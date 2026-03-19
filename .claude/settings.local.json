@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /Users/weisberg/Documents/Development/agent_tools log --oneline -10)",
+      "Bash(ln -s:*)"
+    ]
+  }
+}
