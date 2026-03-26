@@ -7,7 +7,8 @@
 
   Cell style.number_format values:
     "currency"  →  $#,##0 with red negatives
-    "percent"   →  Percent
+    "percent"   →  Percent (NOTE: Excel treats cell value as fractional —
+                   pass 0.156 not 15.6 if you want 15.6% displayed)
     (omit)      →  General (default)
 
   Expected variables:
@@ -24,7 +25,8 @@
     - Does NOT extend _base.html.j2 — standalone HTML with Office namespaces
     - Does NOT support colspan/merged cells — use clipli write --type html for those
     - Empty cells render as &nbsp; per Excel convention
-    - Aptos fonts use mso-font-charset:1, Calibri uses mso-font-charset:0
+    - Font charset is auto-detected: Aptos family → charset 1, others → charset 0
+    - Data cells use text-align:general (Excel default: numbers right, text left)
     - See templates/table_excel.html.md for the full reference document
 #}
 {%- set s = style | default(value={}) -%}
@@ -33,6 +35,12 @@
 {%- set total_bg = s.total_bg | default('#F2F2F2') -%}
 {%- set fnt = s.default_font | default(default_font | default('Calibri')) -%}
 {%- set fsz = s.default_font_size | default(default_font_size | default('11')) -%}
+{#- Auto-detect font charset: Aptos family uses 1, everything else uses 0 -#}
+{%- if "Aptos" in fnt -%}
+  {%- set charset = "1" -%}
+{%- else -%}
+  {%- set charset = "0" -%}
+{%- endif -%}
 {#- Macro: build the inline style string for a data cell -#}
 {%- macro cell_style(cell) -%}
 border-top:none;
@@ -57,6 +65,16 @@ xmlns="http://www.w3.org/TR/REC-html40">
 <!--table
 	{mso-displayed-decimal-separator:"\.";
 	mso-displayed-thousand-separator:"\,";}
+@page
+	{margin:.75in .7in .75in .7in;
+	mso-header-margin:.3in;
+	mso-footer-margin:.3in;}
+tr
+	{mso-height-source:auto;}
+col
+	{mso-width-source:auto;}
+br
+	{mso-data-placement:same-cell;}
 td
 	{padding-top:1px;
 	padding-right:1px;
@@ -68,7 +86,7 @@ td
 	font-style:normal;
 	text-decoration:none;
 	font-family:"{{fnt}}", sans-serif;
-	mso-font-charset:0;
+	mso-font-charset:{{charset}};
 	mso-number-format:General;
 	text-align:general;
 	vertical-align:bottom;
@@ -81,8 +99,6 @@ td
 .hdr_l
 	{color:{{hdr_fg}};
 	font-weight:700;
-	font-family:"{{fnt}}", sans-serif;
-	mso-font-charset:1;
 	text-align:center;
 	vertical-align:middle;
 	border-top:1.0pt solid windowtext;
@@ -94,8 +110,6 @@ td
 .hdr_m
 	{color:{{hdr_fg}};
 	font-weight:700;
-	font-family:"{{fnt}}", sans-serif;
-	mso-font-charset:1;
 	text-align:center;
 	vertical-align:middle;
 	border-top:1.0pt solid windowtext;
@@ -107,8 +121,6 @@ td
 .hdr_r
 	{color:{{hdr_fg}};
 	font-weight:700;
-	font-family:"{{fnt}}", sans-serif;
-	mso-font-charset:1;
 	text-align:center;
 	vertical-align:middle;
 	border-top:1.0pt solid windowtext;
@@ -118,42 +130,22 @@ td
 	background:{{hdr_bg}};
 	mso-pattern:black none;}
 .cl
-	{color:black;
-	font-family:"{{fnt}}", sans-serif;
-	mso-font-charset:1;
-	text-align:center;
-	vertical-align:middle;
-	border-top:none;
+	{border-top:none;
 	border-right:none;
 	border-bottom:.5pt solid windowtext;
 	border-left:1.0pt solid windowtext;}
 .cm
-	{color:black;
-	font-family:"{{fnt}}", sans-serif;
-	mso-font-charset:1;
-	text-align:center;
-	vertical-align:middle;
-	border-top:none;
+	{border-top:none;
 	border-right:none;
 	border-bottom:.5pt solid windowtext;
 	border-left:none;}
 .cr
-	{color:black;
-	font-family:"{{fnt}}", sans-serif;
-	mso-font-charset:1;
-	text-align:center;
-	vertical-align:middle;
-	border-top:none;
+	{border-top:none;
 	border-right:1.0pt solid windowtext;
 	border-bottom:.5pt solid windowtext;
 	border-left:none;}
 .tl
-	{color:black;
-	font-family:"{{fnt}}", sans-serif;
-	mso-font-charset:1;
-	font-weight:700;
-	text-align:center;
-	vertical-align:middle;
+	{font-weight:700;
 	border-top:none;
 	border-right:none;
 	border-bottom:1.0pt solid windowtext;
@@ -161,24 +153,14 @@ td
 	background:{{total_bg}};
 	mso-pattern:black none;}
 .tm
-	{color:black;
-	font-family:"{{fnt}}", sans-serif;
-	mso-font-charset:1;
-	text-align:center;
-	vertical-align:middle;
-	border-top:none;
+	{border-top:none;
 	border-right:none;
 	border-bottom:1.0pt solid windowtext;
 	border-left:none;
 	background:{{total_bg}};
 	mso-pattern:black none;}
 .tr
-	{color:black;
-	font-family:"{{fnt}}", sans-serif;
-	mso-font-charset:1;
-	text-align:center;
-	vertical-align:middle;
-	border-top:none;
+	{border-top:none;
 	border-right:1.0pt solid windowtext;
 	border-bottom:1.0pt solid windowtext;
 	border-left:none;

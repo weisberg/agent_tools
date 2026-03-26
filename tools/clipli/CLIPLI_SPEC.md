@@ -937,7 +937,7 @@ Excel-native template that generates HTML matching Excel 15/16's own clipboard f
 - Thick outer border (`1.0pt solid windowtext`), thin inner borders (`.5pt solid windowtext`)
 - `<!--StartFragment-->` / `<!--EndFragment-->` markers around table rows
 - `mso-number-format` for currency/percent/date formatting
-- `<col>` elements for column widths, explicit `height` on every `<tr>`
+- Explicit `height` on every `<tr>` (note: `<col>` column widths are ignored on paste — confirmed by testing)
 - `&nbsp;` for empty cells (not empty strings)
 - Every class explicitly sets `color:black` and `vertical-align:middle`
 

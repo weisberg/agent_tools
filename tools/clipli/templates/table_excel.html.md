@@ -330,6 +330,19 @@ clipli read --type html > excel_reference.html
 
 ---
 
+## Column widths — NOT supported on paste
+
+**Confirmed 2026-03-26:** Column widths specified via `<col>` elements are completely ignored when pasting clipboard HTML into Excel. Tested with `mso-width-source:userset`, `mso-width-alt`, pixel `width` attributes on `<col>`, and matching `width`/`style` on header `<td>` elements — none had any effect.
+
+Excel auto-fits columns on paste regardless. Column widths are only respected when opening an HTML file as a workbook (File > Open), not on clipboard paste.
+
+Workarounds:
+- Auto-fit columns after paste (select columns, double-click border)
+- Save HTML to a `.html` file and open in Excel instead of pasting
+- Use AppleScript/VBA to resize columns programmatically after paste
+
+---
+
 ## Merged title rows (colspan)
 
 Excel supports `colspan` for merged cells. A title row spanning the full table width uses:
