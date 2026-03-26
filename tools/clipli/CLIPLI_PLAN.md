@@ -1,417 +1,563 @@
 # clipli Development Plan
 
-**Spec:** CLIPLI_SPEC.md v1.0.0-spec
-**Created:** 2026-03-25
+**Spec:** `CLIPLI_SPEC.md` v1.0.0-spec  
+**Current crate version:** `0.1.0`  
+**Plan updated:** 2026-03-26
 
 ---
 
 ## Overview
 
-This plan breaks the spec's 5 phases into concrete, sequentially-buildable tasks. Each task produces a compilable, testable increment. Tasks within a phase can sometimes be parallelized but are listed in recommended order.
+This plan replaces the original bootstrap-oriented phase checklist with a roadmap that matches the current codebase.
+
+clipli is no longer an MVP scaffold. The project already has:
+
+- [x] working macOS pasteboard read/write support
+- [x] a mature HTML cleaning pipeline
+- [x] template rendering and built-in table/slide templates
+- [x] heuristic templatization
+- [x] filesystem-backed template storage
+- [x] rich Excel HTML generation and clipboard editing
+- [x] a passing automated test baseline
+
+The next stage is to turn that solid core into a more complete product: close the highest-value correctness gaps, harden workflows, add missing features promised by the spec, and then expand into automation, sharing, and agent-native integrations.
 
 ---
 
-## Phase 1: Foundation (MVP)
+## Current State Snapshot
 
-**Goal:** A binary that can read and write the macOS pasteboard, with the data model in place.
+### What is already implemented
 
-### 1.1 Project Scaffold
+- [x] `inspect`, `read`, `write`, `capture`, `paste`, `list`, `show`, `edit`, `delete`, `excel`, `excel-edit`, and `convert` commands
+- [x] pasteboard support for HTML, RTF, plain text, PNG, TIFF, and PDF payloads
+- [x] HTML cleaning with target-aware CSS filtering for Excel, PowerPoint, Google Sheets, and generic HTML
+- [x] Jinja2-compatible rendering with custom filters and HTML-to-plain-text conversion
+- [x] heuristic templatization for dates, currency, percentages, emails, large numbers, quarters, and cell text
+- [x] template storage under `~/.config/clipli/templates/`
+- [x] rich CSV-to-Excel HTML generation and A1-style Excel cell editing
 
-- [ ] `cargo init --name clipli` in this directory
-- [ ] Set up `Cargo.toml` with all Phase 1 dependencies:
-  - `clap` (derive), `serde` + `serde_json`, `chrono`, `thiserror`, `dirs`
-  - `objc2`, `objc2-foundation`, `objc2-app-kit`
-- [ ] Add dev-dependencies: `assert_cmd`, `predicates`, `tempfile`, `insta`
-- [ ] Create module files: `main.rs`, `model.rs`, `pb.rs` (empty stubs for `clean.rs`, `render.rs`, `templatize.rs`, `store.rs`)
-- [ ] Verify `cargo build` succeeds on macOS
+### Verified baseline
 
-**Acceptance:** `cargo build` produces a binary. `cargo test` runs (0 tests).
+`cargo test` currently passes, including the unit and integration suites, with GUI-dependent pasteboard tests still ignored as expected.
 
-### 1.2 Data Model (`model.rs`)
+### Completed so far
 
-- [ ] Implement `PbType` enum with `uti()` method and serde derives
-- [ ] Implement `PbSnapshot`, `PbTypeEntry`
-- [ ] Implement `TemplateMeta`, `TemplateVariable`, `VarType`
-- [ ] Implement `TableInput`, `Cell`, `CellStyle`, `Align`, `BorderStyle`, `TableStyle`
-- [ ] Add `From<&str>` for `PbType` (UTI string to enum)
-- [ ] Unit tests: round-trip serde for each type (serialize → deserialize, assert equality)
+- [x] core clipboard I/O is implemented for the primary macOS pasteboard formats used by clipli
+- [x] the HTML cleaning pipeline is implemented and covered by fixture-oriented tests
+- [x] rendering, built-in templates, and HTML-to-plain-text fallback are implemented
+- [x] heuristic templatization is implemented and round-trip tested
+- [x] template capture, storage, listing, editing, showing, and deletion are implemented
+- [x] Excel HTML generation and clipboard editing workflows are implemented beyond the original MVP scope
+- [x] the current automated baseline is green across unit and integration tests, with only GUI-dependent clipboard tests ignored
 
-**Acceptance:** `cargo test model` passes. All types serialize/deserialize correctly.
+### Highest-confidence gaps from the current implementation
 
-### 1.3 Pasteboard FFI (`pb.rs`)
+- [ ] `convert --from rtf --to html` is still explicitly unimplemented
+- [ ] config is loaded, but defaults are not consistently honored across commands
+- [ ] agent templatization uses a stdin/stdout protocol only; clipli does not yet invoke an external agent command itself
+- [ ] template storage has no versioning, rollback, locking, or import/export story
+- [ ] `capture` does not yet provide the preview workflow described in the spec
+- [ ] shell completions, richer diagnostics, and release/distribution work are still missing
 
-- [ ] Implement `read_all() -> Result<PbSnapshot, PbError>` using `objc2-app-kit`
-  - Read `NSPasteboard.generalPasteboard`
-  - Iterate available types, map UTI strings to `PbType`
-  - Read data bytes for each type
-  - Capture timestamp and attempt source app detection
-- [ ] Implement `write(entries: &[(PbType, &[u8])]) -> Result<(), PbError>`
-  - `clearContents()` then `setData:forType:` for each entry
-- [ ] Implement `read_type(pb_type: PbType) -> Result<Vec<u8>, PbError>` convenience
-- [ ] Implement `source_app() -> Option<String>` (best-effort via NSWorkspace)
-- [ ] Define `PbError` enum with thiserror
-- [ ] Write tests marked `#[ignore]` (require GUI session):
-  - Write plain text → read back → assert equal
-  - Write HTML → read back → assert equal
-  - Read empty pasteboard → assert `PbError::Empty` or graceful empty snapshot
+### Strategic implication
 
-**Acceptance:** `cargo test -- --ignored` passes when run in a macOS GUI session. FFI calls don't segfault.
+The roadmap should optimize for four outcomes:
 
-### 1.4 CLI Entrypoint + `inspect` Command
-
-- [ ] Set up clap derive CLI in `main.rs` with top-level `Cli` struct
-- [ ] Define subcommand enum (all commands stubbed, only `inspect` implemented)
-- [ ] Implement `inspect`:
-  - Calls `pb::read_all()`
-  - Default output: human-readable listing of types + sizes + source app
-  - `--json`: JSON output per spec
-- [ ] Error handling: catch `PbError`, print human-readable or JSON error based on `--json`
-
-**Acceptance:** `clipli inspect` shows clipboard contents. `clipli inspect --json` outputs valid JSON.
-
-### 1.5 `read` and `write` Commands
-
-- [ ] Implement `clipli read`:
-  - `--type` flag (html, rtf, plain, png, pdf) defaulting to html
-  - Output to stdout (text types) or `--output` file (binary types)
-  - `--clean` flag (stubbed — just passes through for now, wired in Phase 2)
-- [ ] Implement `clipli write`:
-  - `--type` flag (html, rtf, plain) defaulting to html
-  - Read from `--input` file or stdin
-  - `--with-plain` flag: auto-generate plain text fallback (basic strip-tags for now)
-- [ ] Integration tests:
-  - `clipli write --type plain` with piped input → `clipli read --type plain` → assert match
-  - `clipli read` with empty clipboard → proper error
-
-**Acceptance:** Can round-trip text through the clipboard via CLI.
-
-### 1.6 Test Fixtures
-
-- [ ] Create `tests/fixtures/` directory
-- [ ] Capture and save real HTML from:
-  - Excel (basic table, formatted table)
-  - PowerPoint (single slide, two slides)
-  - Google Sheets (simple table)
-- [ ] At minimum, create 3 representative fixtures to unblock Phase 2
-- [ ] Document capture method in `tests/fixtures/README.md` so fixtures can be reproduced
-
-**Acceptance:** Fixture files exist and contain real pasteboard HTML.
+1. complete the core spec where the product still has sharp edges
+2. make templates safer and easier to manage over time
+3. make clipli a stronger agent workflow primitive
+4. expand into automation and collaboration once the core is dependable
 
 ---
 
-## Phase 2: Capture & Clean
+## Product Direction
 
-**Goal:** Captured clipboard HTML is sanitized and stored as reusable templates.
+clipli should evolve into a clipboard automation platform with four layers:
 
-### 2.1 HTML Cleaner (`clean.rs`) — Core Pipeline
+1. **Core clipboard correctness**  
+   Lossless-ish capture, render, and paste across common macOS productivity apps.
 
-- [ ] Add `lol_html` dependency
-- [ ] Implement `CleanOptions` and `CleanError`
-- [ ] Implement pipeline stages using `lol_html` rewriter:
-  1. Encoding detection/normalization (UTF-8, UTF-16, Windows-1252)
-  2. Strip `<meta>`, `<link>`, `<style>`, `<xml>`, conditional comments
-  3. Strip `mso-*` CSS properties from inline styles
-  4. Normalize font aliases (`+mj-lt` → `Calibri`, etc.)
-  5. Collapse empty `<span>`, `<p>`, `<div>` elements
-  6. Normalize colors (`rgb()` → hex, `windowtext` → `#000000`)
-  7. Strip `class` attributes (unless `--keep-classes`)
-  8. Strip `id` attributes (except internal link targets)
-  9. Collapse whitespace in text nodes
-  10. Validate well-formedness
-- [ ] Implement `TargetApp` enum and per-target CSS property allowlists (from spec table)
-- [ ] Helper: `normalize_css(style: &str) -> String`
+2. **Reusable template workflows**  
+   Safe capture, editing, versioning, search, linting, export/import, and team reuse.
 
-**Note:** Stages 1-3 are highest priority (they handle the worst Office cruft). Stages 4-10 can be iterated on. Build the framework first, then add handlers.
+3. **Agent-native execution**  
+   Clean machine-readable interfaces for external agents, batch jobs, and eventually MCP.
 
-**Acceptance:** `clean("fixture_html", &opts)` produces sane output for all fixtures. Insta snapshot tests pass.
+4. **Automation and operations**  
+   Clipboard history, watch mode, previews, UI helpers, and packaging/distribution.
 
-### 2.2 Cleaner Tests
-
-- [ ] Snapshot tests (insta) for each fixture: raw → cleaned
-- [ ] Unit test: `mso-*` properties are stripped
-- [ ] Unit test: `rgb()` → hex conversion
-- [ ] Unit test: empty elements collapsed
-- [ ] Unit test: `--keep-classes` preserves class attributes
-- [ ] Unit test: target-app CSS filtering (e.g., `border` stripped for PowerPoint target)
-- [ ] Edge case: empty input, input with no HTML tags, malformed HTML
-
-**Acceptance:** `cargo test clean` passes. Snapshots reviewed and approved.
-
-### 2.3 Template Store (`store.rs`)
-
-- [ ] Implement `Store` struct with configurable root (default `~/.config/clipli/templates/`)
-- [ ] Implement `Store::new()` — create directory structure if missing
-- [ ] Implement `save()` — write template.html.j2 (or .html), meta.json, schema.json, original.html, raw.html
-- [ ] Implement `load()` — read back all files, return `LoadedTemplate`
-- [ ] Implement `list()` — scan directories, read meta.json, apply optional tag filter
-- [ ] Implement `delete()` — remove template directory
-- [ ] Implement `exists()` and `template_path()`
-- [ ] Define `StoreError` with codes from spec (STORE_NOT_FOUND, STORE_ALREADY_EXISTS, STORE_IO_ERROR)
-- [ ] All tests use `tempfile::TempDir` — never touch real `~/.config`
-
-**Acceptance:** `cargo test store` passes. CRUD round-trip works in temp directories.
-
-### 2.4 `capture` Command (Raw + Manual)
-
-- [ ] Implement `clipli capture --name <NAME>`:
-  - Read HTML from pasteboard (fallback: RTF → plain text)
-  - Run through `clean::clean()` (unless `--raw`)
-  - Save via `store::save()`
-  - Support `--force` to overwrite
-  - Support `--description`, `--tags`
-  - `--json` output with capture result
-  - `--preview` opens cleaned HTML in browser (`open` command)
-- [ ] Wire `--strategy manual` (save as .html, not .html.j2)
-- [ ] Wire `--keep-classes` through to clean options
-- [ ] `--templatize` flag accepted but only `manual` strategy works (heuristic/agent in Phase 4)
-
-**Acceptance:** `clipli capture -n test_template` saves a template. `clipli list` shows it.
-
-### 2.5 `list`, `show`, `delete` Commands
-
-- [ ] Implement `clipli list` with `--tag`, `--json`, `--verbose` flags
-- [ ] Implement `clipli show <NAME>` with `--html`, `--schema`, `--meta`, `--open` flags
-- [ ] Implement `clipli delete <NAME>` with `--force` flag (confirm prompt without --force)
-- [ ] Integration tests using tempdir store
-
-**Acceptance:** Full template lifecycle: capture → list → show → delete.
+The version roadmap below is sequenced around those layers.
 
 ---
 
-## Phase 3: Templates & Rendering
+## Version Roadmap
 
-**Goal:** Templates can be filled with data and pasted back to the clipboard with formatting preserved.
+## v0.2 — Core Completion and Correctness
 
-### 3.1 Template Renderer (`render.rs`)
+**Goal:** Close the most important spec gaps and make the existing command set reliable enough for daily use.
 
-- [ ] Add `minijinja` dependency
-- [ ] Implement `Renderer::new(template_dir)`:
-  - Load built-in templates via `include_str!`
-  - Scan store directory for user templates
-- [ ] Implement `Renderer::render(name, data) -> Result<RenderedOutput, RenderError>`
-- [ ] Implement `html_to_plain_text()`:
-  - Tables → tab-delimited
-  - `<br>`/`<p>` → newlines
-  - `<li>` → `- ` prefix
-  - Strip all tags, decode entities
-- [ ] Define `RenderError` with codes from spec
+### Primary deliverables
 
-**Acceptance:** Can render built-in table template with sample data. Output is valid HTML.
+- [ ] Implement `rtf -> html` conversion in `convert`
+- [ ] Make config defaults actually influence command behavior end-to-end
+- [ ] Add `capture --preview`
+- [ ] Tighten plain-text output behavior for `paste` and `convert`
+- [ ] Improve structured error output consistency
+- [ ] Expand regression coverage around missing and partial behaviors
 
-### 3.2 Custom Filters
+### Detailed scope
 
-- [ ] `currency` filter — format number as `$X,XXX` (locale-aware stretch goal)
-- [ ] `pct` filter — format float as `X.X%` with configurable decimal places
-- [ ] `date_fmt` filter — parse date string, reformat with strftime pattern
-- [ ] `number_fmt` filter — comma-separated thousands
-- [ ] `default_font` filter — fallback font name
-- [ ] Unit tests for each filter with edge cases (negative numbers, zero, large values, invalid input)
+#### 0.2.1 RTF conversion
 
-**Acceptance:** `{{ 4200000 | currency }}` renders `$4,200,000`. All filter tests pass.
+- [ ] Add an internal `rtf_to_html()` path used by `convert` and optionally by `capture` fallback workflows
+- [ ] Preserve at least bold, italic, underline, font family, font size, foreground color, paragraph breaks, and table-ish structures where possible
+- [ ] Define explicit failure behavior for unsupported RTF constructs instead of silently degrading
+- [ ] Add tests using realistic RTF fixtures from common macOS apps
 
-### 3.3 Built-in Templates
+**Acceptance:**
 
-- [ ] Create `templates/` directory
-- [ ] Implement `_base.html.j2` per spec
-- [ ] Implement `table_default.html.j2` per spec
-- [ ] Implement `table_striped.html.j2` per spec
-- [ ] Implement `slide_default.html.j2` (basic slide layout — single content block)
-- [ ] Render tests: each template with sample data → insta snapshots
-- [ ] Verify rendered HTML pastes correctly into Excel/Sheets (manual validation)
+- [ ] `clipli convert --from rtf --to html` works on representative RTF samples
+- [ ] `capture` can produce useful output when HTML is absent but RTF is present
 
-**Acceptance:** Built-in templates render correctly. Snapshot tests pass.
+#### 0.2.2 Config cascade cleanup
 
-### 3.4 `paste` Command
+- [ ] Audit every command that should honor config defaults
+- [ ] Ensure `defaults.font`, `defaults.font_size_pt`, `defaults.plain_text_strategy`, `clean.keep_classes`, `clean.target_app`, and `templatize.default_strategy` are applied consistently
+- [ ] Define clear precedence: CLI flags > command defaults from config > built-in defaults
+- [ ] Add tests for config-on / config-off behavior
 
-- [ ] Implement `clipli paste <NAME>`:
-  - Load template from store
-  - Merge data: `--data` (inline JSON) > `--data-file` > stdin
-  - Render via `Renderer`
-  - Write HTML + plain text to pasteboard
-  - `--dry-run` prints to stdout instead
-  - `--plain-text` strategy: auto, tab-delimited, none
-  - `--open` opens in browser
-- [ ] Error handling: missing template, missing variables, invalid JSON data
-- [ ] Integration test: save a template, paste with data, read back from clipboard
+**Acceptance:**
 
-**Acceptance:** `clipli paste my_template -D '{"title":"Q4"}'` puts formatted HTML on clipboard.
+- [ ] Changing config materially changes behavior in tested commands without requiring equivalent CLI flags
 
-### 3.5 `paste --from-table`
+#### 0.2.3 Capture and paste polish
 
-- [ ] Implement `--from-table` mode:
-  - Read `TableInput` JSON from stdin
-  - Select built-in template via `--template` flag (default: `table_default`)
-  - Render and write to pasteboard
-- [ ] Test: pipe TableInput JSON → paste → verify clipboard HTML has correct rows/cells
+- [ ] Add `capture --preview` by writing the cleaned or templatized output to a temp file and opening it
+- [ ] Audit `paste --plain-text auto|tab-delimited|none` so behavior is explicit and stable
+- [ ] Improve `show --open` and `paste --open` temp-file handling
+- [ ] Make validation errors more actionable for invalid names, invalid JSON, and missing template data
 
-**Acceptance:** Can generate a formatted table from JSON and paste it.
+**Acceptance:**
 
-### 3.6 `edit` Command
+- [ ] preview flows work for capture, show, and paste
+- [ ] plain-text modes behave deterministically and are documented
 
-- [ ] Implement `clipli edit <NAME>`:
-  - Open template file in `$EDITOR`
-  - On save: validate Jinja2 syntax (attempt parse with minijinja)
-  - Detect new `{{ variables }}` not in schema
-  - `--auto-schema`: auto-add detected variables
-  - Without `--auto-schema`: print warning listing new variables
-  - Update `updated_at` in meta.json
+#### 0.2.4 JSON and error surface hardening
 
-**Acceptance:** Can edit a template, add a variable, and see it detected.
+- [ ] Standardize error envelopes where `--json` is supported
+- [ ] Add command-level error codes where only string errors exist today
+- [ ] Reduce `Box<dyn std::error::Error>` escape hatches in command paths where typed errors are practical
+- [ ] Add tests for error JSON output, not just happy paths
 
-### 3.7 Configuration
+**Acceptance:**
 
-- [ ] Add `toml` dependency
-- [ ] Implement config loading from `~/.config/clipli/config.toml`
-- [ ] Support all config keys from spec section 7
-- [ ] Defaults when no config file exists
-- [ ] CLI flags override config values
-- [ ] Create default config on first run (or document that it's optional)
+- [ ] machine-readable consumers can reliably inspect failure codes across core commands
 
-**Acceptance:** Config values affect behavior (e.g., `default_strategy`, `keep_classes`).
+#### 0.2.5 Core regression coverage
+
+- [ ] Add tests for config usage
+- [ ] Add tests for `capture --preview` and preview temp-file generation where feasible
+- [ ] Add more conversion tests for malformed input and fallback flows
+- [ ] Add at least one real-world RTF fixture suite
+
+### Risks
+
+- [ ] RTF fidelity may be materially worse than HTML fidelity; document known limits rather than overpromising
+- [ ] config cleanup can accidentally change existing defaults; preserve behavior where practical and call out intentional changes
+
+### Exit criteria
+
+- [ ] The spec-promised core conversion and preview workflows are implemented
+- [ ] Config defaults behave consistently
+- [ ] JSON output is more uniform
+- [ ] The project remains green on `cargo test`
 
 ---
 
-## Phase 4: Templatization
+## v0.3 — Template Safety, Search, and Lifecycle
 
-**Goal:** Clipboard content can be automatically analyzed and converted into templates with named variables.
+**Goal:** Make templates durable, discoverable, and safer to evolve over time.
 
-### 4.1 Heuristic Templatizer (`templatize.rs`)
+### Primary deliverables
 
-- [ ] Add `regex` dependency
-- [ ] Implement multi-pass scanner on HTML text content:
-  - Pass 1: Dates (`\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b`, month names, ISO) → `date_N`
-  - Pass 2: Currency (`\$[\d,]+\.?\d*`, `€`, `£`) → `currency_N`
-  - Pass 3: Percentages (`\d+\.?\d*%`) → `pct_N`
-  - Pass 4: Emails → `email_N`
-  - Pass 5: Large numbers (`\b\d{1,3}(,\d{3})+\b`) → `number_N`
-  - Pass 6: Quarters (`Q[1-4]\s*\d{4}`) → `quarter_N`
-  - Pass 7: Remaining `<td>`/`<th>` text content > 2 chars → `field_N`
-- [ ] Each pass outputs `TemplateVariable` with inferred `VarType` and original value as `default_value`
-- [ ] Replace matched text in HTML with `{{ var_name }}` (careful not to break HTML tags/attributes)
-- [ ] Return modified HTML + variable list
+- [ ] template versioning and rollback
+- [ ] template linting and validation improvements
+- [ ] content-based template search
+- [ ] import/export bundles
+- [ ] safer store writes and recovery paths
 
-**Key risk:** Replacing text inside HTML without breaking structure. Use a proper HTML parser to identify text nodes, not raw string replacement.
+### Detailed scope
 
-**Acceptance:** Heuristic templatizer on fixture HTML produces valid Jinja2 templates. Re-rendering with default values reproduces original content.
+#### 0.3.1 Template versioning
 
-### 4.2 Templatizer Tests
+- [ ] Store historical snapshots under each template directory
+- [ ] Track enough metadata to show when a version was created and from what change path
+- [ ] Add commands such as:
+  - [ ] `clipli versions <NAME>`
+  - [ ] `clipli show <NAME> --version <ID>`
+  - [ ] `clipli restore <NAME> --version <ID>`
+- [ ] Decide whether versions are full copies or delta-free snapshots; favor simplicity first
 
-- [ ] Test each detection pass in isolation with targeted inputs
-- [ ] Test combined passes on fixture HTML
-- [ ] Round-trip test: templatize → render with defaults → compare to original (should be identical)
-- [ ] Edge cases: overlapping patterns (e.g., `$1,234` matches both currency and large number — currency should win), values inside HTML attributes, empty tables
+**Acceptance:**
 
-**Acceptance:** All templatizer tests pass. Round-trip fidelity verified.
+- [ ] editing or recapturing a template no longer destroys prior working states
 
-### 4.3 Wire Heuristic Strategy into `capture`
+#### 0.3.2 Template linting
 
-- [ ] `clipli capture --templatize --strategy heuristic`:
-  - After cleaning, run through `templatize::heuristic()`
-  - Save as `.html.j2` with `schema.json`
-  - `--json` output includes detected variables
-- [ ] Integration test: capture fixture → verify template + schema saved correctly
+- [ ] Add `clipli lint <NAME>`
+- [ ] Detect:
+  - [ ] undefined variables
+  - [ ] variables present in schema but unused in template
+  - [ ] duplicate variable names
+  - [ ] suspicious default values
+  - [ ] unbalanced Jinja markers and invalid identifiers
+- [ ] Surface warnings separately from hard failures
 
-**Acceptance:** `clipli capture -n report --templatize` produces a template with variables.
+**Acceptance:**
 
-### 4.4 Agent Strategy Protocol
+- [ ] users can validate templates before a bad paste flow or broken batch run
 
-- [ ] Implement `--strategy agent` flow:
-  - After cleaning, emit JSON payload to stdout (per spec agent protocol)
-  - Read JSON response from stdin
-  - Validate response: valid Jinja2, valid identifiers, HTML structure preserved
-  - Save validated template + variables
-- [ ] Define validation checks:
-  - Parse template with minijinja (syntax check)
-  - All variable names are valid Python/Jinja identifiers
-  - Template HTML has same top-level structure as input (same number of `<table>`, `<tr>`, etc.)
-- [ ] Error handling: timeout, invalid JSON, failed validation → clear error messages
+#### 0.3.3 Search and discovery
 
-**Acceptance:** Can pipe agent protocol JSON through an external command and save the result.
+- [ ] Add full-text search across template HTML, schema, and metadata
+- [ ] Support search by name, tags, source app, and content snippets
+- [ ] Add command:
+  - [ ] `clipli search <QUERY>`
+- [ ] Keep implementation simple at first, likely filesystem scan plus indexed metadata if needed later
 
-### 4.5 `convert` Command
+**Acceptance:**
 
-- [ ] Implement `clipli convert --from <FMT> --to <FMT>`:
-  - `html` → `j2`: run heuristic or agent templatizer on input HTML
-  - `j2` → `html`: render with `--data`
-  - `rtf` → `html`: basic RTF to HTML conversion (may need additional dependency or simple custom parser)
-  - `html` → `plain`: strip tags with table-aware tab-delimited handling
-- [ ] Support `--input`/`--output` (default stdin/stdout)
-- [ ] Tests for each conversion path
+- [ ] users with a non-trivial template library can reliably find the right template
 
-**Acceptance:** All 4 conversion paths work. `convert` is composable in pipelines.
+#### 0.3.4 Import/export bundles
 
----
+- [ ] Export a template directory as a portable `.clipli` bundle
+- [ ] Import a bundle into the store with collision handling
+- [ ] Preserve `meta.json`, `schema.json`, template content, `original.html`, and `raw.html`
+- [ ] Consider optional manifest versioning for future compatibility
 
-## Phase 5: Polish
+**Acceptance:**
 
-**Goal:** Production-quality CLI experience, packaging, and distribution.
+- [ ] a template can be transferred between machines without manual directory copying
 
-### 5.1 Error Output & UX
+#### 0.3.5 Store durability
 
-- [ ] Colored stderr output for human-readable errors (consider `anstream` or `owo-colors`)
-- [ ] Actionable suggestions in error messages (e.g., "Template not found. Run `clipli list` to see available templates.")
-- [ ] Consistent JSON error envelope: `{"error": "message", "code": "ERROR_CODE"}` across all commands
-- [ ] Progress indicators for long operations (e.g., agent strategy waiting for response)
+- [ ] Add atomic writes where practical
+- [ ] Add simple lock-file or temp-file strategy to reduce corruption risk
+- [ ] Ensure `force` overwrites are safe and recoverable
+- [ ] Decide behavior for malformed `meta.json` in partially corrupted template directories
 
-### 5.2 Shell Completions
+### Risks
 
-- [ ] Add `clap_complete` dependency
-- [ ] Generate completions for bash, zsh, fish
-- [ ] Subcommand to emit completions: `clipli completions --shell zsh`
-- [ ] Template name completion (dynamic, reads from store)
+- [ ] versioning and bundle design become de facto public formats; keep them simple and documented
+- [ ] search can drift into building a database too early; start with file-backed indexing only if needed
 
-### 5.3 Help & Documentation
+### Exit criteria
 
-- [ ] Polish `--help` text for every subcommand (examples, clear descriptions)
-- [ ] `clipli --version` shows version + build info
-- [ ] Write README.md with quick-start, examples, agent integration patterns
-
-### 5.4 CI/CD
-
-- [ ] GitHub Actions workflow: build + test on macOS (ARM + Intel)
-- [ ] Separate job for `--ignored` pasteboard tests (needs GUI session — may need workaround)
-- [ ] Clippy + rustfmt checks
-- [ ] Release workflow: build universal binary, create GitHub release
-
-### 5.5 Packaging
-
-- [ ] Homebrew formula
-- [ ] `cargo install` support (publish to crates.io or document install-from-git)
-- [ ] Universal macOS binary (fat binary for arm64 + x86_64)
+- [ ] templates are versioned and recoverable
+- [ ] users can lint, search, export, and import templates
+- [ ] store writes are materially safer than they are today
 
 ---
 
-## Dependency Graph
+## v0.4 — Agent-Native Workflows
 
-```
-Phase 1: model → pb → CLI scaffold → inspect → read/write → fixtures
-Phase 2: clean → store → capture → list/show/delete
-Phase 3: render → filters → templates → paste → paste --from-table → edit → config
-Phase 4: templatize heuristic → wire into capture → agent protocol → convert
-Phase 5: UX → completions → docs → CI → packaging
-```
+**Goal:** Make clipli a first-class primitive in AI and automation pipelines, not just a CLI a user manually chains.
 
-Each phase builds on the previous. Within a phase, the order above reflects real dependencies — later tasks need earlier ones to compile/function.
+### Primary deliverables
+
+- [ ] external agent command execution for templatization
+- [ ] stronger agent-response validation
+- [ ] richer machine-readable command outputs
+- [ ] batch rendering workflows
+- [ ] better debugging and observability for automation use
+
+### Detailed scope
+
+#### 0.4.1 External agent command integration
+
+- [ ] Extend `capture --strategy agent` to optionally invoke an external command directly
+- [ ] Add flags such as:
+  - [ ] `--agent-command`
+  - [ ] `--agent-timeout`
+  - [ ] `--agent-arg` if needed, or support a shell-free command/args shape
+- [ ] Continue to support the current stdin/stdout protocol mode for advanced users
+- [ ] Capture stderr and exit status cleanly
+
+**Acceptance:**
+
+- [ ] users can run a single clipli command that delegates templatization to an external LLM tool
+
+#### 0.4.2 Agent validation hardening
+
+- [ ] Validate variable names more strictly
+- [ ] Validate returned template structure against the input in a practical way
+- [ ] Detect suspicious changes such as removed tables, added scripts, or attribute rewrites outside expected bounds
+- [ ] Add fallback behavior when the agent response is malformed
+
+**Acceptance:**
+
+- [ ] agent-powered capture is safe enough to trust in semi-automated workflows
+
+#### 0.4.3 Batch rendering
+
+- [ ] Add batch render/paste workflow, for example:
+  - [ ] `clipli paste-batch <NAME> --data-file rows.json`
+  - [ ] `clipli render <NAME> --output-dir ...`
+- [ ] Support arrays of objects, newline-delimited JSON, and CSV-backed input as follow-on formats if needed
+- [ ] Allow file output as well as clipboard output
+
+**Acceptance:**
+
+- [ ] clipli can generate many outputs from one template without forcing users to script the loop themselves
+
+#### 0.4.4 Machine-readable command contracts
+
+- [ ] Audit JSON output across `capture`, `paste`, `list`, `show`, `convert`, and future batch flows
+- [ ] Make success outputs stable and explicit enough for programmatic callers
+- [ ] Add example automation docs to the spec or README
+
+#### 0.4.5 Debuggability
+
+- [ ] Add `-v` / `-vv` style logging or an equivalent debug mode
+- [ ] Log which source type was captured, which strategy was used, and which template was loaded
+- [ ] Provide enough visibility for users diagnosing agent failures or data merge mistakes
+
+### Risks
+
+- [ ] external process execution can introduce quoting and security hazards; avoid shell-based execution
+- [ ] stronger validation can reject useful agent output if rules are too strict; start with conservative structural checks
+
+### Exit criteria
+
+- [ ] agent templatization supports a one-command workflow
+- [ ] batch rendering exists for automation-heavy use
+- [ ] JSON output and logging are strong enough for scripted use
 
 ---
 
-## Key Technical Risks
+## v0.5 — Automation, History, and Power-User Flows
 
-| Risk | Mitigation |
-|------|------------|
-| **objc2 API instability** | Pin exact versions. The objc2 ecosystem is pre-1.0 — expect breaking changes. Isolate all FFI in `pb.rs` behind a stable internal API. |
-| **HTML cleaning fidelity** | Invest heavily in fixture-based snapshot tests. Real Office HTML is wildly inconsistent across versions. Collect fixtures from multiple Office versions early. |
-| **lol_html limitations** | lol_html is a streaming rewriter — it can't do tree operations (e.g., "remove this element if all children are empty"). Some clean stages may need a second pass or a tree-based library like `scraper` for specific checks. |
-| **Pasteboard format fidelity** | The HTML that Excel/PPT puts on the clipboard is not the same as what they accept on paste. Test the full round-trip (paste output back into the source app) early and often. |
-| **Templatizer text replacement** | Replacing text in HTML without breaking tags is fragile. Must operate on text nodes only, not raw string search-replace. Use lol_html's text content handlers or a DOM parser. |
-| **Agent protocol design** | The stdin/stdout JSON protocol must be validated thoroughly. Agents may return malformed or subtly wrong templates. Build strong validation in 4.4 before trusting agent output. |
+**Goal:** Expand clipli from a clipboard templating tool into a broader clipboard workflow system.
+
+### Primary deliverables
+
+- [ ] clipboard watch mode and history capture
+- [ ] history search and replay
+- [ ] improved preview and browser workflows
+- [ ] deeper Excel and table automation
+
+### Detailed scope
+
+#### 0.5.1 Clipboard watch and history
+
+- [ ] Add `clipli watch`
+- [ ] Persist captures with timestamps, source app, and content fingerprints
+- [ ] Deduplicate by hash where appropriate
+- [ ] Define a storage structure that can scale without becoming opaque
+
+**Acceptance:**
+
+- [ ] users can build a searchable clipboard history instead of relying on one-off captures
+
+#### 0.5.2 History query and replay
+
+- [ ] Add commands such as:
+  - [ ] `clipli history list`
+  - [ ] `clipli history search <QUERY>`
+  - [ ] `clipli history show <ID>`
+  - [ ] `clipli history restore <ID>`
+- [ ] Support filtering by source app, type, and date range
+
+#### 0.5.3 Preview improvements
+
+- [ ] Improve HTML preview ergonomics across capture, show, and paste
+- [ ] Decide whether to keep temp files, overwrite a stable temp location, or add a small preview cache
+- [ ] Consider a `clipli preview` command for explicit previewing without pasting
+
+#### 0.5.4 Excel workflow extensions
+
+- [ ] Build on `excel` and `excel-edit` rather than replacing them
+- [ ] Candidate additions:
+  - [ ] merged cell helpers beyond title rows
+  - [ ] reusable formatting presets
+  - [ ] richer number-format helpers
+  - [ ] named style presets
+  - [ ] table transforms from JSON as well as CSV
+
+### Risks
+
+- [ ] watch mode turns clipli into a longer-running tool with different operational concerns
+- [ ] history can accumulate sensitive data; storage model and documentation must respect that reality
+
+### Exit criteria
+
+- [ ] clipli can passively collect and actively query clipboard history
+- [ ] power users can automate more of their recurring Excel and preview workflows
 
 ---
 
-## Definition of Done (per phase)
+## v0.6 — Distribution, Interfaces, and Ecosystem
 
-- All `cargo test` pass (excluding `#[ignore]` pasteboard tests)
-- No `cargo clippy` warnings
-- `cargo fmt` clean
-- Implemented commands work end-to-end from the CLI
-- Snapshot tests reviewed and approved for any HTML output changes
+**Goal:** Make clipli easier to install, integrate, and extend.
+
+### Primary deliverables
+
+- [ ] shell completions
+- [ ] CI and release automation
+- [ ] packaging and installation polish
+- [ ] optional library extraction
+- [ ] initial platform/interface expansion groundwork
+
+### Detailed scope
+
+#### 0.6.1 Shell completions and help polish
+
+- [ ] Add `clap_complete`
+- [ ] Generate bash, zsh, and fish completions
+- [ ] Improve command help text with realistic examples
+- [ ] Add template-name completion if practical
+
+#### 0.6.2 CI and release pipeline
+
+- [ ] Add GitHub Actions for build, test, clippy, and fmt
+- [ ] Document expected handling for GUI-only tests
+- [ ] Add release packaging for macOS
+
+#### 0.6.3 Packaging
+
+- [ ] Support `cargo install` cleanly
+- [ ] Add Homebrew distribution if desired
+- [ ] Ensure release artifacts are easy to download and verify
+
+#### 0.6.4 Internal interfaces
+
+- [ ] Evaluate extracting reusable internals into a `clipli-core` library crate once APIs stabilize
+- [ ] Keep the binary UX first; only split once the boundaries are obvious
+
+#### 0.6.5 Forward-looking integration groundwork
+
+- [ ] Prepare for:
+  - [ ] MCP server support
+  - [ ] local preview server
+  - [ ] future non-macOS abstraction layers
+- [ ] Do not commit to full cross-platform support until the macOS product is clearly stable and ergonomic
+
+### Exit criteria
+
+- [ ] clipli is easier to install and use from a shell
+- [ ] CI protects the mainline
+- [ ] the codebase is structured for broader integrations without premature abstraction
+
+---
+
+## v1.0 — Stable, Trusted Core Product
+
+**Goal:** Declare the macOS core product stable.
+
+### Requirements for v1.0
+
+- [ ] core capture, render, and paste workflows are dependable on representative Excel, PowerPoint, Google Sheets, browser, and text-editor inputs
+- [ ] RTF fallback is implemented and documented
+- [ ] config behavior is consistent and tested
+- [ ] template versioning, linting, and search exist
+- [ ] agent integration is production-usable
+- [ ] CI, packaging, completions, and docs are in place
+- [ ] the release notes clearly distinguish stable core features from experimental ones
+
+### Features that may remain post-1.0 or experimental
+
+- [ ] clipboard watch/history
+- [ ] MCP server
+- [ ] preview server
+- [ ] image templates
+- [ ] cross-platform support
+
+---
+
+## Cross-Cutting Workstreams
+
+These workstreams should progress alongside the version milestones rather than being deferred to the end.
+
+### 1. Test Strategy
+
+- [ ] keep `cargo test` green at every milestone
+- [ ] grow fixture coverage with real clipboard HTML and RTF samples
+- [ ] add targeted regression tests before fixing parser or store bugs
+- [ ] keep GUI-dependent pasteboard tests available and documented even if CI cannot run them
+
+### 2. Error Model and Diagnostics
+
+- [ ] move toward typed command errors where it improves clarity
+- [ ] keep human-readable output friendly
+- [ ] keep JSON error codes stable once published
+
+### 3. Template Data Model Evolution
+
+- [ ] evolve `TemplateMeta` carefully if adding version IDs, provenance, bundle metadata, or draft/published states
+- [ ] avoid unnecessary format churn in `meta.json` and `schema.json`
+
+### 4. Store Safety and Backward Compatibility
+
+- [ ] preserve compatibility with existing on-disk templates whenever possible
+- [ ] if migrations become necessary, make them explicit and reversible
+
+### 5. Documentation
+
+- [ ] keep `CLIPLI_SPEC.md` aligned with actual behavior
+- [ ] add practical examples for the commands that matter most in agent workflows
+- [ ] document known fidelity limits instead of implying perfect round-trip behavior
+
+---
+
+## Recommended Sequencing
+
+### Immediate order
+
+1. `v0.2` core completion and correctness
+2. `v0.3` template lifecycle and safety
+3. `v0.4` agent-native workflows
+
+### Next wave
+
+4. `v0.5` automation and history
+5. `v0.6` distribution, interfaces, and ecosystem
+
+### Why this order
+
+- [ ] It fixes the most obvious user-facing correctness gaps first.
+- [ ] It protects user-generated assets before adding more automation on top.
+- [ ] It makes agent integration more trustworthy by building on a safer core.
+- [ ] It postpones broader operational surface area until the fundamentals are stable.
+
+---
+
+## Deferred / Optional Expansion Areas
+
+These are strong ideas, but they should not displace the roadmap above unless user demand clearly pulls them forward.
+
+- [ ] image templates with OCR-backed region replacement
+- [ ] template marketplace or central registry
+- [ ] collaborative/team template workflows
+- [ ] cross-platform clipboard backends
+- [ ] embedded preview server with hot reload
+- [ ] advanced domain-specific templatization passes for finance, legal, or healthcare
+
+---
+
+## Definition of Done
+
+For every milestone:
+
+- [ ] `cargo test` passes
+- [ ] `cargo clippy` is clean for the touched scope
+- [ ] `cargo fmt` is clean
+- [ ] new user-facing commands have help text and at least one integration test where practical
+- [ ] changes to HTML generation or cleaning have fixture- or snapshot-based coverage where practical
+- [ ] on-disk format changes are documented and, if needed, migrated safely
+
+For roadmap completion through v1.0:
+
+- [ ] clipli is a dependable macOS clipboard templating tool for both humans and automation workflows
+- [ ] the project has a clear public contract for templates, CLI output, and error behavior
+- [ ] experimental features are clearly labeled rather than mixed into the stable core
