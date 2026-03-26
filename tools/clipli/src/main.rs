@@ -1,0 +1,1047 @@
+mod clean;
+mod model;
+mod pb;
+mod render;
+mod store;
+mod templatize;
+
+use std::path::PathBuf;
+
+use clap::{Parser, Subcommand};
+
+use clean::{CleanOptions, TargetApp};
+use model::{PbType, TableInput, TemplateMeta};
+use pb::PbError;
+use render::Renderer;
+use store::{ListFilter, SaveContent, Store};
+use templatize::TemplatizeResult;
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
+#[allow(dead_code)]
+#[derive(Debug, Default, serde::Deserialize)]
+struct Config {
+    #[serde(default)]
+    defaults: ConfigDefaults,
+    #[serde(default)]
+    clean: ConfigClean,
+    #[serde(default)]
+    templatize: ConfigTemplatize,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, serde::Deserialize)]
+struct ConfigDefaults {
+    #[serde(default = "default_font")]
+    font: String,
+    #[serde(default = "default_font_size")]
+    font_size_pt: f32,
+    #[serde(default = "default_plain_text_strategy")]
+    plain_text_strategy: String,
+}
+
+fn default_font() -> String {
+    "Calibri".to_string()
+}
+fn default_font_size() -> f32 {
+    11.0
+}
+fn default_plain_text_strategy() -> String {
+    "tab-delimited".to_string()
+}
+
+impl Default for ConfigDefaults {
+    fn default() -> Self {
+        Self {
+            font: default_font(),
+            font_size_pt: default_font_size(),
+            plain_text_strategy: default_plain_text_strategy(),
+        }
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ConfigClean {
+    #[serde(default)]
+    keep_classes: bool,
+    #[serde(default = "default_target_app")]
+    target_app: String,
+}
+
+fn default_target_app() -> String {
+    "generic".to_string()
+}
+
+impl Default for ConfigClean {
+    fn default() -> Self {
+        Self {
+            keep_classes: false,
+            target_app: default_target_app(),
+        }
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, serde::Deserialize)]
+struct ConfigTemplatize {
+    #[serde(default = "default_strategy")]
+    default_strategy: String,
+}
+
+fn default_strategy() -> String {
+    "heuristic".to_string()
+}
+
+impl Default for ConfigTemplatize {
+    fn default() -> Self {
+        Self {
+            default_strategy: default_strategy(),
+        }
+    }
+}
+
+fn load_config() -> Config {
+    let config_path = dirs::config_dir()
+        .unwrap_or_else(|| dirs::home_dir().unwrap().join(".config"))
+        .join("clipli")
+        .join("config.toml");
+    if config_path.exists() {
+        if let Ok(s) = std::fs::read_to_string(&config_path) {
+            if let Ok(c) = toml::from_str::<Config>(&s) {
+                return c;
+            }
+        }
+    }
+    Config::default()
+}
+
+// ---------------------------------------------------------------------------
+// CLI definition
+// ---------------------------------------------------------------------------
+
+#[derive(Parser)]
+#[command(
+    name = "clipli",
+    version,
+    about = "Clipboard intelligence CLI — template-driven pasteboard for agents and power users"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Show all types currently on the clipboard
+    Inspect {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Read clipboard content and output to stdout
+    Read {
+        #[arg(long, short = 't', default_value = "html")]
+        r#type: String,
+        #[arg(long, short = 'c')]
+        clean: bool,
+        #[arg(long, short = 'o')]
+        output: Option<PathBuf>,
+    },
+    /// Write content from stdin or file to the clipboard
+    Write {
+        #[arg(long, short = 't', default_value = "html")]
+        r#type: String,
+        #[arg(long, short = 'i')]
+        input: Option<PathBuf>,
+        #[arg(long, default_value = "true")]
+        with_plain: bool,
+    },
+    /// Capture clipboard content as a named template
+    Capture {
+        #[arg(long, short = 'n')]
+        name: String,
+        #[arg(long, short = 't')]
+        templatize: bool,
+        #[arg(long, default_value = "heuristic")]
+        strategy: String,
+        #[arg(long, short = 'd')]
+        description: Option<String>,
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long, short = 'f')]
+        force: bool,
+        #[arg(long)]
+        raw: bool,
+        #[arg(long)]
+        keep_classes: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Render a template with data and write to clipboard
+    Paste {
+        name: Option<String>,
+        #[arg(long = "data", short = 'D')]
+        data: Option<String>,
+        #[arg(long)]
+        data_file: Option<PathBuf>,
+        #[arg(long)]
+        stdin: bool,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long, default_value = "auto")]
+        plain_text: String,
+        #[arg(long)]
+        open: bool,
+        #[arg(long)]
+        from_table: bool,
+        #[arg(long, short = 't', default_value = "table_default")]
+        template: String,
+    },
+    /// List all saved templates
+    List {
+        #[arg(long)]
+        tag: Option<String>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long, short = 'v')]
+        verbose: bool,
+    },
+    /// Show details of a specific template
+    Show {
+        name: String,
+        #[arg(long)]
+        html: bool,
+        #[arg(long)]
+        schema: bool,
+        #[arg(long)]
+        meta: bool,
+        #[arg(long)]
+        open: bool,
+    },
+    /// Open a template in $EDITOR for manual editing
+    Edit {
+        name: String,
+        #[arg(long)]
+        auto_schema: bool,
+    },
+    /// Delete a template
+    Delete {
+        name: String,
+        #[arg(long, short = 'f')]
+        force: bool,
+    },
+    /// Convert between formats (stdin/stdout)
+    Convert {
+        #[arg(long)]
+        from: String,
+        #[arg(long)]
+        to: String,
+        #[arg(long, short = 'i')]
+        input: Option<PathBuf>,
+        #[arg(long, short = 'o')]
+        output: Option<PathBuf>,
+        #[arg(long = "data", short = 'D')]
+        data: Option<String>,
+        #[arg(long, default_value = "heuristic")]
+        strategy: String,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Entry points
+// ---------------------------------------------------------------------------
+
+fn main() {
+    let cli = Cli::parse();
+    let config = load_config();
+
+    if let Err(e) = run(cli.command, &config) {
+        eprintln!("error: {e}");
+        std::process::exit(1);
+    }
+}
+
+fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>> {
+    match cmd {
+        Commands::Inspect { json } => cmd_inspect(json),
+        Commands::Read {
+            r#type,
+            clean,
+            output,
+        } => cmd_read(r#type, clean, output, config),
+        Commands::Write {
+            r#type,
+            input,
+            with_plain,
+        } => cmd_write(r#type, input, with_plain),
+        Commands::Capture {
+            name,
+            templatize,
+            strategy,
+            description,
+            tags,
+            force,
+            raw,
+            keep_classes,
+            json,
+        } => cmd_capture(
+            name,
+            templatize,
+            strategy,
+            description,
+            tags,
+            force,
+            raw,
+            keep_classes,
+            json,
+            config,
+        ),
+        Commands::Paste {
+            name,
+            data,
+            data_file,
+            stdin,
+            dry_run,
+            plain_text,
+            open,
+            from_table,
+            template,
+        } => cmd_paste(
+            name, data, data_file, stdin, dry_run, plain_text, open, from_table, template, config,
+        ),
+        Commands::List { tag, json, verbose } => cmd_list(tag, json, verbose),
+        Commands::Show {
+            name,
+            html,
+            schema,
+            meta,
+            open,
+        } => cmd_show(name, html, schema, meta, open),
+        Commands::Edit { name, auto_schema } => cmd_edit(name, auto_schema),
+        Commands::Delete { name, force } => cmd_delete(name, force),
+        Commands::Convert {
+            from,
+            to,
+            input,
+            output,
+            data,
+            strategy,
+        } => cmd_convert(from, to, input, output, data, strategy, config),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Command implementations
+// ---------------------------------------------------------------------------
+
+fn cmd_inspect(json: bool) -> Result<(), Box<dyn std::error::Error>> {
+    match pb::read_all() {
+        Ok(snapshot) => {
+            if json {
+                let types: Vec<serde_json::Value> = snapshot
+                    .types
+                    .iter()
+                    .map(|e| {
+                        serde_json::json!({
+                            "uti": e.uti,
+                            "size_bytes": e.size_bytes,
+                        })
+                    })
+                    .collect();
+                let out = serde_json::json!({
+                    "types": types,
+                    "source_app": snapshot.source_app,
+                });
+                println!("{}", serde_json::to_string_pretty(&out)?);
+            } else {
+                println!(
+                    "Pasteboard contents ({} types):",
+                    snapshot.types.len()
+                );
+                for entry in &snapshot.types {
+                    println!(
+                        "  {:<35} {:>10} bytes",
+                        entry.uti,
+                        format_with_commas(entry.size_bytes as u64)
+                    );
+                }
+                if let Some(app) = &snapshot.source_app {
+                    println!("Source app: {}", app);
+                }
+            }
+        }
+        Err(PbError::Empty) => {
+            if json {
+                println!("{}", serde_json::json!({"types": [], "source_app": null}));
+            } else {
+                println!("Pasteboard is empty");
+            }
+        }
+        Err(e) => return Err(e.into()),
+    }
+    Ok(())
+}
+
+fn cmd_read(
+    type_: String,
+    do_clean: bool,
+    output: Option<PathBuf>,
+    config: &Config,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let pb_type = parse_pb_type(&type_)?;
+
+    // Binary types require --output
+    let is_binary = matches!(pb_type, PbType::Png | PbType::Tiff | PbType::Pdf);
+    if is_binary && output.is_none() {
+        return Err(format!(
+            "binary type '{}' requires --output <file>",
+            type_
+        )
+        .into());
+    }
+
+    let data = pb::read_type(pb_type)?;
+
+    if is_binary {
+        let path = output.unwrap();
+        std::fs::write(&path, &data)?;
+        eprintln!("Wrote {} bytes to {}", data.len(), path.display());
+        return Ok(());
+    }
+
+    // Text path
+    let text = String::from_utf8(data)?;
+    let content = if do_clean && pb_type == PbType::Html {
+        let opts = CleanOptions {
+            keep_classes: config.clean.keep_classes,
+            target_app: parse_target_app(&config.clean.target_app),
+        };
+        clean::clean(&text, &opts)?
+    } else {
+        text
+    };
+
+    match output {
+        Some(path) => std::fs::write(&path, content.as_bytes())?,
+        None => print!("{}", content),
+    }
+    Ok(())
+}
+
+fn cmd_write(
+    type_: String,
+    input: Option<PathBuf>,
+    with_plain: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let content = match input {
+        Some(path) => std::fs::read_to_string(&path)?,
+        None => {
+            use std::io::Read;
+            let mut buf = String::new();
+            std::io::stdin().read_to_string(&mut buf)?;
+            buf
+        }
+    };
+
+    let pb_type = parse_pb_type(&type_)?;
+
+    match pb_type {
+        PbType::Html => {
+            let plain = if with_plain {
+                Some(render::html_to_plain_text(&content))
+            } else {
+                None
+            };
+            pb::write_html(&content, plain.as_deref())?;
+        }
+        _ => {
+            pb::write(&[(pb_type, content.as_bytes())])?;
+        }
+    }
+    Ok(())
+}
+
+fn cmd_capture(
+    name: String,
+    do_templatize: bool,
+    strategy: String,
+    description: Option<String>,
+    tags: Vec<String>,
+    force: bool,
+    raw: bool,
+    keep_classes: bool,
+    json: bool,
+    config: &Config,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if !store::validate_name(&name) {
+        return Err(format!(
+            "invalid template name '{}': use only letters, digits, underscores, and hyphens",
+            name
+        )
+        .into());
+    }
+
+    let s = Store::new()?;
+
+    // Read from pasteboard — prefer HTML, fall back to RTF, then plain text
+    let (raw_bytes, source_pb_type) = {
+        match pb::read_type(PbType::Html) {
+            Ok(data) => (data, PbType::Html),
+            Err(_) => match pb::read_type(PbType::Rtf) {
+                Ok(data) => (data, PbType::Rtf),
+                Err(_) => {
+                    let data = pb::read_type(PbType::PlainText)?;
+                    (data, PbType::PlainText)
+                }
+            },
+        }
+    };
+
+    let snapshot = pb::read_all().ok();
+    let source_app = snapshot.as_ref().and_then(|s| s.source_app.clone());
+    let source_pb_types: Vec<String> = snapshot
+        .as_ref()
+        .map(|s| s.types.iter().map(|e| e.uti.clone()).collect())
+        .unwrap_or_else(|| vec![source_pb_type.uti().to_string()]);
+
+    let raw_html = String::from_utf8_lossy(&raw_bytes).into_owned();
+
+    // Optionally clean
+    let cleaned_html = if raw {
+        raw_html.clone()
+    } else {
+        let target_app_str = config.clean.target_app.as_str();
+        let opts = CleanOptions {
+            keep_classes: keep_classes || config.clean.keep_classes,
+            target_app: parse_target_app(target_app_str),
+        };
+        clean::clean(&raw_html, &opts)?
+    };
+
+    // Determine the effective strategy
+    let eff_strategy = if do_templatize {
+        strategy.as_str()
+    } else {
+        "manual"
+    };
+
+    let TemplatizeResult {
+        template_html,
+        variables,
+    } = match eff_strategy {
+        "agent" => {
+            let result = templatize::agent(&cleaned_html, source_app.as_deref())?;
+            result
+        }
+        "heuristic" => templatize::heuristic(&cleaned_html),
+        _ => templatize::manual(&cleaned_html),
+    };
+
+    let is_templatized = do_templatize && eff_strategy != "manual";
+
+    let now = chrono::Utc::now();
+    let meta = TemplateMeta {
+        name: name.clone(),
+        description,
+        created_at: now,
+        updated_at: now,
+        source_app,
+        source_pb_types,
+        templatized: is_templatized,
+        variables: variables.clone(),
+        tags,
+    };
+
+    let schema = if variables.is_empty() {
+        None
+    } else {
+        Some(variables.clone())
+    };
+
+    let content = SaveContent {
+        template_html,
+        is_templatized,
+        meta: meta.clone(),
+        schema,
+        original_html: Some(cleaned_html),
+        raw_html: if raw { None } else { Some(raw_html) },
+    };
+
+    s.save(&name, content, force)?;
+
+    if json {
+        let out = serde_json::json!({
+            "ok": true,
+            "name": meta.name,
+            "templatized": meta.templatized,
+            "variable_count": meta.variables.len(),
+            "tags": meta.tags,
+        });
+        println!("{}", serde_json::to_string_pretty(&out)?);
+    } else {
+        println!(
+            "Captured template '{}' ({} variable{}).",
+            name,
+            variables.len(),
+            if variables.len() == 1 { "" } else { "s" }
+        );
+    }
+
+    Ok(())
+}
+
+fn cmd_paste(
+    name: Option<String>,
+    data: Option<String>,
+    data_file: Option<PathBuf>,
+    stdin_flag: bool,
+    dry_run: bool,
+    plain_text: String,
+    open: bool,
+    from_table: bool,
+    template_name: String,
+    config: &Config,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let templates_dir = dirs::config_dir()
+        .unwrap_or_else(|| dirs::home_dir().unwrap().join(".config"))
+        .join("clipli")
+        .join("templates");
+
+    let renderer = Renderer::new(&templates_dir)?;
+
+    let rendered_html = if from_table {
+        // Read TableInput JSON from stdin
+        use std::io::Read;
+        let mut buf = String::new();
+        std::io::stdin().read_to_string(&mut buf)?;
+        let table: TableInput = serde_json::from_str(&buf)?;
+        let table_value = serde_json::to_value(&table)?;
+        let output = renderer.render(&template_name, &table_value)?;
+        output.html
+    } else {
+        let tmpl_name = name.ok_or("template name is required unless --from-table is set")?;
+        let s = Store::new()?;
+        s.load(&tmpl_name)?; // validate template exists
+
+        // Merge data
+        let merged = merge_data(data, data_file, stdin_flag)?;
+
+        let output = renderer.render(&tmpl_name, &merged)?;
+        output.html
+    };
+
+    if dry_run {
+        print!("{}", rendered_html);
+        return Ok(());
+    }
+
+    // Determine plain text
+    let plain = match plain_text.as_str() {
+        "none" => None,
+        "tab-delimited" | "auto" | _ => {
+            Some(render::html_to_plain_text(&rendered_html))
+        }
+    };
+
+    if open {
+        // Write to a temp file and open in browser
+        let tmp_path = std::env::temp_dir().join("clipli_preview.html");
+        std::fs::write(&tmp_path, &rendered_html)?;
+        open_in_browser(&tmp_path)?;
+    }
+
+    pb::write_html(&rendered_html, plain.as_deref())?;
+
+    let _ = config; // config.defaults used implicitly via strategy
+    Ok(())
+}
+
+fn cmd_list(
+    tag: Option<String>,
+    json: bool,
+    verbose: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let s = Store::new()?;
+    let filter = if tag.is_some() {
+        Some(ListFilter {
+            tag,
+            templatized_only: false,
+        })
+    } else {
+        None
+    };
+    let metas = s.list(filter.as_ref())?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&metas)?);
+    } else {
+        println!("Templates ({}):", metas.len());
+        for meta in &metas {
+            let status = if meta.templatized { "templatized" } else { "raw" };
+            let var_count = meta.variables.len();
+            let tags_str = if meta.tags.is_empty() {
+                String::new()
+            } else {
+                format!("[{}]", meta.tags.join(", "))
+            };
+            println!(
+                "  {:<30}  {:<12}  {} var{}  {}",
+                meta.name,
+                status,
+                var_count,
+                if var_count == 1 { " " } else { "s" },
+                tags_str
+            );
+            if verbose && !meta.variables.is_empty() {
+                for var in &meta.variables {
+                    let desc = var
+                        .description
+                        .as_deref()
+                        .map(|d| format!(" — {}", d))
+                        .unwrap_or_default();
+                    println!("      • {}{}", var.name, desc);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn cmd_show(
+    name: String,
+    html_flag: bool,
+    schema_flag: bool,
+    meta_flag: bool,
+    open: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let s = Store::new()?;
+    let loaded = s.load(&name)?;
+
+    if html_flag {
+        print!("{}", loaded.template_html);
+        return Ok(());
+    }
+
+    if schema_flag {
+        println!("{}", serde_json::to_string_pretty(&loaded.schema)?);
+        return Ok(());
+    }
+
+    if meta_flag {
+        println!("{}", serde_json::to_string_pretty(&loaded.meta)?);
+        return Ok(());
+    }
+
+    if open {
+        let templates_dir = dirs::config_dir()
+            .unwrap_or_else(|| dirs::home_dir().unwrap().join(".config"))
+            .join("clipli")
+            .join("templates");
+        let renderer = Renderer::new(&templates_dir)?;
+        // Build defaults data from schema
+        let mut defaults = serde_json::Map::new();
+        for var in &loaded.schema {
+            if let Some(val) = &var.default_value {
+                defaults.insert(var.name.clone(), val.clone());
+            }
+        }
+        let data = serde_json::Value::Object(defaults);
+        let output = renderer.render(&name, &data)?;
+        let tmp_path = std::env::temp_dir().join("clipli_preview.html");
+        std::fs::write(&tmp_path, &output.html)?;
+        open_in_browser(&tmp_path)?;
+        return Ok(());
+    }
+
+    // Default summary
+    println!("Name:        {}", loaded.meta.name);
+    if let Some(desc) = &loaded.meta.description {
+        println!("Description: {}", desc);
+    }
+    println!(
+        "Templatized: {}",
+        if loaded.meta.templatized { "yes" } else { "no" }
+    );
+    println!("Variables:   {}", loaded.meta.variables.len());
+    if !loaded.meta.tags.is_empty() {
+        println!("Tags:        {}", loaded.meta.tags.join(", "));
+    }
+    if let Some(app) = &loaded.meta.source_app {
+        println!("Source app:  {}", app);
+    }
+    println!("Created:     {}", loaded.meta.created_at);
+    println!("Updated:     {}", loaded.meta.updated_at);
+    Ok(())
+}
+
+fn cmd_edit(name: String, auto_schema: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let s = Store::new()?;
+
+    let path = s
+        .template_file_path(&name)
+        .ok_or_else(|| format!("template '{}' not found", name))?;
+
+    let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
+
+    let status = std::process::Command::new(&editor)
+        .arg(&path)
+        .status()?;
+
+    if !status.success() {
+        return Err(format!("editor '{}' exited with non-zero status", editor).into());
+    }
+
+    // Read back the edited file
+    let updated_html = std::fs::read_to_string(&path)?;
+
+    // Detect new {{ variables }} via simple regex
+    let var_re = regex::Regex::new(r"\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}").unwrap();
+    let found_vars: std::collections::HashSet<String> = var_re
+        .captures_iter(&updated_html)
+        .map(|c| c[1].to_string())
+        .collect();
+
+    // Load existing meta and schema
+    let loaded = s.load(&name)?;
+    let existing_var_names: std::collections::HashSet<String> =
+        loaded.schema.iter().map(|v| v.name.clone()).collect();
+
+    let new_vars: Vec<String> = found_vars
+        .difference(&existing_var_names)
+        .cloned()
+        .collect();
+
+    if !new_vars.is_empty() {
+        if auto_schema {
+            // Add new variables to schema
+            let mut schema = loaded.schema.clone();
+            for var_name in &new_vars {
+                schema.push(model::TemplateVariable {
+                    name: var_name.clone(),
+                    var_type: model::VarType::String,
+                    default_value: None,
+                    description: None,
+                });
+            }
+            let schema_path = s.template_dir(&name).join("schema.json");
+            std::fs::write(&schema_path, serde_json::to_string_pretty(&schema)?)?;
+            println!("Added {} new variable(s) to schema.", new_vars.len());
+        } else {
+            println!(
+                "Detected {} new variable(s): {}. Use --auto-schema to add them.",
+                new_vars.len(),
+                new_vars.join(", ")
+            );
+        }
+    }
+
+    // Update updated_at in meta.json
+    let mut meta = loaded.meta.clone();
+    meta.updated_at = chrono::Utc::now();
+    if auto_schema && !new_vars.is_empty() {
+        // Reflect the discovered variables in meta too
+        let existing_meta_names: std::collections::HashSet<String> =
+            meta.variables.iter().map(|v| v.name.clone()).collect();
+        for var_name in &new_vars {
+            if !existing_meta_names.contains(var_name) {
+                meta.variables.push(model::TemplateVariable {
+                    name: var_name.clone(),
+                    var_type: model::VarType::String,
+                    default_value: None,
+                    description: None,
+                });
+            }
+        }
+        meta.templatized = true;
+    }
+    let meta_path = s.template_dir(&name).join("meta.json");
+    std::fs::write(&meta_path, serde_json::to_string_pretty(&meta)?)?;
+
+    Ok(())
+}
+
+fn cmd_delete(name: String, force: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let s = Store::new()?;
+
+    if !force {
+        use std::io::{BufRead, Write};
+        print!("Delete template '{}'? [y/N] ", name);
+        std::io::stdout().flush()?;
+        let mut line = String::new();
+        std::io::stdin().lock().read_line(&mut line)?;
+        let answer = line.trim().to_lowercase();
+        if answer != "y" && answer != "yes" {
+            println!("Aborted.");
+            return Ok(());
+        }
+    }
+
+    s.delete(&name)?;
+    println!("Deleted template '{}'.", name);
+    Ok(())
+}
+
+fn cmd_convert(
+    from: String,
+    to: String,
+    input: Option<PathBuf>,
+    output: Option<PathBuf>,
+    data: Option<String>,
+    strategy: String,
+    _config: &Config,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Read input
+    let input_text = match input {
+        Some(path) => std::fs::read_to_string(&path)?,
+        None => {
+            use std::io::Read;
+            let mut buf = String::new();
+            std::io::stdin().read_to_string(&mut buf)?;
+            buf
+        }
+    };
+
+    let result: String = match (from.as_str(), to.as_str()) {
+        ("html", "j2") => {
+            let templatize_result = match strategy.as_str() {
+                "agent" => {
+                    templatize::agent(&input_text, None)?.template_html
+                }
+                _ => templatize::heuristic(&input_text).template_html,
+            };
+            templatize_result
+        }
+        ("j2", "html") => {
+            // Render with provided data using an inline minijinja environment
+            let render_data: serde_json::Value = if let Some(d) = data {
+                serde_json::from_str(&d)?
+            } else {
+                serde_json::Value::Object(Default::default())
+            };
+            let mut env = minijinja::Environment::new();
+            env.add_template_owned("_convert_inline", input_text)
+                .map_err(|e| format!("template syntax error: {}", e))?;
+            let tmpl = env
+                .get_template("_convert_inline")
+                .map_err(|e| format!("template error: {}", e))?;
+            let ctx = minijinja::Value::from_serialize(&render_data);
+            tmpl.render(ctx)
+                .map_err(|e| format!("render error: {}", e))?
+        }
+        ("html", "plain") => render::html_to_plain_text(&input_text),
+        ("rtf", "html") => {
+            return Err("RTF→HTML not yet implemented".into());
+        }
+        _ => {
+            return Err(
+                format!("unsupported conversion: {} → {}", from, to).into()
+            );
+        }
+    };
+
+    match output {
+        Some(path) => std::fs::write(&path, result.as_bytes())?,
+        None => print!("{}", result),
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Helper functions
+// ---------------------------------------------------------------------------
+
+/// Map a type string to PbType.
+fn parse_pb_type(s: &str) -> Result<PbType, Box<dyn std::error::Error>> {
+    match s.to_ascii_lowercase().as_str() {
+        "html" => Ok(PbType::Html),
+        "rtf" => Ok(PbType::Rtf),
+        "plain" | "text" | "plaintext" => Ok(PbType::PlainText),
+        "png" => Ok(PbType::Png),
+        "tiff" => Ok(PbType::Tiff),
+        "pdf" => Ok(PbType::Pdf),
+        other => Err(format!("unknown pasteboard type '{}': use html, rtf, plain, png, tiff, or pdf", other).into()),
+    }
+}
+
+/// Map a target app string from config to TargetApp enum.
+fn parse_target_app(s: &str) -> TargetApp {
+    match s.to_ascii_lowercase().as_str() {
+        "excel" => TargetApp::Excel,
+        "powerpoint" | "ppt" => TargetApp::PowerPoint,
+        "googlesheets" | "sheets" | "google_sheets" => TargetApp::GoogleSheets,
+        _ => TargetApp::Generic,
+    }
+}
+
+/// Simple HTML tag stripper for plain-text fallback.
+#[allow(dead_code)]
+fn strip_tags(html: &str) -> String {
+    let mut result = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for ch in html.chars() {
+        match ch {
+            '<' => {
+                in_tag = true;
+            }
+            '>' => {
+                in_tag = false;
+            }
+            _ if !in_tag => result.push(ch),
+            _ => {}
+        }
+    }
+    result
+}
+
+/// Open a file in the default macOS application.
+fn open_in_browser(path: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
+    std::process::Command::new("open").arg(path).status()?;
+    Ok(())
+}
+
+/// Print a JSON error envelope to stdout.
+#[allow(dead_code)]
+fn print_json_error(message: &str, code: &str) {
+    println!(
+        "{}",
+        serde_json::json!({"error": message, "code": code})
+    );
+}
+
+/// Merge data from --data > --data_file > stdin.
+fn merge_data(
+    data_str: Option<String>,
+    data_file: Option<PathBuf>,
+    from_stdin: bool,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+    if let Some(s) = data_str {
+        return Ok(serde_json::from_str(&s)?);
+    }
+    if let Some(path) = data_file {
+        let s = std::fs::read_to_string(&path)?;
+        return Ok(serde_json::from_str(&s)?);
+    }
+    if from_stdin {
+        use std::io::Read;
+        let mut buf = String::new();
+        std::io::stdin().read_to_string(&mut buf)?;
+        return Ok(serde_json::from_str(&buf)?);
+    }
+    Ok(serde_json::Value::Object(Default::default()))
+}
+
+/// Format a u64 integer with comma grouping, e.g. 12847 → "12,847".
+fn format_with_commas(n: u64) -> String {
+    let s = n.to_string();
+    let chars: Vec<char> = s.chars().collect();
+    let mut result = String::new();
+    let len = chars.len();
+    for (i, ch) in chars.iter().enumerate() {
+        if i > 0 && (len - i) % 3 == 0 {
+            result.push(',');
+        }
+        result.push(*ch);
+    }
+    result
+}

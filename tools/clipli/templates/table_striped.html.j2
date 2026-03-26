@@ -1,0 +1,52 @@
+{#
+  table_striped.html.j2 — Striped (alternating row color) table template.
+
+  Expected variables:
+    headers     list of cell objects, each with:
+                  .value   string — header cell text
+                  (other style fields on header cells are ignored; use header_bg/header_fg below)
+    rows        list of rows; each row is a list of cell objects with:
+                  .value   string — cell text
+                  (per-cell styles are not applied; stripe colors govern background)
+    header_bg   string — header background color (default: '#4472C4')
+    header_fg   string — header foreground color (default: '#FFFFFF')
+    stripe_odd  string — background for odd data rows  (default: '#FFFFFF')
+    stripe_even string — background for even data rows (default: '#D6E4F0')
+    default_font  string (default: 'Calibri')
+
+  Example usage:
+    clipli paste table_striped \
+      --var headers='[{"value":"Region","style":{}},{"value":"Revenue","style":{}}]' \
+      --var rows='[[{"value":"North","style":{}},{"value":"$1M","style":{}}],[{"value":"South","style":{}},{"value":"$2M","style":{}}]]' \
+      --var stripe_even='#E8F4FD'
+#}
+{% extends "_base.html.j2" %}
+{% block content %}
+<table style="border-collapse:collapse; font-family:{{default_font | default('Calibri')}};">
+  {% if headers %}
+  <tr>
+    {% for cell in headers %}
+    <td style="
+      font-weight:bold;
+      background-color:{{header_bg | default('#4472C4')}};
+      color:{{header_fg | default('#FFFFFF')}};
+      padding:8px 12px;
+      border:1px solid #999;
+    ">{{cell.value}}</td>
+    {% endfor %}
+  </tr>
+  {% endif %}
+  {% for row in rows %}
+  {% set row_idx = loop.index %}
+  <tr>
+    {% for cell in row %}
+    <td style="
+      background-color:{% if row_idx is odd %}{{stripe_odd | default('#FFFFFF')}}{% else %}{{stripe_even | default('#D6E4F0')}}{% endif %};
+      padding:6px 12px;
+      border:1px solid #D9D9D9;
+    ">{{cell.value}}</td>
+    {% endfor %}
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

@@ -1,0 +1,233 @@
+{#
+  table_excel.html.j2 — Excel-native table template.
+
+  Generates HTML matching Excel 15/16's own clipboard format so that
+  pasting into Excel preserves backgrounds, borders, colors, fonts,
+  and number formatting. Reverse-engineered from actual Excel clipboard output.
+
+  Cell style.number_format values:
+    "currency"  →  $#,##0 with red negatives
+    "percent"   →  Percent
+    (omit)      →  General (default)
+
+  Expected variables:
+    headers       list of cell objects ({value, style})
+    rows          list of rows, each a list of cell objects
+    style         table-level style object:
+                    .header_bg       header background hex (default: '#4472C4')
+                    .header_fg       header text color hex (default: '#FFFFFF')
+                    .total_bg        total row background (default: '#F2F2F2')
+                    .default_font    font family (default: 'Calibri')
+                    .default_font_size  font size in pt (default: '11')
+
+  Notes:
+    - Does NOT extend _base.html.j2 — standalone HTML with Office namespaces
+    - Does NOT support colspan/merged cells — use clipli write --type html for those
+    - Empty cells render as &nbsp; per Excel convention
+    - Aptos fonts use mso-font-charset:1, Calibri uses mso-font-charset:0
+    - See templates/table_excel.html.md for the full reference document
+#}
+{%- set s = style | default(value={}) -%}
+{%- set hdr_bg = s.header_bg | default('#4472C4') -%}
+{%- set hdr_fg = s.header_fg | default('#FFFFFF') -%}
+{%- set total_bg = s.total_bg | default('#F2F2F2') -%}
+{%- set fnt = s.default_font | default(default_font | default('Calibri')) -%}
+{%- set fsz = s.default_font_size | default(default_font_size | default('11')) -%}
+{#- Macro: build the inline style string for a data cell -#}
+{%- macro cell_style(cell) -%}
+border-top:none;
+{%- if cell.style.bold %}font-weight:700;{% endif %}
+{%- if cell.style.fg_color %}color:{{cell.style.fg_color}};{% endif %}
+{%- if cell.style.alignment %}text-align:{{cell.style.alignment}};{% endif %}
+{%- if cell.style.number_format == "currency" %}mso-number-format:"\0022$\0022\#\,\#\#0_\)\;\[Red\]\\\(\0022$\0022\#\,\#\#0\\\)";{% elif cell.style.number_format == "percent" %}mso-number-format:Percent;{% endif %}
+{%- endmacro -%}
+{#- Macro: render cell value, using &nbsp; for empty cells -#}
+{%- macro cell_value(cell) -%}
+{%- if cell.value %}{{cell.value}}{% else %}&nbsp;{% endif %}
+{%- endmacro -%}
+<html xmlns:v="urn:schemas-microsoft-com:vml"
+xmlns:o="urn:schemas-microsoft-com:office:office"
+xmlns:x="urn:schemas-microsoft-com:office:excel"
+xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta http-equiv=Content-Type content="text/html; charset=utf-8">
+<meta name=ProgId content=Excel.Sheet>
+<meta name=Generator content="clipli">
+<style>
+<!--table
+	{mso-displayed-decimal-separator:"\.";
+	mso-displayed-thousand-separator:"\,";}
+td
+	{padding-top:1px;
+	padding-right:1px;
+	padding-left:1px;
+	mso-ignore:padding;
+	color:black;
+	font-size:{{fsz}}.0pt;
+	font-weight:400;
+	font-style:normal;
+	text-decoration:none;
+	font-family:"{{fnt}}", sans-serif;
+	mso-font-charset:0;
+	mso-number-format:General;
+	text-align:general;
+	vertical-align:bottom;
+	border:none;
+	mso-background-source:auto;
+	mso-pattern:auto;
+	mso-protection:locked visible;
+	white-space:nowrap;
+	mso-rotate:0;}
+.hdr_l
+	{color:{{hdr_fg}};
+	font-weight:700;
+	font-family:"{{fnt}}", sans-serif;
+	mso-font-charset:1;
+	text-align:center;
+	vertical-align:middle;
+	border-top:1.0pt solid windowtext;
+	border-right:none;
+	border-bottom:.5pt solid windowtext;
+	border-left:1.0pt solid windowtext;
+	background:{{hdr_bg}};
+	mso-pattern:black none;}
+.hdr_m
+	{color:{{hdr_fg}};
+	font-weight:700;
+	font-family:"{{fnt}}", sans-serif;
+	mso-font-charset:1;
+	text-align:center;
+	vertical-align:middle;
+	border-top:1.0pt solid windowtext;
+	border-right:none;
+	border-bottom:.5pt solid windowtext;
+	border-left:none;
+	background:{{hdr_bg}};
+	mso-pattern:black none;}
+.hdr_r
+	{color:{{hdr_fg}};
+	font-weight:700;
+	font-family:"{{fnt}}", sans-serif;
+	mso-font-charset:1;
+	text-align:center;
+	vertical-align:middle;
+	border-top:1.0pt solid windowtext;
+	border-right:1.0pt solid windowtext;
+	border-bottom:.5pt solid windowtext;
+	border-left:none;
+	background:{{hdr_bg}};
+	mso-pattern:black none;}
+.cl
+	{color:black;
+	font-family:"{{fnt}}", sans-serif;
+	mso-font-charset:1;
+	text-align:center;
+	vertical-align:middle;
+	border-top:none;
+	border-right:none;
+	border-bottom:.5pt solid windowtext;
+	border-left:1.0pt solid windowtext;}
+.cm
+	{color:black;
+	font-family:"{{fnt}}", sans-serif;
+	mso-font-charset:1;
+	text-align:center;
+	vertical-align:middle;
+	border-top:none;
+	border-right:none;
+	border-bottom:.5pt solid windowtext;
+	border-left:none;}
+.cr
+	{color:black;
+	font-family:"{{fnt}}", sans-serif;
+	mso-font-charset:1;
+	text-align:center;
+	vertical-align:middle;
+	border-top:none;
+	border-right:1.0pt solid windowtext;
+	border-bottom:.5pt solid windowtext;
+	border-left:none;}
+.tl
+	{color:black;
+	font-family:"{{fnt}}", sans-serif;
+	mso-font-charset:1;
+	font-weight:700;
+	text-align:center;
+	vertical-align:middle;
+	border-top:none;
+	border-right:none;
+	border-bottom:1.0pt solid windowtext;
+	border-left:1.0pt solid windowtext;
+	background:{{total_bg}};
+	mso-pattern:black none;}
+.tm
+	{color:black;
+	font-family:"{{fnt}}", sans-serif;
+	mso-font-charset:1;
+	text-align:center;
+	vertical-align:middle;
+	border-top:none;
+	border-right:none;
+	border-bottom:1.0pt solid windowtext;
+	border-left:none;
+	background:{{total_bg}};
+	mso-pattern:black none;}
+.tr
+	{color:black;
+	font-family:"{{fnt}}", sans-serif;
+	mso-font-charset:1;
+	text-align:center;
+	vertical-align:middle;
+	border-top:none;
+	border-right:1.0pt solid windowtext;
+	border-bottom:1.0pt solid windowtext;
+	border-left:none;
+	background:{{total_bg}};
+	mso-pattern:black none;}
+-->
+</style>
+</head>
+<body>
+<table border=0 cellpadding=0 cellspacing=0 style='border-collapse:collapse'>
+<!--StartFragment-->
+{%- if headers %}
+ <tr height=21 style='height:16.0pt'>
+{%- for cell in headers %}
+{%- if loop.first %}
+  <td height=21 class=hdr_l{% if cell.style.alignment %} align={{cell.style.alignment}} style='text-align:{{cell.style.alignment}}'{% endif %}>{{cell.value}}</td>
+{%- elif loop.last %}
+  <td class=hdr_r{% if cell.style.alignment %} align={{cell.style.alignment}} style='text-align:{{cell.style.alignment}}'{% endif %}>{{cell.value}}</td>
+{%- else %}
+  <td class=hdr_m{% if cell.style.alignment %} align={{cell.style.alignment}} style='text-align:{{cell.style.alignment}}'{% endif %}>{{cell.value}}</td>
+{%- endif %}
+{%- endfor %}
+ </tr>
+{%- endif %}
+{%- for row in rows %}
+{%- set is_last_row = loop.last %}
+ <tr height=21 style='height:16.0pt'>
+{%- for cell in row %}
+{%- if is_last_row and cell.style.bg_color %}
+{%- if loop.first %}
+  <td class=tl style='{{cell_style(cell)}}'{% if cell.style.alignment %} align={{cell.style.alignment}}{% endif %}>{{cell_value(cell)}}</td>
+{%- elif loop.last %}
+  <td class=tr style='{{cell_style(cell)}}'{% if cell.style.alignment %} align={{cell.style.alignment}}{% endif %}>{{cell_value(cell)}}</td>
+{%- else %}
+  <td class=tm style='{{cell_style(cell)}}'{% if cell.style.alignment %} align={{cell.style.alignment}}{% endif %}>{{cell_value(cell)}}</td>
+{%- endif %}
+{%- else %}
+{%- if loop.first %}
+  <td class=cl style='{{cell_style(cell)}}'{% if cell.style.alignment %} align={{cell.style.alignment}}{% endif %}>{{cell_value(cell)}}</td>
+{%- elif loop.last %}
+  <td class=cr style='{{cell_style(cell)}}'{% if cell.style.alignment %} align={{cell.style.alignment}}{% endif %}>{{cell_value(cell)}}</td>
+{%- else %}
+  <td class=cm style='{{cell_style(cell)}}'{% if cell.style.alignment %} align={{cell.style.alignment}}{% endif %}>{{cell_value(cell)}}</td>
+{%- endif %}
+{%- endif %}
+{%- endfor %}
+ </tr>
+{%- endfor %}
+<!--EndFragment-->
+</table>
+</body>
+</html>

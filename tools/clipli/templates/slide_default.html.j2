@@ -1,0 +1,65 @@
+{#
+  slide_default.html.j2 — PowerPoint-style slide layout template.
+
+  Expected variables:
+    title         string (required) — slide title text displayed in the header band
+    subtitle      string (optional) — smaller subtitle line below the title
+    bullets       list of strings   — bullet point items in the content area
+    default_font  string (default: 'Calibri') — font applied to all text
+
+  Example usage:
+    clipli paste slide_default \
+      --var title='Q1 Results' \
+      --var subtitle='January – March 2026' \
+      --var bullets='["Revenue up 12% YoY","Headcount stable at 240","New markets: APAC launch Q2"]'
+#}
+{% extends "_base.html.j2" %}
+{% block content %}
+<div style="
+  width:720px;
+  border:1px solid #CCCCCC;
+  font-family:{{ default_font | default('Calibri') }};
+  background-color:#FFFFFF;
+">
+  {# ── Header band ── #}
+  <div style="
+    background-color:#1F497D;
+    padding:24px 32px 20px 32px;
+  ">
+    <div style="
+      color:#FFFFFF;
+      font-size:28pt;
+      font-weight:bold;
+      line-height:1.2;
+    ">{{ title }}</div>
+    {% if subtitle %}
+    <div style="
+      color:#C8D8EA;
+      font-size:16pt;
+      font-weight:normal;
+      margin-top:6px;
+    ">{{ subtitle }}</div>
+    {% endif %}
+  </div>
+
+  {# ── Content area ── #}
+  <div style="padding:28px 32px 32px 32px;">
+    {% if bullets %}
+    <ul style="
+      margin:0;
+      padding-left:24px;
+      list-style-type:disc;
+    ">
+      {% for bullet in bullets %}
+      <li style="
+        font-size:14pt;
+        color:#1F1F1F;
+        margin-bottom:10px;
+        line-height:1.4;
+      ">{{ bullet }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

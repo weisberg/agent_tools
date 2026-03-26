@@ -1,0 +1,54 @@
+{#
+  table_default.html.j2 — Default table template.
+
+  Expected variables:
+    headers         list of cell objects, each with:
+                      .value           string — header cell text
+                      .style.font_weight  string (default: 'bold')
+                      .style.bg_color     string (default: '#4472C4')
+                      .style.fg_color     string (default: '#FFFFFF')
+                      .style.font_size_pt number (default: 11)
+                      .style.alignment    string (default: 'left')
+                      .style.font_family  string (optional)
+    rows            list of rows; each row is a list of cell objects with:
+                      .value           string — cell text
+                      .style.bold      bool (optional)
+                      .style.italic    bool (optional)
+                      .style.bg_color  string (optional)
+                      .style.fg_color  string (optional)
+                      .style.font_family  string (optional)
+                      .style.font_size_pt number (default: 11)
+                      .style.alignment    string (default: 'left')
+    default_font    string (default: 'Calibri')
+    default_font_size  number (default: 11)
+
+  Example usage:
+    clipli paste table_default --var headers='[{"value":"Name","style":{}},{"value":"Score","style":{}}]' \
+      --var rows='[[{"value":"Alice","style":{}},{"value":"95","style":{}}]]'
+#}
+{% extends "_base.html.j2" %}
+{% block content %}
+{% set s = style | default(value={}) %}
+{% set hdr_bg = s.header_bg | default('#4472C4') %}
+{% set hdr_fg = s.header_fg | default('#FFFFFF') %}
+{% set row_sep = s.row_border | default('1px solid #D9D9D9') %}
+{% set tbl_border = s.outer_border | default('2px solid #333333') %}
+{% set fnt = default_font | default('Calibri') %}
+{% set fsz = default_font_size | default('11') %}
+<table border="1" cellpadding="0" cellspacing="0" style="border-collapse:collapse; border:{{tbl_border}}; font-family:{{fnt}}; font-size:{{fsz}}pt;">
+{%- if headers %}
+<tr>
+{%- for cell in headers %}
+<td bgcolor="{{cell.style.bg_color | default(hdr_bg)}}" style="background-color:{{cell.style.bg_color | default(hdr_bg)}}; color:{{cell.style.fg_color | default(hdr_fg)}}; font-weight:bold; padding:6px 10px; border:{{tbl_border}}; font-size:{{cell.style.font_size_pt | default(fsz)}}pt; text-align:{{cell.style.alignment | default('left')}};{% if cell.style.font_family %} font-family:{{cell.style.font_family}};{% endif %}">{{cell.value}}</td>
+{%- endfor %}
+</tr>
+{%- endif %}
+{%- for row in rows %}
+<tr>
+{%- for cell in row %}
+<td{% if cell.style.bg_color %} bgcolor="{{cell.style.bg_color}}"{% endif %} style="{% if cell.style.bold %}font-weight:bold; {% endif %}{% if cell.style.italic %}font-style:italic; {% endif %}{% if cell.style.bg_color %}background-color:{{cell.style.bg_color}}; {% endif %}{% if cell.style.fg_color %}color:{{cell.style.fg_color}}; {% endif %}{% if cell.style.font_family %}font-family:{{cell.style.font_family}}; {% endif %}font-size:{{cell.style.font_size_pt | default(fsz)}}pt; padding:4px 8px; border-bottom:{{row_sep}}; text-align:{{cell.style.alignment | default('left')}};">{{cell.value}}</td>
+{%- endfor %}
+</tr>
+{%- endfor %}
+</table>
+{% endblock %}
