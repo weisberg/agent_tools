@@ -956,8 +956,21 @@ Excel-native template that generates HTML matching Excel 15/16's own clipboard f
 | `alignment` | `left`, `center`, `right` | Text alignment (emits both `align=` attr and `text-align:` CSS) |
 | `bold` | bool | Bold text (`font-weight:700`) |
 | `fg_color` | hex string | Text color |
-| `bg_color` | hex string | Background (triggers total-row class on last row) |
-| `number_format` | `currency`, `percent` | Excel number format (`mso-number-format`) |
+| `bg_color` | hex string | Background on any cell (`background:` + `mso-pattern:black none`). Last row with bg_color gets thick bottom border. |
+| `number_format` | see below | Excel number format (`mso-number-format`) |
+| `url` | string | Hyperlink URL — renders `<a href>` with styled span preserving cell colors |
+| `wrap` | bool | Word wrapping (`white-space:normal`). Default: nowrap. |
+
+**Number format values:**
+| Value | Output | Example |
+|-------|--------|---------|
+| `currency` | `$#,##0` with red negatives | `$4,230,000` |
+| `percent` | `Percent` (fractional input) | `15.60%` |
+| `percent_int` | `0%` | `98%` |
+| `percent_1dp` | `0.0%` | `15.6%` |
+| `integer` | `#,##0` | `12,819` |
+| `standard` | `Standard` | `1234.5678` |
+| `text` | `@` (force text) | `B0BFBRL47B` |
 
 **Usage:**
 ```bash

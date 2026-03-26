@@ -248,30 +248,78 @@ Each cell has a `style` object with these fields:
 | Field | Type | Description |
 |-------|------|-------------|
 | `alignment` | `"left"`, `"center"`, `"right"` | Text alignment |
-| `bold` | boolean | Bold text |
+| `bold` | boolean | Bold text (`font-weight:700`) |
+| `italic` | boolean | Italic text |
 | `fg_color` | hex string (e.g. `"#2E7D32"`) | Text color |
-| `bg_color` | hex string | Background (also triggers total-row class on last row) |
-| `number_format` | `"currency"`, `"percent"` | Excel number format; omit for General |
+| `bg_color` | hex string | Background color (adds `background:` + `mso-pattern:black none`). Works on any cell. Last row with bg_color gets thick bottom border. |
+| `number_format` | string | Excel number format (see table below); omit for General |
+| `url` | string | Hyperlink URL. Renders as `<a href>` with styled `<span>` that preserves the cell's text color. |
+| `wrap` | boolean | Enable word wrapping (`white-space:normal`). Default: nowrap. |
+
+### Number formats
+
+| `number_format` value | CSS output | Display example |
+|----------------------|-----------|-----------------|
+| `"currency"` | `$#,##0` with red negatives | `$4,230,000` / `($500)` in red |
+| `"percent"` | `Percent` (Excel treats value as fractional) | `15.60%` |
+| `"percent_int"` | `0%` | `98%` |
+| `"percent_1dp"` | `0.0%` | `15.6%` |
+| `"integer"` | `#,##0` (comma-grouped, no decimals) | `12,819` |
+| `"standard"` | `Standard` (like General with more decimals) | `1234.5678` |
+| `"text"` | `@` (force text, prevent number auto-detection) | `B0BFBRL47B` |
+| (omit) | `General` | Auto-detect |
+
+### Color-coded conditional cells
+
+Excel represents conditional formatting on the clipboard by baking the rendered colors into per-cell styles. To reproduce this, set `bg_color` and `fg_color` on each cell based on value thresholds:
+
+| Range | Background | Text Color | Meaning |
+|-------|-----------|------------|---------|
+| 90-100% | `#A0D771` | `#628048` | Excellent (green) |
+| 80-89% | `#FCCF84` | `#8B7449` | Good (yellow) |
+| 60-79% | `#FBAD56` | `#986F3E` | Warning (orange) |
+| 40-59% | `#E45621` | `white` | Poor (orange-red) |
+| 0-39% | `#C92E25` | `white` | Critical (red) |
+
+Example: `{"value": "98%", "style": {"bg_color": "#A0D771", "fg_color": "#628048", "bold": true, "number_format": "percent_int", "alignment": "center"}}`
+
+### Hyperlinks
+
+Cells with a `url` field render as clickable links that preserve the cell's visual style:
+
+```json
+{"value": "B0BFBRL47B", "style": {"url": "https://amazon.com/dp/B0BFBRL47B", "number_format": "text"}}
+```
+
+The template wraps the value in `<a href="URL"><span style='color:...;text-decoration:none'>VALUE</span></a>`. The span suppresses the default blue link color and underline, keeping the cell's fg_color (or black if not set).
+
+Use `"number_format": "text"` on link cells to prevent Excel from auto-detecting the ASIN/ID as a number.
 
 ### Complete example
 
 ```json
 {
   "headers": [
-    {"value": "Region", "style": {}},
+    {"value": "ASIN", "style": {"wrap": true}},
+    {"value": "Product", "style": {"wrap": true}},
+    {"value": "BB%", "style": {"alignment": "center"}},
     {"value": "Revenue", "style": {"alignment": "right"}},
-    {"value": "Growth", "style": {"alignment": "center"}}
+    {"value": "Status", "style": {"alignment": "center"}}
   ],
   "rows": [
     [
-      {"value": "North America", "style": {"bold": true}},
-      {"value": "$4,230,000", "style": {"number_format": "currency", "alignment": "right"}},
-      {"value": "15.60%", "style": {"number_format": "percent", "alignment": "center", "fg_color": "#2E7D32"}}
+      {"value": "B0BFBRL47B", "style": {"url": "https://amazon.com/dp/B0BFBRL47B", "number_format": "text"}},
+      {"value": "Widget A Long Product Name", "style": {"wrap": true}},
+      {"value": "98%", "style": {"bg_color": "#A0D771", "fg_color": "#628048", "bold": true, "number_format": "percent_int", "alignment": "center"}},
+      {"value": "12,819", "style": {"number_format": "integer", "alignment": "right"}},
+      {"value": "Secure", "style": {"bold": true, "bg_color": "#FFF2CC", "alignment": "center"}}
     ],
     [
       {"value": "Total", "style": {"bold": true, "bg_color": "#F2F2F2"}},
+      {"value": "", "style": {"bg_color": "#F2F2F2"}},
+      {"value": "", "style": {"bg_color": "#F2F2F2"}},
       {"value": "$4,230,000", "style": {"number_format": "currency", "alignment": "right", "bold": true, "bg_color": "#F2F2F2"}},
-      {"value": "15.60%", "style": {"number_format": "percent", "alignment": "center", "bold": true, "fg_color": "#2E7D32", "bg_color": "#F2F2F2"}}
+      {"value": "", "style": {"bg_color": "#F2F2F2"}}
     ]
   ],
   "style": {
@@ -309,9 +357,9 @@ Excel's CSS cascade gives the class-level `text-align:general` higher priority t
 
 ## Reference: actual Excel 15 clipboard output
 
-This is what Excel 15 (macOS) puts on the clipboard when you copy formatted cells. The template was designed to match this structure exactly.
+### Plain ranges (cells without Table formatting)
 
-Key observations from the real Excel output:
+Key observations from copying formatted cells in a plain range:
 - Every unique combination of formatting gets its own numbered class (`.xl65`, `.xl66`, etc.)
 - The base `td` rule defines ALL default properties — nothing is left to browser defaults
 - `mso-pattern:black none` is used for cells WITH a background fill
@@ -321,6 +369,81 @@ Key observations from the real Excel output:
 - `mso-width-source:userset` indicates user-set column widths
 - `<col>` elements define column widths before the first `<tr>`
 - `<!--[if gte mso 9]>` conditional comment blocks contain XML workbook metadata (optional)
+
+### Excel Tables (Insert > Table — with filtering/banding)
+
+When copying an Excel Table (the structured table with filter dropdowns and banded rows), the HTML output differs significantly from plain ranges:
+
+**1. Full inline style on every cell**
+
+Every `<td>` has the COMPLETE computed style as an inline `style=` attribute, IN ADDITION to the class. This is massively redundant (explains 3.3MB for 1331 rows) but ensures formatting survives even if the `<style>` block is stripped:
+
+```html
+<td class=xl70 style='height:16.0pt;font-size:12.0pt;color:black;
+  font-weight:400;text-decoration:none;text-underline-style:none;text-line-through:
+  none;font-family:Calibri, sans-serif;border-top:.5pt solid #8EA9DB;
+  border-right:none;border-bottom:.5pt solid #8EA9DB;border-left:.5pt solid #8EA9DB;
+  background:#D9E1F2;mso-pattern:#D9E1F2 none'>B09KG6LZ7D</td>
+```
+
+**2. Theme-based border color**
+
+Tables use `#8EA9DB` (blue-gray) for borders, NOT `windowtext` (black). This matches Excel's default "Table Style Medium 2":
+```css
+border-top:.5pt solid #8EA9DB;
+```
+
+**3. `mso-pattern` uses SAME color as background (not `black none`)**
+
+- Plain ranges: `mso-pattern:black none`
+- Excel Tables: `mso-pattern:#D9E1F2 none` (same hex as `background`)
+- Header row: `mso-pattern:#4472C4 none` (same hex as `background`)
+
+**4. Banded rows — all data rows get background**
+
+All data rows have `background:#D9E1F2` (light blue). The banding is a table-level feature — the clipboard HTML bakes the computed color into every cell rather than alternating. Header row uses `background:#4472C4` (darker blue).
+
+**5. Additional inline properties**
+
+Every cell includes `text-underline-style:none` and `text-line-through:none` — these are absent in plain range output.
+
+**6. `mso-spacerun:yes` for cell padding**
+
+Number cells with accounting format use `<span style='mso-spacerun:yes'>` followed by spaces for visual padding/alignment:
+```html
+<span style='mso-spacerun:yes'>            </span>42,396
+```
+
+**7. Accounting number format**
+
+The full accounting format string (with parentheses for negatives and dash for zeros):
+```css
+mso-number-format:"_\(* \#\,\#\#0_\)\;_\(* \\\(\#\,\#\#0\\\)\;_\(* \0022-\0022??_\)\;_\(\@_\)"
+```
+
+**8. ISO datetime format**
+
+```css
+mso-number-format:"yyyy\\-mm\\-dd\\ hh\:mm"
+```
+
+**9. Header row styling**
+
+- White bold text on `#4472C4` background
+- All borders are `.5pt solid #8EA9DB` (not thick outer borders)
+- Class + full inline style redundancy
+
+### Summary: Plain Range vs Excel Table
+
+| Aspect | Plain Range | Excel Table |
+|--------|------------|-------------|
+| Inline styles | Minimal (overrides only) | Full computed style on every cell |
+| Border color | `windowtext` (black) | `#8EA9DB` (theme blue-gray) |
+| `mso-pattern` | `black none` | Same hex as background (e.g. `#D9E1F2 none`) |
+| Background | Only on explicitly-filled cells | On ALL data rows (banded) |
+| Outer border | Thick (1.0pt) | Same as inner (.5pt) |
+| Extra properties | None | `text-underline-style:none`, `text-line-through:none` |
+| File size | Small (class-driven) | Large (inline redundancy) |
 
 To capture a fresh reference from Excel at any time:
 ```bash

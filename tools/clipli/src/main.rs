@@ -1,4 +1,6 @@
 mod clean;
+mod excel;
+mod excel_edit;
 mod model;
 mod pb;
 mod render;
@@ -231,6 +233,124 @@ enum Commands {
         #[arg(long, short = 'f')]
         force: bool,
     },
+    /// Generate Excel-compatible HTML from CSV and write to clipboard
+    Excel {
+        /// CSV file path (or - for stdin)
+        file: PathBuf,
+        /// Table style: "table" (banded rows) or "plain" (thick borders)
+        #[arg(long, default_value = "table")]
+        style: String,
+        /// Header background color
+        #[arg(long, default_value = "#4472C4")]
+        header_bg: String,
+        /// Header text color
+        #[arg(long, default_value = "#FFFFFF")]
+        header_fg: String,
+        /// Banded row background color (table style only)
+        #[arg(long, default_value = "#D9E1F2")]
+        band_bg: String,
+        /// Font family
+        #[arg(long, default_value = "Calibri")]
+        font: String,
+        /// Font size in pt
+        #[arg(long, default_value = "12")]
+        font_size: String,
+        /// Column format: NAME:FORMAT[:ALIGN] (repeatable)
+        #[arg(long = "col", value_name = "NAME:FMT[:ALIGN]")]
+        col_specs: Vec<String>,
+        /// Column alignment without format: NAME:ALIGN (repeatable)
+        #[arg(long = "align", value_name = "NAME:ALIGN")]
+        align_specs: Vec<String>,
+        /// Make a column bold (repeatable)
+        #[arg(long = "bold")]
+        bold_cols: Vec<String>,
+        /// Make a column italic (repeatable)
+        #[arg(long = "italic")]
+        italic_cols: Vec<String>,
+        /// Enable word wrap for a column (repeatable)
+        #[arg(long = "wrap")]
+        wrap_cols: Vec<String>,
+        /// Column text color: NAME:HEX (repeatable)
+        #[arg(long = "fg-color", value_name = "NAME:HEX")]
+        fg_colors: Vec<String>,
+        /// Column background color: NAME:HEX (repeatable)
+        #[arg(long = "bg-color", value_name = "NAME:HEX")]
+        bg_colors: Vec<String>,
+        /// Conditional color: COLUMN:OP:VALUE:BG_HEX:FG_HEX (repeatable).
+        /// Ops: >=, <=, >, <, ==, !=, contains, empty, not_empty
+        #[arg(long = "color-if", value_name = "SPEC")]
+        color_rules: Vec<String>,
+        /// Hyperlink pattern: NAME:URL_PATTERN with {} placeholder (repeatable)
+        #[arg(long = "link", value_name = "NAME:URL")]
+        links: Vec<String>,
+        /// Merged title row above the header
+        #[arg(long)]
+        title: Option<String>,
+        /// Add a total row (auto-sums numeric columns)
+        #[arg(long)]
+        total_row: bool,
+        /// Use SUM formulas in total row instead of pre-computed values
+        #[arg(long)]
+        total_formula: bool,
+        /// Per-cell formula: COL:ROW:FORMULA (row is 0-based data row index, repeatable)
+        #[arg(long = "formula", value_name = "COL:ROW:EXPR")]
+        formulas: Vec<String>,
+        /// Row height in pixels
+        #[arg(long)]
+        row_height: Option<u32>,
+        /// Header row height in pixels
+        #[arg(long)]
+        header_height: Option<u32>,
+        /// Select and order columns: COL1,COL2,... (comma-separated)
+        #[arg(long, value_delimiter = ',')]
+        columns: Option<Vec<String>>,
+        /// Hide a column (repeatable)
+        #[arg(long = "hide")]
+        hidden_cols: Vec<String>,
+        /// Rename a column header: OLD:NEW (repeatable)
+        #[arg(long = "rename", value_name = "OLD:NEW")]
+        renames: Vec<String>,
+        /// Column font size override: NAME:SIZE (repeatable)
+        #[arg(long = "col-font-size", value_name = "NAME:SIZE")]
+        col_font_sizes: Vec<String>,
+        /// Print HTML to stdout instead of writing to clipboard
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Edit cells in the clipboard's Excel HTML by A1 reference
+    #[command(name = "excel-edit")]
+    ExcelEdit {
+        /// Set cell value: CELL:VALUE (e.g. A2:Hello)
+        #[arg(long = "set", value_name = "CELL:VALUE")]
+        set_values: Vec<String>,
+        /// Set cell background: CELL:HEX (e.g. C3:#A0D771)
+        #[arg(long = "set-bg", value_name = "CELL:HEX")]
+        set_bgs: Vec<String>,
+        /// Set cell text color: CELL:HEX
+        #[arg(long = "set-fg", value_name = "CELL:HEX")]
+        set_fgs: Vec<String>,
+        /// Set cell number format: CELL:FORMAT
+        #[arg(long = "set-format", value_name = "CELL:FMT")]
+        set_formats: Vec<String>,
+        /// Set cell formula: CELL:FORMULA (e.g. E6:=SUM(E2:E5))
+        #[arg(long = "set-formula", value_name = "CELL:EXPR")]
+        set_formulas: Vec<String>,
+        /// Set cell alignment: CELL:ALIGN
+        #[arg(long = "set-align", value_name = "CELL:ALIGN")]
+        set_aligns: Vec<String>,
+        /// Make cell bold: CELL (e.g. A2)
+        #[arg(long = "set-bold", value_name = "CELL")]
+        set_bolds: Vec<String>,
+        /// Make cell italic: CELL
+        #[arg(long = "set-italic", value_name = "CELL")]
+        set_italics: Vec<String>,
+        /// Enable word wrap on cell: CELL
+        #[arg(long = "set-wrap", value_name = "CELL")]
+        set_wraps: Vec<String>,
+        /// Print modified HTML to stdout instead of writing to clipboard
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Convert between formats (stdin/stdout)
     Convert {
         #[arg(long)]
@@ -320,6 +440,26 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
         } => cmd_show(name, html, schema, meta, open),
         Commands::Edit { name, auto_schema } => cmd_edit(name, auto_schema),
         Commands::Delete { name, force } => cmd_delete(name, force),
+        Commands::Excel {
+            file, style, header_bg, header_fg, band_bg, font, font_size,
+            col_specs, align_specs, bold_cols, italic_cols, wrap_cols,
+            fg_colors, bg_colors, color_rules, links,
+            title, total_row, total_formula, formulas, row_height, header_height,
+            columns, hidden_cols, renames, col_font_sizes, dry_run,
+        } => cmd_excel(
+            file, style, header_bg, header_fg, band_bg, font, font_size,
+            col_specs, align_specs, bold_cols, italic_cols, wrap_cols,
+            fg_colors, bg_colors, color_rules, links,
+            title, total_row, total_formula, formulas, row_height, header_height,
+            columns, hidden_cols, renames, col_font_sizes, dry_run,
+        ),
+        Commands::ExcelEdit {
+            set_values, set_bgs, set_fgs, set_formats, set_formulas,
+            set_aligns, set_bolds, set_italics, set_wraps, dry_run,
+        } => cmd_excel_edit(
+            set_values, set_bgs, set_fgs, set_formats, set_formulas,
+            set_aligns, set_bolds, set_italics, set_wraps, dry_run,
+        ),
         Commands::Convert {
             from,
             to,
@@ -879,6 +1019,220 @@ fn cmd_delete(name: String, force: bool) -> Result<(), Box<dyn std::error::Error
 
     s.delete(&name)?;
     println!("Deleted template '{}'.", name);
+    Ok(())
+}
+
+fn cmd_excel_edit(
+    set_values: Vec<String>,
+    set_bgs: Vec<String>,
+    set_fgs: Vec<String>,
+    set_formats: Vec<String>,
+    set_formulas: Vec<String>,
+    set_aligns: Vec<String>,
+    set_bolds: Vec<String>,
+    set_italics: Vec<String>,
+    set_wraps: Vec<String>,
+    dry_run: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Read HTML from clipboard
+    let html_bytes = pb::read_type(PbType::Html)?;
+    let html = String::from_utf8(html_bytes)?;
+
+    // Parse all edit operations
+    let mut edits: Vec<excel_edit::EditOp> = Vec::new();
+
+    for spec in &set_values {
+        edits.push(excel_edit::parse_set_value(spec)?);
+    }
+    for spec in &set_bgs {
+        edits.push(excel_edit::parse_set_bg(spec)?);
+    }
+    for spec in &set_fgs {
+        edits.push(excel_edit::parse_set_fg(spec)?);
+    }
+    for spec in &set_formats {
+        edits.push(excel_edit::parse_set_format(spec)?);
+    }
+    for spec in &set_formulas {
+        edits.push(excel_edit::parse_set_formula(spec)?);
+    }
+    for spec in &set_aligns {
+        edits.push(excel_edit::parse_set_align(spec)?);
+    }
+    for spec in &set_bolds {
+        edits.push(excel_edit::parse_set_bold(spec)?);
+    }
+    for spec in &set_italics {
+        edits.push(excel_edit::parse_set_italic(spec)?);
+    }
+    for spec in &set_wraps {
+        edits.push(excel_edit::parse_set_wrap(spec)?);
+    }
+
+    if edits.is_empty() {
+        return Err("no edits specified".into());
+    }
+
+    // Apply edits
+    let modified = excel_edit::apply_edits(&html, &edits);
+
+    if dry_run {
+        print!("{}", modified);
+        return Ok(());
+    }
+
+    // Write back to clipboard
+    let plain = render::html_to_plain_text(&modified);
+    pb::write_html(&modified, Some(&plain))?;
+
+    eprintln!("Applied {} edit(s) to clipboard", edits.len());
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cmd_excel(
+    file: PathBuf,
+    style: String,
+    header_bg: String,
+    header_fg: String,
+    band_bg: String,
+    font: String,
+    font_size: String,
+    col_specs: Vec<String>,
+    align_specs: Vec<String>,
+    bold_cols: Vec<String>,
+    italic_cols: Vec<String>,
+    wrap_cols: Vec<String>,
+    fg_colors: Vec<String>,
+    bg_colors: Vec<String>,
+    color_rules: Vec<String>,
+    links: Vec<String>,
+    title: Option<String>,
+    total_row: bool,
+    total_formula: bool,
+    formulas: Vec<String>,
+    row_height: Option<u32>,
+    header_height: Option<u32>,
+    columns: Option<Vec<String>>,
+    hidden_cols: Vec<String>,
+    renames: Vec<String>,
+    col_font_sizes: Vec<String>,
+    dry_run: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Parse CSV
+    let (headers, rows) = if file.to_str() == Some("-") {
+        use std::io::Read;
+        let mut buf = String::new();
+        std::io::stdin().read_to_string(&mut buf)?;
+        excel::read_csv_from_str(&buf)?
+    } else {
+        excel::read_csv(&file)?
+    };
+
+    // Build config
+    let table_style = match style.as_str() {
+        "plain" => excel::TableStyle::Plain,
+        _ => excel::TableStyle::Table,
+    };
+
+    let mut col_formats = std::collections::HashMap::new();
+    for spec in &col_specs {
+        let (name, fmt) = excel::parse_col_spec(spec);
+        col_formats.insert(name, fmt);
+    }
+
+    let mut align_overrides = std::collections::HashMap::new();
+    for spec in &align_specs {
+        let (name, align) = excel::parse_color_spec(spec);
+        align_overrides.insert(name, align);
+    }
+
+    let mut fg_map = std::collections::HashMap::new();
+    for spec in &fg_colors {
+        let (name, color) = excel::parse_color_spec(spec);
+        fg_map.insert(name, color);
+    }
+
+    let mut bg_map = std::collections::HashMap::new();
+    for spec in &bg_colors {
+        let (name, color) = excel::parse_color_spec(spec);
+        bg_map.insert(name, color);
+    }
+
+    let mut parsed_rules = Vec::new();
+    for spec in &color_rules {
+        parsed_rules.push(excel::parse_color_rule(spec)?);
+    }
+
+    let mut link_map = std::collections::HashMap::new();
+    for spec in &links {
+        let (name, pattern) = excel::parse_color_spec(spec);
+        link_map.insert(name, pattern);
+    }
+
+    let mut rename_map = std::collections::HashMap::new();
+    for spec in &renames {
+        let (old, new) = excel::parse_rename(spec);
+        rename_map.insert(old, new);
+    }
+
+    let mut font_size_map = std::collections::HashMap::new();
+    for spec in &col_font_sizes {
+        let (name, size) = excel::parse_col_font_size(spec);
+        font_size_map.insert(name, size);
+    }
+
+    let mut cell_formulas = std::collections::HashMap::new();
+    for spec in &formulas {
+        let (col, row, expr) = excel::parse_formula_spec(spec)?;
+        cell_formulas.insert((col, row), expr);
+    }
+
+    let config = excel::ExcelConfig {
+        style: table_style,
+        header_bg,
+        header_fg,
+        band_bg,
+        font,
+        font_size,
+        col_formats,
+        bold_cols,
+        italic_cols,
+        wrap_cols,
+        fg_colors: fg_map,
+        bg_colors: bg_map,
+        align_overrides,
+        links: link_map,
+        color_rules: parsed_rules,
+        title,
+        total_row,
+        row_height,
+        header_height,
+        columns: columns.clone(),
+        hidden_cols,
+        renames: rename_map,
+        col_font_sizes: font_size_map,
+        total_formula,
+        cell_formulas,
+    };
+
+    let html = excel::generate_html(&headers, &rows, &config);
+
+    if dry_run {
+        print!("{}", html);
+        return Ok(());
+    }
+
+    let plain = render::html_to_plain_text(&html);
+    pb::write_html(&html, Some(&plain))?;
+
+    let visible_cols = config.columns.as_ref().map(|c| c.len()).unwrap_or(headers.len());
+    eprintln!(
+        "Wrote {} rows × {} cols to clipboard ({})",
+        rows.len(),
+        visible_cols,
+        style
+    );
     Ok(())
 }
 

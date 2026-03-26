@@ -3,30 +3,44 @@
 
   Generates HTML matching Excel 15/16's own clipboard format so that
   pasting into Excel preserves backgrounds, borders, colors, fonts,
-  and number formatting. Reverse-engineered from actual Excel clipboard output.
+  number formatting, hyperlinks, and word wrapping.
 
   Cell style.number_format values:
-    "currency"  →  $#,##0 with red negatives
-    "percent"   →  Percent (NOTE: Excel treats cell value as fractional —
-                   pass 0.156 not 15.6 if you want 15.6% displayed)
-    (omit)      →  General (default)
+    "currency"      →  $#,##0 with red negatives
+    "accounting"    →  Accounting format (parentheses negatives, dash for zero)
+    "percent"       →  Percent (Excel treats value as fractional)
+    "percent_int"   →  0% (integer percentage)
+    "percent_1dp"   →  0.0% (one decimal percentage)
+    "integer"       →  #,##0 (comma-grouped integer)
+    "standard"      →  Standard (like General with more decimals)
+    "text"          →  @ (force text, prevent number auto-detection)
+    "datetime_iso"  →  yyyy-mm-dd hh:mm (ISO datetime)
+    (omit)          →  General (default)
 
-  Expected variables:
-    headers       list of cell objects ({value, style})
-    rows          list of rows, each a list of cell objects
-    style         table-level style object:
-                    .header_bg       header background hex (default: '#4472C4')
-                    .header_fg       header text color hex (default: '#FFFFFF')
-                    .total_bg        total row background (default: '#F2F2F2')
-                    .default_font    font family (default: 'Calibri')
-                    .default_font_size  font size in pt (default: '11')
+  Cell style fields:
+    .bold          bool     — bold text (font-weight:700)
+    .italic        bool     — italic text
+    .fg_color      string   — text color hex, e.g. "#2E7D32"
+    .bg_color      string   — background color hex (adds mso-pattern:black none)
+    .alignment     string   — "left", "center", "right"
+    .number_format string   — see above
+    .url           string   — hyperlink URL (renders <a href> with styled span)
+    .wrap          bool     — enable word wrapping (white-space:normal)
+
+  Table style object:
+    .header_bg       header background hex (default: '#4472C4')
+    .header_fg       header text color hex (default: '#FFFFFF')
+    .total_bg        total row background (default: '#F2F2F2')
+    .default_font    font family (default: 'Calibri')
+    .default_font_size  font size in pt (default: '11')
 
   Notes:
     - Does NOT extend _base.html.j2 — standalone HTML with Office namespaces
-    - Does NOT support colspan/merged cells — use clipli write --type html for those
+    - Does NOT support colspan/merged cells — use clipli write --type html
     - Empty cells render as &nbsp; per Excel convention
-    - Font charset is auto-detected: Aptos family → charset 1, others → charset 0
-    - Data cells use text-align:general (Excel default: numbers right, text left)
+    - Font charset auto-detected: Aptos family → 1, others → 0
+    - bg_color works on ANY cell (not just total row)
+    - Last row with bg_color gets thick bottom border (total row treatment)
     - See templates/table_excel.html.md for the full reference document
 #}
 {%- set s = style | default(value={}) -%}
@@ -35,23 +49,36 @@
 {%- set total_bg = s.total_bg | default('#F2F2F2') -%}
 {%- set fnt = s.default_font | default(default_font | default('Calibri')) -%}
 {%- set fsz = s.default_font_size | default(default_font_size | default('11')) -%}
-{#- Auto-detect font charset: Aptos family uses 1, everything else uses 0 -#}
 {%- if "Aptos" in fnt -%}
   {%- set charset = "1" -%}
 {%- else -%}
   {%- set charset = "0" -%}
 {%- endif -%}
-{#- Macro: build the inline style string for a data cell -#}
+{#- Macro: inline style for a data cell -#}
 {%- macro cell_style(cell) -%}
 border-top:none;
 {%- if cell.style.bold %}font-weight:700;{% endif %}
 {%- if cell.style.fg_color %}color:{{cell.style.fg_color}};{% endif %}
+{%- if cell.style.bg_color %}background:{{cell.style.bg_color}};mso-pattern:black none;{% endif %}
 {%- if cell.style.alignment %}text-align:{{cell.style.alignment}};{% endif %}
-{%- if cell.style.number_format == "currency" %}mso-number-format:"\0022$\0022\#\,\#\#0_\)\;\[Red\]\\\(\0022$\0022\#\,\#\#0\\\)";{% elif cell.style.number_format == "percent" %}mso-number-format:Percent;{% endif %}
+{%- if cell.style.wrap %}white-space:normal;{% endif %}
+{%- if cell.style.number_format == "currency" %}mso-number-format:"\0022$\0022\#\,\#\#0_\)\;\[Red\]\\\(\0022$\0022\#\,\#\#0\\\)";
+{%- elif cell.style.number_format == "accounting" %}mso-number-format:"_\(* \#\,\#\#0_\)\;_\(* \\\(\#\,\#\#0\\\)\;_\(* \0022-\0022??_\)\;_\(\@_\)";
+{%- elif cell.style.number_format == "percent" %}mso-number-format:Percent;
+{%- elif cell.style.number_format == "percent_int" %}mso-number-format:0%;
+{%- elif cell.style.number_format == "percent_1dp" %}mso-number-format:"0\.0%";
+{%- elif cell.style.number_format == "integer" %}mso-number-format:"\#\,\#\#0";
+{%- elif cell.style.number_format == "standard" %}mso-number-format:Standard;
+{%- elif cell.style.number_format == "text" %}mso-number-format:"\@";
+{%- elif cell.style.number_format == "datetime_iso" %}mso-number-format:"yyyy\\-mm\\-dd\\ hh\:mm";
+{%- endif %}
 {%- endmacro -%}
-{#- Macro: render cell value, using &nbsp; for empty cells -#}
+{#- Macro: render cell value with optional hyperlink, using &nbsp; for empty -#}
 {%- macro cell_value(cell) -%}
-{%- if cell.value %}{{cell.value}}{% else %}&nbsp;{% endif %}
+{%- if cell.style.url and cell.value %}<a href="{{cell.style.url}}"><span style='color:{{cell.style.fg_color | default("black")}};font-size:{{fsz}}.0pt;text-decoration:none'>{{cell.value}}</span></a>
+{%- elif cell.value %}{{cell.value}}
+{%- else %}&nbsp;
+{%- endif %}
 {%- endmacro -%}
 <html xmlns:v="urn:schemas-microsoft-com:vml"
 xmlns:o="urn:schemas-microsoft-com:office:office"
@@ -145,8 +172,7 @@ td
 	border-bottom:.5pt solid windowtext;
 	border-left:none;}
 .tl
-	{font-weight:700;
-	border-top:none;
+	{border-top:none;
 	border-right:none;
 	border-bottom:1.0pt solid windowtext;
 	border-left:1.0pt solid windowtext;
@@ -176,11 +202,11 @@ td
  <tr height=21 style='height:16.0pt'>
 {%- for cell in headers %}
 {%- if loop.first %}
-  <td height=21 class=hdr_l{% if cell.style.alignment %} align={{cell.style.alignment}} style='text-align:{{cell.style.alignment}}'{% endif %}>{{cell.value}}</td>
+  <td height=21 class=hdr_l{% if cell.style.alignment %} align={{cell.style.alignment}} style='text-align:{{cell.style.alignment}}'{% endif %}{% if cell.style.wrap %} style='white-space:normal'{% endif %}>{{cell.value}}</td>
 {%- elif loop.last %}
-  <td class=hdr_r{% if cell.style.alignment %} align={{cell.style.alignment}} style='text-align:{{cell.style.alignment}}'{% endif %}>{{cell.value}}</td>
+  <td class=hdr_r{% if cell.style.alignment %} align={{cell.style.alignment}} style='text-align:{{cell.style.alignment}}'{% endif %}{% if cell.style.wrap %} style='white-space:normal'{% endif %}>{{cell.value}}</td>
 {%- else %}
-  <td class=hdr_m{% if cell.style.alignment %} align={{cell.style.alignment}} style='text-align:{{cell.style.alignment}}'{% endif %}>{{cell.value}}</td>
+  <td class=hdr_m{% if cell.style.alignment %} align={{cell.style.alignment}} style='text-align:{{cell.style.alignment}}'{% endif %}{% if cell.style.wrap %} style='white-space:normal'{% endif %}>{{cell.value}}</td>
 {%- endif %}
 {%- endfor %}
  </tr>

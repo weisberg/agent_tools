@@ -173,9 +173,18 @@ pub struct CellStyle {
     pub colspan: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rowspan: Option<u32>,
-    /// Excel number format string, e.g. "currency", "percent", "general".
+    /// Excel number format string, e.g. "currency", "percent", "integer", "text".
     #[serde(skip_serializing_if = "Option::is_none")]
     pub number_format: Option<String>,
+    /// URL for hyperlinked cells. Renders as <a href> with styled span.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Enable word wrapping (white-space:normal). Default: nowrap.
+    #[serde(default)]
+    pub wrap: bool,
+    /// Excel formula (e.g. "=SUM(B2:B5)"). Emitted as x:fmla attribute.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub formula: Option<String>,
 }
 
 /// Horizontal text alignment inside a cell.

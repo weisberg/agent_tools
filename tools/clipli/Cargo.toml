@@ -31,6 +31,7 @@ minijinja = { version = "2", features = ["loader", "builtins"] }
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
+csv = "1"
 thiserror = "1"
 dirs = "5"
 toml = "0.8"

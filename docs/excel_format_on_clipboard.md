@@ -921,7 +921,7 @@ Add-Type -AssemblyName System.Windows.Forms
 [System.Windows.Forms.Clipboard]::GetData("HTML Format") | Out-File clipboard.html
 ```
 
-Key observations from real Excel 15 output:
+Key observations from real Excel 15 output (plain ranges):
 - Every unique formatting combination gets its own numbered class (`.xl65`, `.xl66`, etc.)
 - The base `td` rule defines ALL default properties
 - `mso-pattern:black none` for cells WITH background; `mso-pattern:auto` for cells WITHOUT
@@ -929,3 +929,71 @@ Key observations from real Excel 15 output:
 - Row heights and column widths are explicit
 - `<col>` elements define column widths before the first `<tr>`
 - `<!--[if gte mso 9]>` blocks contain optional workbook metadata
+
+---
+
+## 20. Excel Tables (Insert > Table) vs Plain Ranges
+
+When copying an Excel Table (the structured table object with filter dropdowns and banded rows), the clipboard HTML differs significantly from plain formatted ranges. Analyzed from a 1331-row, 7-column table captured 2026-03-26.
+
+### 20.1 Full Inline Style Redundancy
+
+Every `<td>` in an Excel Table has the COMPLETE computed style as an inline `style=` attribute, in addition to the class. This makes the output massively larger (3.3MB for 1331 rows) but ensures formatting survives even if the `<style>` block is stripped:
+
+```html
+<td class=xl70 style='height:16.0pt;font-size:12.0pt;color:black;
+  font-weight:400;text-decoration:none;text-underline-style:none;text-line-through:
+  none;font-family:Calibri, sans-serif;border-top:.5pt solid #8EA9DB;
+  border-right:none;border-bottom:.5pt solid #8EA9DB;border-left:.5pt solid #8EA9DB;
+  background:#D9E1F2;mso-pattern:#D9E1F2 none'>B09KG6LZ7D</td>
+```
+
+### 20.2 Theme-Based Border Colors
+
+Tables use theme-derived border colors, not `windowtext`:
+- Default table style ("Table Style Medium 2"): `#8EA9DB` (blue-gray)
+- All borders are `.5pt solid #8EA9DB` — there is no thick/thin outer/inner distinction like plain ranges
+
+### 20.3 `mso-pattern` Uses Same Color as Background
+
+Unlike plain ranges which use `mso-pattern:black none`, Excel Tables use the same hex color:
+- Data rows: `background:#D9E1F2; mso-pattern:#D9E1F2 none`
+- Header row: `background:#4472C4; mso-pattern:#4472C4 none`
+
+### 20.4 Banded Rows
+
+All data rows in the captured table have `background:#D9E1F2` (light blue). The banding is a table-level feature — the clipboard HTML bakes the computed color into every cell. Header row uses `background:#4472C4` (darker blue) with white bold text.
+
+### 20.5 Additional Inline Properties
+
+Every cell in an Excel Table includes these properties that are absent in plain range output:
+- `text-underline-style:none`
+- `text-line-through:none`
+
+### 20.6 `mso-spacerun` for Accounting Format Padding
+
+Number cells with accounting format use `<span style='mso-spacerun:yes'>` followed by literal spaces for visual padding:
+```html
+<span style='mso-spacerun:yes'>            </span>42,396
+```
+
+### 20.7 Additional Number Formats Observed
+
+| Format | CSS | Purpose |
+|--------|-----|---------|
+| Accounting | `"_\(* \#\,\#\#0_\)\;_\(* \\\(\#\,\#\#0\\\)\;_\(* \0022-\0022??_\)\;_\(\@_\)"` | Parentheses for negatives, dash for zeros |
+| ISO datetime | `"yyyy\\-mm\\-dd\\ hh\:mm"` | `2023-10-09 08:28` |
+| Standard | `Standard` | Like General with more decimal places |
+
+### 20.8 Summary: Plain Range vs Excel Table
+
+| Aspect | Plain Range | Excel Table |
+|--------|------------|-------------|
+| Inline styles | Minimal (overrides only) | Full computed style on every cell |
+| Border color | `windowtext` (black) | `#8EA9DB` (theme blue-gray) |
+| Border weights | Thick outer (1.0pt), thin inner (.5pt) | Uniform .5pt everywhere |
+| `mso-pattern` | `black none` | Same hex as background |
+| Background | Only on explicitly-filled cells | On ALL data rows (banded) |
+| Extra properties | None | `text-underline-style`, `text-line-through` |
+| File size | Small (class-driven) | Large (inline redundancy) |
+| Typical size | ~8KB for 75 rows | ~3.3MB for 1331 rows |
