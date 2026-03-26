@@ -1,0 +1,10 @@
+[package]
+name = "bashli-vars"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bashli-core = { workspace = true }
+serde_json = { workspace = true }
+regex = { workspace = true }

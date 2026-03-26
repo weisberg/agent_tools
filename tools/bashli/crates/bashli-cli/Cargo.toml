@@ -1,0 +1,16 @@
+[package]
+name = "bashli-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "bashli"
+path = "src/main.rs"
+
+[dependencies]
+bashli-core = { workspace = true }
+bashli-engine = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }

@@ -1,0 +1,18 @@
+[package]
+name = "bashli-steps"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bashli-core = { workspace = true }
+bashli-vars = { workspace = true }
+bashli-runner = { workspace = true }
+bashli-transforms = { workspace = true }
+bashli-extract = { workspace = true }
+bashli-budget = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+regex = { workspace = true }

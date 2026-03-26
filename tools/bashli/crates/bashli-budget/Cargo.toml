@@ -1,0 +1,8 @@
+[package]
+name = "bashli-budget"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+bashli-core = { workspace = true }

@@ -1,0 +1,46 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/bashli-core",
+    "crates/bashli-vars",
+    "crates/bashli-jq",
+    "crates/bashli-sed",
+    "crates/bashli-awk",
+    "crates/bashli-transforms",
+    "crates/bashli-extract",
+    "crates/bashli-runner",
+    "crates/bashli-budget",
+    "crates/bashli-steps",
+    "crates/bashli-engine",
+    "crates/bashli-cli",
+]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+
+[workspace.dependencies]
+# Internal crates
+bashli-core = { path = "crates/bashli-core" }
+bashli-vars = { path = "crates/bashli-vars" }
+bashli-jq = { path = "crates/bashli-jq" }
+bashli-sed = { path = "crates/bashli-sed" }
+bashli-awk = { path = "crates/bashli-awk" }
+bashli-transforms = { path = "crates/bashli-transforms" }
+bashli-extract = { path = "crates/bashli-extract" }
+bashli-runner = { path = "crates/bashli-runner" }
+bashli-budget = { path = "crates/bashli-budget" }
+bashli-steps = { path = "crates/bashli-steps" }
+bashli-engine = { path = "crates/bashli-engine" }
+
+# External dependencies
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+clap = { version = "4", features = ["derive"] }
+sha2 = "0.10"
+base64 = "0.22"
+thiserror = "2"

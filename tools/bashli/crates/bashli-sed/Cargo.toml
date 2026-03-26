@@ -1,0 +1,9 @@
+[package]
+name = "bashli-sed"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+regex = { workspace = true }
+thiserror = { workspace = true }

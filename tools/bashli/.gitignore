@@ -1,0 +1,4 @@
+/target
+.venv/
+.tmp_ql/
+*.pdf
