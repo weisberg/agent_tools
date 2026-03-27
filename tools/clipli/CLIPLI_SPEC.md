@@ -31,7 +31,7 @@ Copy from App → clipli capture → templatize → agent fills data → clipli 
 
 ### 2.1 Crate Layout
 
-Single crate, binary target, six modules:
+Single crate, binary target, ten modules:
 
 ```
 clipli/
@@ -42,8 +42,12 @@ clipli/
 │   ├── clean.rs             # HTML sanitizer pipeline
 │   ├── render.rs            # Template engine (minijinja)
 │   ├── templatize.rs        # Literal → variable extraction
-│   ├── store.rs             # Template storage manager
-│   └── model.rs             # Shared data types
+│   ├── store.rs             # Template storage manager (versioning, atomic writes)
+│   ├── model.rs             # Shared data types
+│   ├── rtf.rs               # RTF → HTML conversion via macOS textutil
+│   ├── lint.rs              # Template linter (variable/schema consistency)
+│   ├── excel.rs             # CSV → Excel-native HTML pipeline
+│   └── excel_edit.rs        # In-place cell editing of clipboard Excel HTML
 ├── templates/
 │   ├── _base.html.j2        # Base template with common boilerplate
 │   ├── table_default.html.j2
@@ -65,8 +69,12 @@ main.rs
   ├── clean      (sanitizes captured HTML)
   ├── render     (fills templates via minijinja)
   ├── templatize (extracts variables from HTML)
-  ├── store      (manages template filesystem)
-  └── model      (shared types, used by all)
+  ├── store      (manages template filesystem + versioning)
+  ├── model      (shared types, used by all)
+  ├── rtf        (RTF → HTML via textutil)
+  ├── lint       (template variable/schema validation)
+  ├── excel      (CSV → Excel-native HTML)
+  └── excel_edit (cell-level editing of clipboard HTML)
 ```
 
 No circular dependencies. `model` is a leaf. `pb` has no internal dependencies.
@@ -280,7 +288,7 @@ clipli capture --name <NAME> [OPTIONS]
 |------|------|---------|-------------|
 | `--name` / `-n` | string | **required** | Template name (slug-friendly) |
 | `--templatize` / `-t` | bool | false | Extract variables from literal values |
-| `--strategy` | enum | `heuristic` | Templatization strategy: `heuristic`, `agent`, `manual` |
+| `--strategy` | enum | from config | Templatization strategy: `heuristic`, `agent`, `manual`. Defaults to `[templatize] default_strategy` in config.toml (falls back to `heuristic`). |
 | `--description` / `-d` | string | none | Human-readable description |
 | `--tags` | string[] | [] | Comma-separated tags |
 | `--force` / `-f` | bool | false | Overwrite existing template |
@@ -407,6 +415,7 @@ clipli show <NAME> [OPTIONS]
 | `--schema` | bool | false | Print variable schema as JSON |
 | `--meta` | bool | false | Print metadata as JSON |
 | `--open` | bool | false | Render with defaults and open in browser |
+| `--version` | string | none | Show a specific version instead of the live template (ID from `clipli versions`) |
 
 ---
 
@@ -433,8 +442,15 @@ Opens the `.html.j2` (or `.html`) file. On save, clipli validates Jinja2 syntax 
 Remove a template from the store.
 
 ```
-clipli delete <NAME> [--force]
+clipli delete <NAME> [--force] [--keep-versions]
 ```
+
+**Flags:**
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `<NAME>` | positional | **required** | Template name |
+| `--force` / `-f` | bool | false | Skip confirmation prompt |
+| `--keep-versions` | bool | false | Delete the live template but preserve version history in `versions/` |
 
 ---
 
@@ -487,7 +503,7 @@ clipli convert --from <FORMAT> --to <FORMAT> [OPTIONS]
 |------|----|--------|
 | `html` | `j2` | Heuristic or agent templatization |
 | `j2` | `html` | Render with provided data |
-| `rtf` | `html` | RTF → HTML conversion |
+| `rtf` | `html` | RTF → HTML conversion via macOS `textutil` (see `rtf.rs`) |
 | `html` | `plain` | Strip tags, table-aware tab-delimited |
 
 **Flags:**
@@ -499,6 +515,176 @@ clipli convert --from <FORMAT> --to <FORMAT> [OPTIONS]
 | `--output` / `-o` | path | stdout | Output file |
 | `--data` / `-D` | string | none | JSON data (for j2 → html) |
 | `--strategy` | enum | `heuristic` | For html → j2: `heuristic` or `agent` |
+
+---
+
+#### `clipli versions`
+
+List version history for a template.
+
+```
+clipli versions <NAME> [--json]
+```
+
+**Flags:**
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `<NAME>` | positional | **required** | Template name |
+| `--json` | bool | false | JSON output |
+
+Each version entry includes the version ID (timestamp), change type (e.g. `capture`, `edit`, `restore`), and creation time. Versions are listed newest-first.
+
+---
+
+#### `clipli restore`
+
+Restore a template from a previous version.
+
+```
+clipli restore <NAME> --version <ID>
+```
+
+**Flags:**
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `<NAME>` | positional | **required** | Template name |
+| `--version` | string | **required** | Version ID to restore (from `clipli versions`) |
+
+Restoring creates a new version snapshot of the current state before overwriting, so the operation is reversible.
+
+---
+
+#### `clipli lint`
+
+Lint a template for variable mismatches and syntax issues.
+
+```
+clipli lint <NAME> [--strict] [--json]
+```
+
+**Flags:**
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `<NAME>` | positional | **required** | Template name |
+| `--strict` | bool | false | Treat warnings as errors (non-zero exit code) |
+| `--json` | bool | false | JSON output |
+
+Checks performed include: valid Jinja2 syntax, variables used in the template match the schema, undefined variables with no defaults, unused schema variables, and common HTML issues.
+
+---
+
+#### `clipli search`
+
+Search templates by name, description, tags, or content.
+
+```
+clipli search <QUERY> [--tag TAG] [--json]
+```
+
+**Flags:**
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `<QUERY>` | positional | **required** | Search query (matched against name, description, tags, and template content) |
+| `--tag` | string | none | Filter results to templates with this tag |
+| `--json` | bool | false | JSON output |
+
+---
+
+#### `clipli export`
+
+Export a template as a `.clipli` bundle (zip archive of the template directory).
+
+```
+clipli export <NAME> [-o FILE]
+```
+
+**Flags:**
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `<NAME>` | positional | **required** | Template name |
+| `-o` / `--output` | path | `./<NAME>.clipli` | Output file path |
+
+---
+
+#### `clipli import`
+
+Import a template from a `.clipli` bundle.
+
+```
+clipli import <FILE> [--force] [--name NAME]
+```
+
+**Flags:**
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `<FILE>` | positional | **required** | Path to `.clipli` bundle file |
+| `--force` / `-f` | bool | false | Overwrite existing template with same name |
+| `--name` | string | from bundle | Override the template name from the bundle |
+
+---
+
+#### `clipli excel`
+
+Generate Excel-compatible HTML from a CSV file and write it to the clipboard. Uses the `table_excel.html.j2` template internally, producing Office-native HTML with `mso-*` properties that Excel recognizes on paste.
+
+```
+clipli excel <FILE> [OPTIONS]
+```
+
+**Flags:**
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `<FILE>` | positional | **required** | CSV file path (or `-` for stdin) |
+| `--style` | enum | `table` | Table style: `table` (banded rows) or `plain` (thick borders) |
+| `--header-bg` | string | `#4472C4` | Header background color |
+| `--header-fg` | string | `#FFFFFF` | Header text color |
+| `--band-bg` | string | `#D9E1F2` | Banded row background color (table style only) |
+| `--font` | string | from config | Font family |
+| `--font-size` | string | from config | Font size in pt |
+| `--col NAME:FMT[:ALIGN]` | repeatable | none | Column format (e.g. `Revenue:currency:right`) |
+| `--align NAME:ALIGN` | repeatable | none | Column alignment without format |
+| `--bold NAME` | repeatable | none | Make a column bold |
+| `--italic NAME` | repeatable | none | Make a column italic |
+| `--wrap NAME` | repeatable | none | Enable word wrap for a column |
+| `--fg-color NAME:HEX` | repeatable | none | Column text color |
+| `--bg-color NAME:HEX` | repeatable | none | Column background color |
+| `--color-if SPEC` | repeatable | none | Conditional color: `COLUMN:OP:VALUE:BG_HEX:FG_HEX`. Ops: `>=`, `<=`, `>`, `<`, `==`, `!=`, `contains`, `empty`, `not_empty` |
+| `--link NAME:URL` | repeatable | none | Hyperlink pattern with `{}` placeholder for cell value |
+| `--title TEXT` | string | none | Merged title row above the header |
+| `--total-row` | bool | false | Add a total row (auto-sums numeric columns) |
+| `--total-formula` | bool | false | Use SUM formulas in total row instead of pre-computed values |
+| `--formula COL:ROW:EXPR` | repeatable | none | Per-cell formula (row is 0-based data row index) |
+| `--row-height` | u32 | none | Row height in pixels |
+| `--header-height` | u32 | none | Header row height in pixels |
+| `--columns COL1,COL2,...` | string | all | Select and order columns |
+| `--hide NAME` | repeatable | none | Hide a column |
+| `--rename OLD:NEW` | repeatable | none | Rename a column header |
+| `--col-font-size NAME:SIZE` | repeatable | none | Column font size override |
+| `--dry-run` | bool | false | Print HTML to stdout instead of writing to clipboard |
+
+---
+
+#### `clipli excel-edit`
+
+Edit cells in the clipboard's Excel HTML by A1 reference. Reads the current clipboard HTML, applies edits, and writes the modified HTML back.
+
+```
+clipli excel-edit [OPTIONS]
+```
+
+**Flags:**
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--set CELL:VALUE` | repeatable | none | Set cell value (e.g. `A2:Hello`) |
+| `--set-bg CELL:HEX` | repeatable | none | Set cell background color |
+| `--set-fg CELL:HEX` | repeatable | none | Set cell text color |
+| `--set-format CELL:FMT` | repeatable | none | Set cell number format |
+| `--set-formula CELL:EXPR` | repeatable | none | Set cell formula (e.g. `E6:=SUM(E2:E5)`) |
+| `--set-align CELL:ALIGN` | repeatable | none | Set cell alignment |
+| `--set-bold CELL` | repeatable | none | Make cell bold |
+| `--set-italic CELL` | repeatable | none | Make cell italic |
+| `--set-wrap CELL` | repeatable | none | Enable word wrap on cell |
+| `--dry-run` | bool | false | Print modified HTML to stdout instead of writing to clipboard |
 
 ---
 
@@ -772,6 +958,8 @@ No extraction. Saves cleaned HTML as `.html`. User edits in `$EDITOR`.
 - Manage the filesystem layout under `~/.config/clipli/templates/`
 - CRUD operations on templates
 - Search and listing
+- Version history (snapshot on every mutation, up to 20 versions per template)
+- Atomic writes (build into a temp directory, then rename into place)
 
 **Filesystem layout:**
 
@@ -784,15 +972,29 @@ No extraction. Saves cleaned HTML as `.html`. User edits in `$EDITOR`.
     │   ├── meta.json               # TemplateMeta
     │   ├── schema.json             # Variable schema (if templatized)
     │   ├── original.html           # Cleaned HTML before templatization (reference)
-    │   └── raw.html                # Uncleaned original from pasteboard (archival)
+    │   ├── raw.html                # Uncleaned original from pasteboard (archival)
+    │   └── versions/               # Version history (auto-managed)
+    │       ├── 20260315T143022Z/   # Snapshot ID = UTC timestamp
+    │       │   ├── template.html.j2
+    │       │   ├── meta.json
+    │       │   ├── schema.json
+    │       │   └── _version_meta.json  # {id, change_type, created_at}
+    │       └── 20260310T091500Z/
+    │           └── ...
     ├── kpi_table/
     │   ├── template.html.j2
     │   ├── meta.json
     │   ├── schema.json
     │   ├── original.html
-    │   └── raw.html
+    │   ├── raw.html
+    │   └── versions/
+    │       └── ...
     └── ...
 ```
+
+**Atomic writes:** When saving a template, the store builds the new template directory under a temporary path (`.tmp.<name>.<pid>`), then atomically renames it into place. If the template already has a `versions/` subdirectory, that directory is preserved across the rename so version history survives updates.
+
+**Versioning:** Every mutation (capture, edit, restore) creates a snapshot in `versions/<timestamp>/` before overwriting the live files. The store prunes old versions to keep at most 20 per template.
 
 **API:**
 
@@ -1005,28 +1207,34 @@ See `templates/table_excel.html.md` for the full sidecar reference document with
 
 ## 7. Configuration (`config.toml`)
 
+All 6 configuration fields below are wired and loaded at startup. Missing fields use the documented defaults.
+
 ```toml
 # ~/.config/clipli/config.toml
 
 [defaults]
-font = "Calibri"
-font_size_pt = 11
-plain_text_strategy = "tab-delimited"   # auto | tab-delimited | none
+font = "Calibri"                         # default font for templates and excel output
+font_size_pt = 11                        # default font size in pt
+plain_text_strategy = "tab-delimited"    # auto | tab-delimited | none
 
 [clean]
-keep_classes = false
-target_app = "generic"    # excel | powerpoint | google_sheets | generic
+keep_classes = false                     # preserve CSS class attributes during cleaning
+target_app = "generic"                   # excel | powerpoint | google_sheets | generic
 
 [templatize]
-default_strategy = "heuristic"    # heuristic | agent | manual
+default_strategy = "heuristic"           # heuristic | agent | manual
+```
 
+The `capture --strategy` flag defaults to `[templatize] default_strategy` when not explicitly provided. The `excel` command reads `[defaults] font` and `[defaults] font_size_pt` as fallbacks when `--font` / `--font-size` are omitted.
+
+**Future (not yet wired):**
+
+```toml
 [agent]
 # For --strategy agent: how to invoke the external agent
 # clipli pipes JSON to this command's stdin and reads JSON from stdout.
 command = "claude-code"
 args = ["--prompt-file", "/dev/stdin"]
-# Alternatively, for direct API calls (future):
-# endpoint = "http://localhost:8080/templatize"
 
 [editor]
 command = "$EDITOR"    # for `clipli edit`
@@ -1183,10 +1391,9 @@ pb::write(&[(PbType::Html, rendered.html.as_bytes()), (PbType::PlainText, render
 |-----------|-------------|
 | **Cross-platform pasteboard** | Linux (xclip/wl-copy/xsel), Windows (clipboard API) |
 | **Image template capture** | Capture `public.png`/`public.tiff`, use as template backgrounds |
-| **RTF round-trip** | Some apps prefer RTF over HTML; add RTF rendering |
+| **RTF rendering** | Full RTF round-trip (RTF → HTML is done via `textutil`; HTML → RTF rendering is not yet supported) |
 | **Clipboard watch mode** | `clipli watch` — daemon that auto-captures every clipboard change to a log |
 | **MCP server** | Expose clipli as an MCP tool server for direct agent integration |
-| **Template sharing** | Import/export templates as `.clipli` bundles (zip of template dir) |
 | **clipli-core crate** | Extract library crate for programmatic use without CLI overhead |
 | **Embedded preview server** | `clipli serve` — local HTTP server to preview templates in browser with hot reload |
 

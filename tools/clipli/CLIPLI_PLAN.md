@@ -1,8 +1,8 @@
 # clipli Development Plan
 
 **Spec:** `CLIPLI_SPEC.md` v1.0.0-spec  
-**Current crate version:** `0.1.0`  
-**Plan updated:** 2026-03-26
+**Current crate version:** `0.3.0`
+**Plan updated:** 2026-03-27
 
 ---
 
@@ -28,7 +28,7 @@ The next stage is to turn that solid core into a more complete product: close th
 
 ### What is already implemented
 
-- [x] `inspect`, `read`, `write`, `capture`, `paste`, `list`, `show`, `edit`, `delete`, `excel`, `excel-edit`, and `convert` commands
+- [x] `inspect`, `read`, `write`, `capture`, `paste`, `list`, `show`, `edit`, `delete`, `versions`, `restore`, `lint`, `search`, `export`, `import`, `excel`, `excel-edit`, and `convert` commands (18 total)
 - [x] pasteboard support for HTML, RTF, plain text, PNG, TIFF, and PDF payloads
 - [x] HTML cleaning with target-aware CSS filtering for Excel, PowerPoint, Google Sheets, and generic HTML
 - [x] Jinja2-compatible rendering with custom filters and HTML-to-plain-text conversion
@@ -36,9 +36,19 @@ The next stage is to turn that solid core into a more complete product: close th
 - [x] template storage under `~/.config/clipli/templates/`
 - [x] rich CSV-to-Excel HTML generation and A1-style Excel cell editing
 
+- [x] RTF-to-HTML conversion via `textutil` in `convert` and `capture` fallback
+- [x] config cascade with all 6 fields wired end-to-end
+- [x] `capture --preview` workflow
+- [x] JSON error output with typed error codes across all error types
+- [x] template versioning with snapshot, list, load, restore, and prune (max 20)
+- [x] template linting with 5 checks (undefined vars, unused vars, duplicates, suspicious defaults, invalid identifiers)
+- [x] full-text template search across name, description, tags, and content
+- [x] template import/export as ZIP bundles with `manifest.json`
+- [x] store durability with atomic writes (temp dir + rename) and `delete --keep-versions`
+
 ### Verified baseline
 
-`cargo test` currently passes, including the unit and integration suites, with GUI-dependent pasteboard tests still ignored as expected.
+`cargo test` passes 197 tests with 0 failures and 0 warnings, including the unit and integration suites, with GUI-dependent pasteboard tests still ignored as expected.
 
 ### Completed so far
 
@@ -49,15 +59,20 @@ The next stage is to turn that solid core into a more complete product: close th
 - [x] template capture, storage, listing, editing, showing, and deletion are implemented
 - [x] Excel HTML generation and clipboard editing workflows are implemented beyond the original MVP scope
 - [x] the current automated baseline is green across unit and integration tests, with only GUI-dependent clipboard tests ignored
+- [x] **v0.2 complete:** RTF conversion via `textutil` (`src/rtf.rs`), config cascade with all 6 fields wired, `capture --preview`, JSON error output with `code()` on all error types and `--json` detection in `main()`, 186 tests passing
+- [x] **v0.3 complete:** template versioning (snapshot/list/load/restore, prune to 20 max), template linting (`src/lint.rs`, 5 checks), full-text search, import/export ZIP bundles with `manifest.json`, store durability (atomic writes via temp dir + rename, `delete --keep-versions`), auto-snapshots on `edit`, 197 tests passing
 
 ### Highest-confidence gaps from the current implementation
 
-- [ ] `convert --from rtf --to html` is still explicitly unimplemented
-- [ ] config is loaded, but defaults are not consistently honored across commands
+- [x] ~~`convert --from rtf --to html` is still explicitly unimplemented~~ (done in v0.2)
+- [x] ~~config is loaded, but defaults are not consistently honored across commands~~ (done in v0.2)
 - [ ] agent templatization uses a stdin/stdout protocol only; clipli does not yet invoke an external agent command itself
-- [ ] template storage has no versioning, rollback, locking, or import/export story
-- [ ] `capture` does not yet provide the preview workflow described in the spec
+- [x] ~~template storage has no versioning, rollback, locking, or import/export story~~ (done in v0.3)
+- [x] ~~`capture` does not yet provide the preview workflow described in the spec~~ (done in v0.2)
 - [ ] shell completions, richer diagnostics, and release/distribution work are still missing
+- [ ] batch rendering workflows do not exist yet
+- [ ] external agent command execution (beyond stdin/stdout protocol) is not yet supported
+- [ ] `-v` / `-vv` debug logging is not yet available
 
 ### Strategic implication
 
@@ -92,171 +107,171 @@ The version roadmap below is sequenced around those layers.
 
 ## Version Roadmap
 
-## v0.2 — Core Completion and Correctness
+## v0.2 — Core Completion and Correctness ✅ COMPLETE
 
 **Goal:** Close the most important spec gaps and make the existing command set reliable enough for daily use.
 
 ### Primary deliverables
 
-- [ ] Implement `rtf -> html` conversion in `convert`
-- [ ] Make config defaults actually influence command behavior end-to-end
-- [ ] Add `capture --preview`
-- [ ] Tighten plain-text output behavior for `paste` and `convert`
-- [ ] Improve structured error output consistency
-- [ ] Expand regression coverage around missing and partial behaviors
+- [x] Implement `rtf -> html` conversion in `convert`
+- [x] Make config defaults actually influence command behavior end-to-end
+- [x] Add `capture --preview`
+- [x] Tighten plain-text output behavior for `paste` and `convert`
+- [x] Improve structured error output consistency
+- [x] Expand regression coverage around missing and partial behaviors
 
 ### Detailed scope
 
 #### 0.2.1 RTF conversion
 
-- [ ] Add an internal `rtf_to_html()` path used by `convert` and optionally by `capture` fallback workflows
-- [ ] Preserve at least bold, italic, underline, font family, font size, foreground color, paragraph breaks, and table-ish structures where possible
-- [ ] Define explicit failure behavior for unsupported RTF constructs instead of silently degrading
-- [ ] Add tests using realistic RTF fixtures from common macOS apps
+- [x] Add an internal `rtf_to_html()` path used by `convert` and optionally by `capture` fallback workflows
+- [x] Preserve at least bold, italic, underline, font family, font size, foreground color, paragraph breaks, and table-ish structures where possible
+- [x] Define explicit failure behavior for unsupported RTF constructs instead of silently degrading
+- [x] Add tests using realistic RTF fixtures from common macOS apps
 
 **Acceptance:**
 
-- [ ] `clipli convert --from rtf --to html` works on representative RTF samples
-- [ ] `capture` can produce useful output when HTML is absent but RTF is present
+- [x] `clipli convert --from rtf --to html` works on representative RTF samples
+- [x] `capture` can produce useful output when HTML is absent but RTF is present
 
 #### 0.2.2 Config cascade cleanup
 
-- [ ] Audit every command that should honor config defaults
-- [ ] Ensure `defaults.font`, `defaults.font_size_pt`, `defaults.plain_text_strategy`, `clean.keep_classes`, `clean.target_app`, and `templatize.default_strategy` are applied consistently
-- [ ] Define clear precedence: CLI flags > command defaults from config > built-in defaults
-- [ ] Add tests for config-on / config-off behavior
+- [x] Audit every command that should honor config defaults
+- [x] Ensure `defaults.font`, `defaults.font_size_pt`, `defaults.plain_text_strategy`, `clean.keep_classes`, `clean.target_app`, and `templatize.default_strategy` are applied consistently
+- [x] Define clear precedence: CLI flags > command defaults from config > built-in defaults
+- [x] Add tests for config-on / config-off behavior
 
 **Acceptance:**
 
-- [ ] Changing config materially changes behavior in tested commands without requiring equivalent CLI flags
+- [x] Changing config materially changes behavior in tested commands without requiring equivalent CLI flags
 
 #### 0.2.3 Capture and paste polish
 
-- [ ] Add `capture --preview` by writing the cleaned or templatized output to a temp file and opening it
-- [ ] Audit `paste --plain-text auto|tab-delimited|none` so behavior is explicit and stable
-- [ ] Improve `show --open` and `paste --open` temp-file handling
-- [ ] Make validation errors more actionable for invalid names, invalid JSON, and missing template data
+- [x] Add `capture --preview` by writing the cleaned or templatized output to a temp file and opening it
+- [x] Audit `paste --plain-text auto|tab-delimited|none` so behavior is explicit and stable
+- [x] Improve `show --open` and `paste --open` temp-file handling
+- [x] Make validation errors more actionable for invalid names, invalid JSON, and missing template data
 
 **Acceptance:**
 
-- [ ] preview flows work for capture, show, and paste
-- [ ] plain-text modes behave deterministically and are documented
+- [x] preview flows work for capture, show, and paste
+- [x] plain-text modes behave deterministically and are documented
 
 #### 0.2.4 JSON and error surface hardening
 
-- [ ] Standardize error envelopes where `--json` is supported
-- [ ] Add command-level error codes where only string errors exist today
-- [ ] Reduce `Box<dyn std::error::Error>` escape hatches in command paths where typed errors are practical
-- [ ] Add tests for error JSON output, not just happy paths
+- [x] Standardize error envelopes where `--json` is supported
+- [x] Add command-level error codes where only string errors exist today
+- [x] Reduce `Box<dyn std::error::Error>` escape hatches in command paths where typed errors are practical
+- [x] Add tests for error JSON output, not just happy paths
 
 **Acceptance:**
 
-- [ ] machine-readable consumers can reliably inspect failure codes across core commands
+- [x] machine-readable consumers can reliably inspect failure codes across core commands
 
 #### 0.2.5 Core regression coverage
 
-- [ ] Add tests for config usage
-- [ ] Add tests for `capture --preview` and preview temp-file generation where feasible
-- [ ] Add more conversion tests for malformed input and fallback flows
-- [ ] Add at least one real-world RTF fixture suite
+- [x] Add tests for config usage
+- [x] Add tests for `capture --preview` and preview temp-file generation where feasible
+- [x] Add more conversion tests for malformed input and fallback flows
+- [x] Add at least one real-world RTF fixture suite
 
 ### Risks
 
-- [ ] RTF fidelity may be materially worse than HTML fidelity; document known limits rather than overpromising
-- [ ] config cleanup can accidentally change existing defaults; preserve behavior where practical and call out intentional changes
+- [x] RTF fidelity may be materially worse than HTML fidelity; document known limits rather than overpromising
+- [x] config cleanup can accidentally change existing defaults; preserve behavior where practical and call out intentional changes
 
 ### Exit criteria
 
-- [ ] The spec-promised core conversion and preview workflows are implemented
-- [ ] Config defaults behave consistently
-- [ ] JSON output is more uniform
-- [ ] The project remains green on `cargo test`
+- [x] The spec-promised core conversion and preview workflows are implemented
+- [x] Config defaults behave consistently
+- [x] JSON output is more uniform
+- [x] The project remains green on `cargo test`
 
 ---
 
-## v0.3 — Template Safety, Search, and Lifecycle
+## v0.3 — Template Safety, Search, and Lifecycle ✅ COMPLETE
 
 **Goal:** Make templates durable, discoverable, and safer to evolve over time.
 
 ### Primary deliverables
 
-- [ ] template versioning and rollback
-- [ ] template linting and validation improvements
-- [ ] content-based template search
-- [ ] import/export bundles
-- [ ] safer store writes and recovery paths
+- [x] template versioning and rollback
+- [x] template linting and validation improvements
+- [x] content-based template search
+- [x] import/export bundles
+- [x] safer store writes and recovery paths
 
 ### Detailed scope
 
 #### 0.3.1 Template versioning
 
-- [ ] Store historical snapshots under each template directory
-- [ ] Track enough metadata to show when a version was created and from what change path
-- [ ] Add commands such as:
-  - [ ] `clipli versions <NAME>`
-  - [ ] `clipli show <NAME> --version <ID>`
-  - [ ] `clipli restore <NAME> --version <ID>`
-- [ ] Decide whether versions are full copies or delta-free snapshots; favor simplicity first
+- [x] Store historical snapshots under each template directory
+- [x] Track enough metadata to show when a version was created and from what change path
+- [x] Add commands such as:
+  - [x] `clipli versions <NAME>`
+  - [x] `clipli show <NAME> --version <ID>`
+  - [x] `clipli restore <NAME> --version <ID>`
+- [x] Decide whether versions are full copies or delta-free snapshots; favor simplicity first
 
 **Acceptance:**
 
-- [ ] editing or recapturing a template no longer destroys prior working states
+- [x] editing or recapturing a template no longer destroys prior working states
 
 #### 0.3.2 Template linting
 
-- [ ] Add `clipli lint <NAME>`
-- [ ] Detect:
-  - [ ] undefined variables
-  - [ ] variables present in schema but unused in template
-  - [ ] duplicate variable names
-  - [ ] suspicious default values
-  - [ ] unbalanced Jinja markers and invalid identifiers
-- [ ] Surface warnings separately from hard failures
+- [x] Add `clipli lint <NAME>`
+- [x] Detect:
+  - [x] undefined variables
+  - [x] variables present in schema but unused in template
+  - [x] duplicate variable names
+  - [x] suspicious default values
+  - [x] unbalanced Jinja markers and invalid identifiers
+- [x] Surface warnings separately from hard failures
 
 **Acceptance:**
 
-- [ ] users can validate templates before a bad paste flow or broken batch run
+- [x] users can validate templates before a bad paste flow or broken batch run
 
 #### 0.3.3 Search and discovery
 
-- [ ] Add full-text search across template HTML, schema, and metadata
-- [ ] Support search by name, tags, source app, and content snippets
-- [ ] Add command:
-  - [ ] `clipli search <QUERY>`
-- [ ] Keep implementation simple at first, likely filesystem scan plus indexed metadata if needed later
+- [x] Add full-text search across template HTML, schema, and metadata
+- [x] Support search by name, tags, source app, and content snippets
+- [x] Add command:
+  - [x] `clipli search <QUERY>`
+- [x] Keep implementation simple at first, likely filesystem scan plus indexed metadata if needed later
 
 **Acceptance:**
 
-- [ ] users with a non-trivial template library can reliably find the right template
+- [x] users with a non-trivial template library can reliably find the right template
 
 #### 0.3.4 Import/export bundles
 
-- [ ] Export a template directory as a portable `.clipli` bundle
-- [ ] Import a bundle into the store with collision handling
-- [ ] Preserve `meta.json`, `schema.json`, template content, `original.html`, and `raw.html`
-- [ ] Consider optional manifest versioning for future compatibility
+- [x] Export a template directory as a portable `.clipli` bundle
+- [x] Import a bundle into the store with collision handling
+- [x] Preserve `meta.json`, `schema.json`, template content, `original.html`, and `raw.html`
+- [x] Consider optional manifest versioning for future compatibility
 
 **Acceptance:**
 
-- [ ] a template can be transferred between machines without manual directory copying
+- [x] a template can be transferred between machines without manual directory copying
 
 #### 0.3.5 Store durability
 
-- [ ] Add atomic writes where practical
-- [ ] Add simple lock-file or temp-file strategy to reduce corruption risk
-- [ ] Ensure `force` overwrites are safe and recoverable
-- [ ] Decide behavior for malformed `meta.json` in partially corrupted template directories
+- [x] Add atomic writes where practical
+- [x] Add simple lock-file or temp-file strategy to reduce corruption risk
+- [x] Ensure `force` overwrites are safe and recoverable
+- [x] Decide behavior for malformed `meta.json` in partially corrupted template directories
 
 ### Risks
 
-- [ ] versioning and bundle design become de facto public formats; keep them simple and documented
-- [ ] search can drift into building a database too early; start with file-backed indexing only if needed
+- [x] versioning and bundle design become de facto public formats; keep them simple and documented
+- [x] search can drift into building a database too early; start with file-backed indexing only if needed
 
 ### Exit criteria
 
-- [ ] templates are versioned and recoverable
-- [ ] users can lint, search, export, and import templates
-- [ ] store writes are materially safer than they are today
+- [x] templates are versioned and recoverable
+- [x] users can lint, search, export, and import templates
+- [x] store writes are materially safer than they are today
 
 ---
 
@@ -458,9 +473,9 @@ The version roadmap below is sequenced around those layers.
 ### Requirements for v1.0
 
 - [ ] core capture, render, and paste workflows are dependable on representative Excel, PowerPoint, Google Sheets, browser, and text-editor inputs
-- [ ] RTF fallback is implemented and documented
-- [ ] config behavior is consistent and tested
-- [ ] template versioning, linting, and search exist
+- [x] RTF fallback is implemented and documented
+- [x] config behavior is consistent and tested
+- [x] template versioning, linting, and search exist
 - [ ] agent integration is production-usable
 - [ ] CI, packaging, completions, and docs are in place
 - [ ] the release notes clearly distinguish stable core features from experimental ones
@@ -514,9 +529,9 @@ These workstreams should progress alongside the version milestones rather than b
 
 ### Immediate order
 
-1. `v0.2` core completion and correctness
-2. `v0.3` template lifecycle and safety
-3. `v0.4` agent-native workflows
+1. ~~`v0.2` core completion and correctness~~ ✅ COMPLETE
+2. ~~`v0.3` template lifecycle and safety~~ ✅ COMPLETE
+3. `v0.4` agent-native workflows ← **current**
 
 ### Next wave
 
