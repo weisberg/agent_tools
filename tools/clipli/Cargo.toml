@@ -36,6 +36,7 @@ thiserror = "1"
 dirs = "5"
 toml = "0.8"
 regex = "1"
+zip = "2"
 
 [dev-dependencies]
 assert_cmd = "2"

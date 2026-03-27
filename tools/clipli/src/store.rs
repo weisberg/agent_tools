@@ -70,6 +70,23 @@ pub struct LoadedTemplate {
     pub is_templatized: bool,
 }
 
+/// A version snapshot entry.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct VersionEntry {
+    pub id: String,
+    pub change_type: String,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
+/// A search result.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SearchResult {
+    pub name: String,
+    pub match_field: String,
+    pub match_context: String,
+    pub description: Option<String>,
+}
+
 /// Optional filter for `Store::list`.
 pub struct ListFilter {
     /// If set, only return templates whose `tags` contains this value.
@@ -81,6 +98,10 @@ pub struct ListFilter {
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
+
+fn version_id() -> String {
+    chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string()
+}
 
 /// Manages the template directory tree under `~/.config/clipli/templates/`.
 pub struct Store {
@@ -129,36 +150,58 @@ impl Store {
             return Err(StoreError::AlreadyExists(name.to_string()));
         }
 
-        std::fs::create_dir_all(&dir)?;
+        // Auto-snapshot before overwrite
+        if dir.exists() && force {
+            let _ = self.snapshot(name, "overwrite");
+        }
 
-        // template HTML — filename depends on templatized flag
-        let template_filename = if content.is_templatized {
-            "template.html.j2"
-        } else {
-            "template.html"
-        };
-        std::fs::write(dir.join(template_filename), &content.template_html)?;
+        // Atomic write: build in temp dir, then swap
+        let tmp_name = format!(".{}.tmp.{}", name, std::process::id());
+        let tmp_dir = self.root.join(&tmp_name);
+        if tmp_dir.exists() {
+            std::fs::remove_dir_all(&tmp_dir)?;
+        }
+        std::fs::create_dir_all(&tmp_dir)?;
 
-        // meta.json — always refresh `updated_at`
+        // Write template HTML
+        let template_filename = if content.is_templatized { "template.html.j2" } else { "template.html" };
+        std::fs::write(tmp_dir.join(template_filename), &content.template_html)?;
+
+        // Write meta.json
         let mut meta = content.meta;
         meta.updated_at = Utc::now();
-        let meta_json = serde_json::to_string_pretty(&meta)?;
-        std::fs::write(dir.join("meta.json"), meta_json)?;
+        std::fs::write(tmp_dir.join("meta.json"), serde_json::to_string_pretty(&meta)?)?;
 
-        // schema.json (optional)
+        // Write schema.json (optional)
         if let Some(schema) = content.schema {
-            let schema_json = serde_json::to_string_pretty(&schema)?;
-            std::fs::write(dir.join("schema.json"), schema_json)?;
+            std::fs::write(tmp_dir.join("schema.json"), serde_json::to_string_pretty(&schema)?)?;
         }
 
-        // original.html (optional)
+        // Write original.html (optional)
         if let Some(original) = content.original_html {
-            std::fs::write(dir.join("original.html"), original)?;
+            std::fs::write(tmp_dir.join("original.html"), original)?;
         }
 
-        // raw.html (optional)
+        // Write raw.html (optional)
         if let Some(raw) = content.raw_html {
-            std::fs::write(dir.join("raw.html"), raw)?;
+            std::fs::write(tmp_dir.join("raw.html"), raw)?;
+        }
+
+        // Atomic swap
+        if dir.exists() {
+            let versions_dir = dir.join("versions");
+            let has_versions = versions_dir.exists();
+            let versions_tmp = self.root.join(format!(".{}.versions.{}", name, std::process::id()));
+            if has_versions {
+                std::fs::rename(&versions_dir, &versions_tmp)?;
+            }
+            std::fs::remove_dir_all(&dir)?;
+            std::fs::rename(&tmp_dir, &dir)?;
+            if has_versions {
+                std::fs::rename(&versions_tmp, dir.join("versions"))?;
+            }
+        } else {
+            std::fs::rename(&tmp_dir, &dir)?;
         }
 
         Ok(())
@@ -305,6 +348,385 @@ impl Store {
         }
         None
     }
+
+    // ------------------------------------------------------------------
+    // Versioning
+    // ------------------------------------------------------------------
+
+    /// Create a snapshot of the current template files in `versions/<timestamp>/`.
+    pub fn snapshot(&self, name: &str, change_type: &str) -> Result<String, StoreError> {
+        let dir = self.template_dir(name);
+        if !dir.exists() {
+            return Err(StoreError::NotFound(name.to_string()));
+        }
+        let id = version_id();
+        let versions_dir = dir.join("versions");
+        let dest = versions_dir.join(&id);
+        std::fs::create_dir_all(&dest)?;
+        // Copy only files (not subdirectories like versions/) from template dir
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                std::fs::copy(&path, dest.join(entry.file_name()))?;
+            }
+        }
+        // Write version metadata
+        let meta = serde_json::json!({
+            "change_type": change_type,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        });
+        std::fs::write(dest.join("_version_meta.json"), serde_json::to_string_pretty(&meta)?)?;
+        self.prune_versions(name, 20)?;
+        Ok(id)
+    }
+
+    /// List all version snapshots for a template, newest first.
+    pub fn list_versions(&self, name: &str) -> Result<Vec<VersionEntry>, StoreError> {
+        let dir = self.template_dir(name);
+        if !dir.exists() {
+            return Err(StoreError::NotFound(name.to_string()));
+        }
+        let versions_dir = dir.join("versions");
+        if !versions_dir.exists() {
+            return Ok(Vec::new());
+        }
+        let mut entries = Vec::new();
+        for entry in std::fs::read_dir(&versions_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if !path.is_dir() { continue; }
+            let meta_path = path.join("_version_meta.json");
+            if !meta_path.exists() { continue; }
+            let meta_str = match std::fs::read_to_string(&meta_path) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let meta: serde_json::Value = match serde_json::from_str(&meta_str) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            let id = entry.file_name().to_string_lossy().to_string();
+            let change_type = meta.get("change_type").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+            let timestamp_str = meta.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
+            let timestamp = chrono::DateTime::parse_from_rfc3339(timestamp_str)
+                .map(|dt| dt.with_timezone(&chrono::Utc))
+                .unwrap_or_else(|_| chrono::Utc::now());
+            entries.push(VersionEntry { id, change_type, timestamp });
+        }
+        entries.sort_by(|a, b| b.id.cmp(&a.id)); // newest first
+        Ok(entries)
+    }
+
+    /// Load a specific version snapshot of a template.
+    pub fn load_version(&self, name: &str, version_id: &str) -> Result<LoadedTemplate, StoreError> {
+        let dir = self.template_dir(name).join("versions").join(version_id);
+        if !dir.exists() {
+            return Err(StoreError::NotFound(format!("{} version {}", name, version_id)));
+        }
+        // Same loading logic as load() but from the version directory
+        let (template_html, is_templatized) = {
+            let j2 = dir.join("template.html.j2");
+            let plain = dir.join("template.html");
+            if j2.exists() {
+                (std::fs::read_to_string(&j2)?, true)
+            } else if plain.exists() {
+                (std::fs::read_to_string(&plain)?, false)
+            } else {
+                return Err(StoreError::NotFound(format!("{} version {}", name, version_id)));
+            }
+        };
+        let meta_path = dir.join("meta.json");
+        if !meta_path.exists() {
+            return Err(StoreError::NotFound(format!("{} version {}", name, version_id)));
+        }
+        let meta: TemplateMeta = serde_json::from_str(&std::fs::read_to_string(&meta_path)?)?;
+        let schema_path = dir.join("schema.json");
+        let schema: Vec<TemplateVariable> = if schema_path.exists() {
+            serde_json::from_str(&std::fs::read_to_string(&schema_path)?)?
+        } else {
+            vec![]
+        };
+        Ok(LoadedTemplate { template_html, meta, schema, is_templatized })
+    }
+
+    /// Restore a version snapshot: snapshots current state, then copies version files back.
+    pub fn restore_version(&self, name: &str, version_id: &str) -> Result<(), StoreError> {
+        // Snapshot current state first
+        self.snapshot(name, "restore")?;
+        // Copy all files from the version directory to the template root
+        let version_dir = self.template_dir(name).join("versions").join(version_id);
+        if !version_dir.exists() {
+            return Err(StoreError::NotFound(format!("{} version {}", name, version_id)));
+        }
+        let template_dir = self.template_dir(name);
+        // Delete live files (not versions/)
+        for entry in std::fs::read_dir(&template_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                std::fs::remove_file(&path)?;
+            }
+        }
+        // Copy version files to root
+        for entry in std::fs::read_dir(&version_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                let fname = entry.file_name();
+                // Skip _version_meta.json — it's version-internal
+                if fname.to_string_lossy() == "_version_meta.json" { continue; }
+                std::fs::copy(&path, template_dir.join(fname))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Keep at most `max` version directories, pruning oldest first.
+    fn prune_versions(&self, name: &str, max: usize) -> Result<(), StoreError> {
+        let versions_dir = self.template_dir(name).join("versions");
+        if !versions_dir.exists() { return Ok(()); }
+        let mut dirs: Vec<String> = Vec::new();
+        for entry in std::fs::read_dir(&versions_dir)? {
+            let entry = entry?;
+            if entry.path().is_dir() {
+                dirs.push(entry.file_name().to_string_lossy().to_string());
+            }
+        }
+        dirs.sort(); // oldest first (lexicographic on timestamps)
+        while dirs.len() > max {
+            let oldest = dirs.remove(0);
+            let oldest_path = versions_dir.join(&oldest);
+            std::fs::remove_dir_all(&oldest_path)?;
+        }
+        Ok(())
+    }
+
+    /// Delete live template files but preserve the versions/ directory.
+    pub fn delete_preserving_versions(&self, name: &str) -> Result<(), StoreError> {
+        let dir = self.template_dir(name);
+        if !dir.exists() {
+            return Err(StoreError::NotFound(name.to_string()));
+        }
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() && entry.file_name().to_string_lossy() == "versions" {
+                continue; // preserve versions/
+            }
+            if path.is_dir() {
+                std::fs::remove_dir_all(&path)?;
+            } else {
+                std::fs::remove_file(&path)?;
+            }
+        }
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // Search
+    // ------------------------------------------------------------------
+
+    /// Full-text search across all templates.
+    pub fn search(&self, query: &str, tag_filter: Option<&str>) -> Result<Vec<SearchResult>, StoreError> {
+        let query_lower = query.to_lowercase();
+        let mut results = Vec::new();
+
+        let read_dir = std::fs::read_dir(&self.root)?;
+        for entry in read_dir {
+            let entry = entry?;
+            let path = entry.path();
+            if !path.is_dir() { continue; }
+            let meta_path = path.join("meta.json");
+            if !meta_path.exists() { continue; }
+            let meta_str = match std::fs::read_to_string(&meta_path) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let meta: TemplateMeta = match serde_json::from_str(&meta_str) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+
+            // Apply tag filter
+            if let Some(tag) = tag_filter {
+                if !meta.tags.contains(&tag.to_string()) { continue; }
+            }
+
+            let description = meta.description.clone();
+
+            // Check name
+            if meta.name.to_lowercase().contains(&query_lower) {
+                results.push(SearchResult {
+                    name: meta.name.clone(),
+                    match_field: "name".to_string(),
+                    match_context: meta.name.clone(),
+                    description: description.clone(),
+                });
+                continue;
+            }
+
+            // Check description
+            if let Some(ref desc) = meta.description {
+                if desc.to_lowercase().contains(&query_lower) {
+                    let ctx = extract_match_context(desc, &query_lower, 60);
+                    results.push(SearchResult {
+                        name: meta.name.clone(),
+                        match_field: "description".to_string(),
+                        match_context: ctx,
+                        description: description.clone(),
+                    });
+                    continue;
+                }
+            }
+
+            // Check tags
+            let mut tag_matched = false;
+            for tag in &meta.tags {
+                if tag.to_lowercase().contains(&query_lower) {
+                    results.push(SearchResult {
+                        name: meta.name.clone(),
+                        match_field: "tag".to_string(),
+                        match_context: tag.clone(),
+                        description: description.clone(),
+                    });
+                    tag_matched = true;
+                    break;
+                }
+            }
+            if tag_matched { continue; }
+
+            // Check template HTML content
+            let template_path = {
+                let j2 = path.join("template.html.j2");
+                let html = path.join("template.html");
+                if j2.exists() { Some(j2) } else if html.exists() { Some(html) } else { None }
+            };
+            if let Some(tp) = template_path {
+                if let Ok(content) = std::fs::read_to_string(&tp) {
+                    if content.to_lowercase().contains(&query_lower) {
+                        let ctx = extract_match_context(&content, &query_lower, 60);
+                        results.push(SearchResult {
+                            name: meta.name.clone(),
+                            match_field: "content".to_string(),
+                            match_context: ctx,
+                            description,
+                        });
+                    }
+                }
+            }
+        }
+
+        results.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(results)
+    }
+
+    // ------------------------------------------------------------------
+    // Import / Export
+    // ------------------------------------------------------------------
+
+    /// Export a template as a ZIP bundle.
+    pub fn export(&self, name: &str, output_path: &std::path::Path) -> Result<(), StoreError> {
+        let dir = self.template_dir(name);
+        if !dir.exists() {
+            return Err(StoreError::NotFound(name.to_string()));
+        }
+
+        let file = std::fs::File::create(output_path)
+            .map_err(|e| StoreError::Io(e))?;
+        let mut zip = zip::ZipWriter::new(file);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+
+        // Write manifest
+        let manifest = serde_json::json!({
+            "version": 1,
+            "name": name,
+            "exported_at": chrono::Utc::now().to_rfc3339(),
+            "clipli_version": env!("CARGO_PKG_VERSION"),
+        });
+        zip.start_file("manifest.json", options)
+            .map_err(|e| StoreError::Io(std::io::Error::other(e.to_string())))?;
+        use std::io::Write;
+        zip.write_all(serde_json::to_string_pretty(&manifest)?.as_bytes())
+            .map_err(|e| StoreError::Io(e))?;
+
+        // Add all files from template directory (skip versions/)
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() { continue; } // Skip versions/ and any other subdirs
+            let fname = entry.file_name().to_string_lossy().to_string();
+            zip.start_file(&fname, options)
+                .map_err(|e| StoreError::Io(std::io::Error::other(e.to_string())))?;
+            let data = std::fs::read(&path)?;
+            zip.write_all(&data)
+                .map_err(|e| StoreError::Io(e))?;
+        }
+
+        zip.finish()
+            .map_err(|e| StoreError::Io(std::io::Error::other(e.to_string())))?;
+        Ok(())
+    }
+
+    /// Import a template from a ZIP bundle.
+    pub fn import(&self, zip_path: &std::path::Path, force: bool, name_override: Option<&str>) -> Result<String, StoreError> {
+        let file = std::fs::File::open(zip_path)
+            .map_err(|e| StoreError::Io(e))?;
+        let mut archive = zip::ZipArchive::new(file)
+            .map_err(|e| StoreError::Io(std::io::Error::other(e.to_string())))?;
+
+        // Read manifest to get template name
+        let manifest_str = {
+            let mut manifest_file = archive.by_name("manifest.json")
+                .map_err(|e| StoreError::Io(std::io::Error::other(format!("missing manifest.json: {}", e))))?;
+            let mut buf = String::new();
+            use std::io::Read;
+            manifest_file.read_to_string(&mut buf)
+                .map_err(|e| StoreError::Io(e))?;
+            buf
+        };
+        let manifest: serde_json::Value = serde_json::from_str(&manifest_str)?;
+        let name = name_override
+            .map(|s| s.to_string())
+            .or_else(|| manifest.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()))
+            .ok_or_else(|| StoreError::Io(std::io::Error::other("manifest.json missing 'name' field")))?;
+
+        if !validate_name(&name) {
+            return Err(StoreError::Io(std::io::Error::other(format!("invalid template name: {}", name))));
+        }
+
+        let dir = self.template_dir(&name);
+        if dir.exists() && !force {
+            return Err(StoreError::AlreadyExists(name.clone()));
+        }
+        if dir.exists() && force {
+            // Snapshot before overwriting
+            let _ = self.snapshot(&name, "import");
+        }
+
+        std::fs::create_dir_all(&dir)?;
+
+        // Extract all files except manifest.json
+        for i in 0..archive.len() {
+            let mut entry = archive.by_index(i)
+                .map_err(|e| StoreError::Io(std::io::Error::other(e.to_string())))?;
+            let fname = entry.name().to_string();
+            if fname == "manifest.json" { continue; }
+            // Security: reject path traversal
+            if fname.contains("..") || fname.starts_with('/') { continue; }
+            let dest = dir.join(&fname);
+            let mut outfile = std::fs::File::create(&dest)?;
+            use std::io::Read;
+            let mut buf = Vec::new();
+            entry.read_to_end(&mut buf)
+                .map_err(|e| StoreError::Io(e))?;
+            use std::io::Write;
+            outfile.write_all(&buf)?;
+        }
+
+        Ok(name)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -320,6 +742,20 @@ pub fn validate_name(name: &str) -> bool {
     }
     name.chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+/// Extract a context snippet around the first occurrence of `query_lower` in `text`.
+fn extract_match_context(text: &str, query_lower: &str, window: usize) -> String {
+    let text_lower = text.to_lowercase();
+    if let Some(pos) = text_lower.find(query_lower) {
+        let start = pos.saturating_sub(window / 2);
+        let end = (pos + query_lower.len() + window / 2).min(text.len());
+        let snippet = &text[start..end];
+        let snippet = snippet.trim().replace('\n', " ").replace('\r', "");
+        if start > 0 { format!("...{}", snippet) } else { snippet }
+    } else {
+        text.chars().take(window).collect()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -635,5 +1071,132 @@ mod tests {
         let store = make_store(&dir);
         let err = store.delete("ghost").unwrap_err();
         assert!(matches!(err, StoreError::NotFound(_)));
+    }
+
+    // ------------------------------------------------------------------
+    // Versioning tests
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn snapshot_creates_version_dir() {
+        let dir = TempDir::new().unwrap();
+        let store = make_store(&dir);
+        store.save("snap_test", make_save_content("snap_test"), false).unwrap();
+        let id = store.snapshot("snap_test", "test").unwrap();
+        let version_dir = store.template_dir("snap_test").join("versions").join(&id);
+        assert!(version_dir.exists());
+        assert!(version_dir.join("meta.json").exists());
+        assert!(version_dir.join("_version_meta.json").exists());
+    }
+
+    #[test]
+    fn list_versions_returns_entries() {
+        let dir = TempDir::new().unwrap();
+        let store = make_store(&dir);
+        store.save("ver_test", make_save_content("ver_test"), false).unwrap();
+        store.snapshot("ver_test", "edit").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        store.snapshot("ver_test", "overwrite").unwrap();
+        let versions = store.list_versions("ver_test").unwrap();
+        assert_eq!(versions.len(), 2);
+        assert_eq!(versions[0].change_type, "overwrite"); // newest first
+    }
+
+    #[test]
+    fn load_version_returns_snapshot_content() {
+        let dir = TempDir::new().unwrap();
+        let store = make_store(&dir);
+        store.save("lv_test", make_save_content("lv_test"), false).unwrap();
+        let id = store.snapshot("lv_test", "edit").unwrap();
+        // Wait so the auto-snapshot in force-save gets a distinct version ID
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        // Modify live template
+        let new_content = SaveContent {
+            template_html: "<p>Modified</p>".to_string(),
+            ..make_save_content("lv_test")
+        };
+        store.save("lv_test", new_content, true).unwrap();
+        // Load version should have original content
+        let loaded = store.load_version("lv_test", &id).unwrap();
+        assert_eq!(loaded.template_html, "<p>Hello</p>");
+    }
+
+    #[test]
+    fn restore_version_reverts_content() {
+        let dir = TempDir::new().unwrap();
+        let store = make_store(&dir);
+        store.save("rv_test", make_save_content("rv_test"), false).unwrap();
+        let id = store.snapshot("rv_test", "edit").unwrap();
+        // Wait so subsequent snapshots get distinct version IDs (second-resolution)
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        // Modify live
+        let new_content = SaveContent {
+            template_html: "<p>Changed</p>".to_string(),
+            ..make_save_content("rv_test")
+        };
+        store.save("rv_test", new_content, true).unwrap();
+        // Wait again so restore's auto-snapshot gets a distinct ID
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        // Restore
+        store.restore_version("rv_test", &id).unwrap();
+        let loaded = store.load("rv_test").unwrap();
+        assert_eq!(loaded.template_html, "<p>Hello</p>");
+    }
+
+    #[test]
+    fn force_save_auto_snapshots() {
+        let dir = TempDir::new().unwrap();
+        let store = make_store(&dir);
+        store.save("fs_test", make_save_content("fs_test"), false).unwrap();
+        // Force save should auto-snapshot
+        let new_content = SaveContent {
+            template_html: "<p>New</p>".to_string(),
+            ..make_save_content("fs_test")
+        };
+        store.save("fs_test", new_content, true).unwrap();
+        let versions = store.list_versions("fs_test").unwrap();
+        assert!(!versions.is_empty());
+        assert_eq!(versions[0].change_type, "overwrite");
+    }
+
+    #[test]
+    fn delete_preserving_versions_keeps_history() {
+        let dir = TempDir::new().unwrap();
+        let store = make_store(&dir);
+        store.save("dpv_test", make_save_content("dpv_test"), false).unwrap();
+        store.snapshot("dpv_test", "test").unwrap();
+        store.delete_preserving_versions("dpv_test").unwrap();
+        // Live template files should be gone
+        assert!(!store.template_dir("dpv_test").join("meta.json").exists());
+        // But versions/ should still exist
+        assert!(store.template_dir("dpv_test").join("versions").exists());
+    }
+
+    #[test]
+    fn search_finds_by_name() {
+        let dir = TempDir::new().unwrap();
+        let store = make_store(&dir);
+        store.save("quarterly_report", make_save_content("quarterly_report"), false).unwrap();
+        store.save("monthly_summary", make_save_content("monthly_summary"), false).unwrap();
+        let results = store.search("quarterly", None).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "quarterly_report");
+    }
+
+    #[test]
+    fn export_import_round_trip() {
+        let dir = TempDir::new().unwrap();
+        let store = make_store(&dir);
+        store.save("export_test", make_save_content("export_test"), false).unwrap();
+
+        let zip_path = dir.path().join("export_test.clipli");
+        store.export("export_test", &zip_path).unwrap();
+        assert!(zip_path.exists());
+
+        let imported_name = store.import(&zip_path, false, Some("imported_test")).unwrap();
+        assert_eq!(imported_name, "imported_test");
+
+        let loaded = store.load("imported_test").unwrap();
+        assert_eq!(loaded.template_html, "<p>Hello</p>");
     }
 }

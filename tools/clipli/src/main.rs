@@ -1,6 +1,7 @@
 mod clean;
 mod excel;
 mod excel_edit;
+mod lint;
 mod model;
 mod pb;
 mod render;
@@ -221,6 +222,9 @@ enum Commands {
         meta: bool,
         #[arg(long)]
         open: bool,
+        /// Show a specific version instead of the live template
+        #[arg(long)]
+        version: Option<String>,
     },
     /// Open a template in $EDITOR for manual editing
     Edit {
@@ -233,6 +237,56 @@ enum Commands {
         name: String,
         #[arg(long, short = 'f')]
         force: bool,
+        /// Delete live template but preserve version history
+        #[arg(long)]
+        keep_versions: bool,
+    },
+    /// List version history for a template
+    Versions {
+        name: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Restore a template from a previous version
+    Restore {
+        name: String,
+        /// Version ID to restore (from `clipli versions`)
+        #[arg(long)]
+        version: String,
+    },
+    /// Lint a template for variable mismatches and syntax issues
+    Lint {
+        name: String,
+        /// Treat warnings as errors
+        #[arg(long)]
+        strict: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Search templates by name, description, tags, or content
+    Search {
+        query: String,
+        #[arg(long)]
+        tag: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Export a template as a .clipli bundle
+    Export {
+        name: String,
+        /// Output file path (default: ./<name>.clipli)
+        #[arg(short = 'o', long)]
+        output: Option<PathBuf>,
+    },
+    /// Import a template from a .clipli bundle
+    Import {
+        /// Path to .clipli bundle file
+        file: PathBuf,
+        #[arg(long, short = 'f')]
+        force: bool,
+        /// Override the template name from the bundle
+        #[arg(long)]
+        name: Option<String>,
     },
     /// Generate Excel-compatible HTML from CSV and write to clipboard
     Excel {
@@ -383,6 +437,9 @@ fn main() {
         Commands::Inspect { json: true, .. }
             | Commands::Capture { json: true, .. }
             | Commands::List { json: true, .. }
+            | Commands::Versions { json: true, .. }
+            | Commands::Lint { json: true, .. }
+            | Commands::Search { json: true, .. }
     );
 
     if let Err(e) = run(cli.command, &config) {
@@ -453,9 +510,16 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
             schema,
             meta,
             open,
-        } => cmd_show(name, html, schema, meta, open),
+            version,
+        } => cmd_show(name, html, schema, meta, open, version),
         Commands::Edit { name, auto_schema } => cmd_edit(name, auto_schema),
-        Commands::Delete { name, force } => cmd_delete(name, force),
+        Commands::Delete { name, force, keep_versions } => cmd_delete(name, force, keep_versions),
+        Commands::Versions { name, json } => cmd_versions(name, json),
+        Commands::Restore { name, version } => cmd_restore(name, version),
+        Commands::Lint { name, strict, json } => cmd_lint(name, strict, json),
+        Commands::Search { query, tag, json } => cmd_search(query, tag, json),
+        Commands::Export { name, output } => cmd_export(name, output),
+        Commands::Import { file, force, name } => cmd_import(file, force, name),
         Commands::Excel {
             file, style, header_bg, header_fg, band_bg, font, font_size,
             col_specs, align_specs, bold_cols, italic_cols, wrap_cols,
@@ -888,9 +952,14 @@ fn cmd_show(
     schema_flag: bool,
     meta_flag: bool,
     open: bool,
+    version: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let s = Store::new()?;
-    let loaded = s.load(&name)?;
+    let loaded = if let Some(ref ver) = version {
+        s.load_version(&name, ver)?
+    } else {
+        s.load(&name)?
+    };
 
     if html_flag {
         print!("{}", loaded.template_html);
@@ -955,6 +1024,9 @@ fn cmd_edit(name: String, auto_schema: bool) -> Result<(), Box<dyn std::error::E
     let path = s
         .template_file_path(&name)
         .ok_or_else(|| format!("template '{}' not found", name))?;
+
+    // Snapshot before editing
+    let _ = s.snapshot(&name, "edit");
 
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
 
@@ -1035,7 +1107,7 @@ fn cmd_edit(name: String, auto_schema: bool) -> Result<(), Box<dyn std::error::E
     Ok(())
 }
 
-fn cmd_delete(name: String, force: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_delete(name: String, force: bool, keep_versions: bool) -> Result<(), Box<dyn std::error::Error>> {
     let s = Store::new()?;
 
     if !force {
@@ -1051,8 +1123,104 @@ fn cmd_delete(name: String, force: bool) -> Result<(), Box<dyn std::error::Error
         }
     }
 
-    s.delete(&name)?;
-    println!("Deleted template '{}'.", name);
+    if keep_versions {
+        s.delete_preserving_versions(&name)?;
+        println!("Deleted template '{}' (version history preserved).", name);
+    } else {
+        s.delete(&name)?;
+        println!("Deleted template '{}'.", name);
+    }
+    Ok(())
+}
+
+fn cmd_versions(name: String, json: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let s = Store::new()?;
+    let versions = s.list_versions(&name)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&versions)?);
+    } else if versions.is_empty() {
+        println!("No versions found for '{}'.", name);
+    } else {
+        println!("Versions for '{}' ({}):", name, versions.len());
+        for v in &versions {
+            println!("  {}  ({})  {}", v.id, v.change_type, v.timestamp.format("%Y-%m-%d %H:%M:%S UTC"));
+        }
+    }
+    Ok(())
+}
+
+fn cmd_restore(name: String, version: String) -> Result<(), Box<dyn std::error::Error>> {
+    let s = Store::new()?;
+    s.restore_version(&name, &version)?;
+    println!("Restored '{}' from version {}.", name, version);
+    Ok(())
+}
+
+fn cmd_lint(name: String, strict: bool, json: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let s = Store::new()?;
+    let loaded = s.load(&name)?;
+    let report = lint::lint(&loaded.template_html, &loaded.schema);
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        for d in &report.diagnostics {
+            let prefix = match d.severity {
+                lint::Severity::Error => "ERROR",
+                lint::Severity::Warning => "WARN",
+            };
+            if let Some(line) = d.line {
+                eprintln!("[{}] line {}: {} ({})", prefix, line, d.message, d.code);
+            } else {
+                eprintln!("[{}] {} ({})", prefix, d.message, d.code);
+            }
+            if let Some(ref ctx) = d.context {
+                eprintln!("  | {}", ctx);
+            }
+        }
+        println!("{} error(s), {} warning(s)", report.error_count, report.warning_count);
+    }
+
+    if report.error_count > 0 || (strict && report.warning_count > 0) {
+        std::process::exit(1);
+    }
+    Ok(())
+}
+
+fn cmd_search(query: String, tag: Option<String>, json: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let s = Store::new()?;
+    let results = s.search(&query, tag.as_deref())?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&results)?);
+    } else if results.is_empty() {
+        println!("No templates found matching '{}'.", query);
+    } else {
+        println!("Found {} result(s):", results.len());
+        for r in &results {
+            let desc = r.description.as_deref().unwrap_or("");
+            println!("  {:<30}  [{}]  {}", r.name, r.match_field, desc);
+            if !r.match_context.is_empty() {
+                println!("    {}", r.match_context);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn cmd_export(name: String, output: Option<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
+    let s = Store::new()?;
+    let output_path = output.unwrap_or_else(|| PathBuf::from(format!("{}.clipli", name)));
+    s.export(&name, &output_path)?;
+    println!("Exported '{}' to {}", name, output_path.display());
+    Ok(())
+}
+
+fn cmd_import(file: PathBuf, force: bool, name: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+    let s = Store::new()?;
+    let imported_name = s.import(&file, force, name.as_deref())?;
+    println!("Imported template '{}'.", imported_name);
     Ok(())
 }
 
