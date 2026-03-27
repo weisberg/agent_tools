@@ -374,6 +374,7 @@ impl Renderer {
         template_name: &str,
         data: &serde_json::Value,
     ) -> Result<RenderedOutput, RenderError> {
+        tracing::debug!(template = %template_name, "render: rendering template");
         let tmpl = self
             .env
             .get_template(template_name)
@@ -390,6 +391,18 @@ impl Renderer {
         let html = tmpl.render(ctx).map_err(map_minijinja_error)?;
         let plain = html_to_plain_text(&html);
         Ok(RenderedOutput { html, plain })
+    }
+
+    /// Render a template with multiple data rows, returning all results.
+    #[allow(dead_code)]
+    pub fn render_batch(
+        &self,
+        template_name: &str,
+        rows: &[serde_json::Value],
+    ) -> Result<Vec<RenderedOutput>, RenderError> {
+        rows.iter()
+            .map(|data| self.render(template_name, data))
+            .collect()
     }
 
     /// Check whether a template name exists in this renderer.

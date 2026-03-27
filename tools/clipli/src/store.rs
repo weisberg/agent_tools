@@ -144,6 +144,7 @@ impl Store {
     /// already exists and `force` is `false`.  When `force` is `true` the
     /// existing content is silently overwritten.
     pub fn save(&self, name: &str, content: SaveContent, force: bool) -> Result<(), StoreError> {
+        tracing::info!(template = %name, "store: saving template");
         let dir = self.template_dir(name);
 
         if dir.exists() && !force {
@@ -213,6 +214,7 @@ impl Store {
     /// Returns [`StoreError::NotFound`] when the directory or `meta.json` is
     /// absent.
     pub fn load(&self, name: &str) -> Result<LoadedTemplate, StoreError> {
+        tracing::debug!(template = %name, "store: loading template");
         let dir = self.template_dir(name);
         if !dir.exists() {
             return Err(StoreError::NotFound(name.to_string()));

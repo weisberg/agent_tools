@@ -32,6 +32,8 @@ struct Config {
     clean: ConfigClean,
     #[serde(default)]
     templatize: ConfigTemplatize,
+    #[serde(default)]
+    agent: ConfigAgent,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -103,6 +105,29 @@ impl Default for ConfigTemplatize {
     }
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct ConfigAgent {
+    command: Option<String>,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default = "default_agent_timeout")]
+    timeout_secs: u64,
+}
+
+fn default_agent_timeout() -> u64 {
+    30
+}
+
+impl Default for ConfigAgent {
+    fn default() -> Self {
+        Self {
+            command: None,
+            args: Vec::new(),
+            timeout_secs: default_agent_timeout(),
+        }
+    }
+}
+
 fn load_config() -> Config {
     let config_path = dirs::config_dir()
         .unwrap_or_else(|| dirs::home_dir().unwrap().join(".config"))
@@ -129,6 +154,10 @@ fn load_config() -> Config {
     about = "Clipboard intelligence CLI — template-driven pasteboard for agents and power users"
 )]
 struct Cli {
+    /// Increase verbosity (-v info, -vv debug, -vvv trace)
+    #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count, global = true)]
+    verbose: u8,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -176,6 +205,12 @@ enum Commands {
         raw: bool,
         #[arg(long)]
         keep_classes: bool,
+        /// External command to invoke for agent strategy
+        #[arg(long)]
+        agent_command: Option<String>,
+        /// Timeout in seconds for agent response
+        #[arg(long, default_value = "30")]
+        agent_timeout: u64,
         /// Preview cleaned/templatized HTML in browser before saving
         #[arg(long)]
         preview: bool,
@@ -201,6 +236,8 @@ enum Commands {
         from_table: bool,
         #[arg(long, short = 't', default_value = "table_default")]
         template: String,
+        #[arg(long)]
+        json: bool,
     },
     /// List all saved templates
     List {
@@ -208,8 +245,9 @@ enum Commands {
         tag: Option<String>,
         #[arg(long)]
         json: bool,
-        #[arg(long, short = 'v')]
-        verbose: bool,
+        /// Show variable details for each template
+        #[arg(long, short = 'd')]
+        detail: bool,
     },
     /// Show details of a specific template
     Show {
@@ -225,6 +263,8 @@ enum Commands {
         /// Show a specific version instead of the live template
         #[arg(long)]
         version: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
     /// Open a template in $EDITOR for manual editing
     Edit {
@@ -240,6 +280,8 @@ enum Commands {
         /// Delete live template but preserve version history
         #[arg(long)]
         keep_versions: bool,
+        #[arg(long)]
+        json: bool,
     },
     /// List version history for a template
     Versions {
@@ -371,6 +413,8 @@ enum Commands {
         /// Print HTML to stdout instead of writing to clipboard
         #[arg(long)]
         dry_run: bool,
+        #[arg(long)]
+        json: bool,
     },
     /// Edit cells in the clipboard's Excel HTML by A1 reference
     #[command(name = "excel-edit")]
@@ -405,6 +449,24 @@ enum Commands {
         /// Print modified HTML to stdout instead of writing to clipboard
         #[arg(long)]
         dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Render a template with multiple data rows to files or stdout
+    Render {
+        /// Template name
+        name: String,
+        /// JSON file containing an array of data objects (or newline-delimited JSON)
+        #[arg(long)]
+        data_file: PathBuf,
+        /// Output directory for rendered files (001.html, 002.html, ...)
+        #[arg(long, short = 'o')]
+        output_dir: Option<PathBuf>,
+        /// Output format: "html" or "plain"
+        #[arg(long, default_value = "html")]
+        format: String,
+        #[arg(long)]
+        json: bool,
     },
     /// Convert between formats (stdin/stdout)
     Convert {
@@ -420,6 +482,8 @@ enum Commands {
         data: Option<String>,
         #[arg(long, default_value = "heuristic")]
         strategy: String,
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -429,6 +493,27 @@ enum Commands {
 
 fn main() {
     let cli = Cli::parse();
+
+    // Initialize tracing subscriber
+    let log_level = match cli.verbose {
+        0 => tracing::Level::ERROR,
+        1 => tracing::Level::INFO,
+        2 => tracing::Level::DEBUG,
+        _ => tracing::Level::TRACE,
+    };
+    if std::env::var("RUST_LOG").is_ok() {
+        // Honor RUST_LOG if set
+        tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .with_writer(std::io::stderr)
+            .init();
+    } else if cli.verbose > 0 {
+        tracing_subscriber::fmt()
+            .with_max_level(log_level)
+            .with_writer(std::io::stderr)
+            .init();
+    }
+
     let config = load_config();
 
     // Detect --json mode before dispatching (so errors can be reported as JSON)
@@ -437,9 +522,16 @@ fn main() {
         Commands::Inspect { json: true, .. }
             | Commands::Capture { json: true, .. }
             | Commands::List { json: true, .. }
+            | Commands::Paste { json: true, .. }
+            | Commands::Show { json: true, .. }
+            | Commands::Delete { json: true, .. }
             | Commands::Versions { json: true, .. }
             | Commands::Lint { json: true, .. }
             | Commands::Search { json: true, .. }
+            | Commands::Excel { json: true, .. }
+            | Commands::ExcelEdit { json: true, .. }
+            | Commands::Render { json: true, .. }
+            | Commands::Convert { json: true, .. }
     );
 
     if let Err(e) = run(cli.command, &config) {
@@ -475,6 +567,8 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
             force,
             raw,
             keep_classes,
+            agent_command,
+            agent_timeout,
             preview,
             json,
         } => cmd_capture(
@@ -486,6 +580,8 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
             force,
             raw,
             keep_classes,
+            agent_command,
+            agent_timeout,
             preview,
             json,
             config,
@@ -500,10 +596,11 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
             open,
             from_table,
             template,
+            json,
         } => cmd_paste(
-            name, data, data_file, stdin, dry_run, plain_text, open, from_table, template, config,
+            name, data, data_file, stdin, dry_run, plain_text, open, from_table, template, json, config,
         ),
-        Commands::List { tag, json, verbose } => cmd_list(tag, json, verbose),
+        Commands::List { tag, json, detail } => cmd_list(tag, json, detail),
         Commands::Show {
             name,
             html,
@@ -511,9 +608,10 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
             meta,
             open,
             version,
-        } => cmd_show(name, html, schema, meta, open, version),
+            json,
+        } => cmd_show(name, html, schema, meta, open, version, json),
         Commands::Edit { name, auto_schema } => cmd_edit(name, auto_schema),
-        Commands::Delete { name, force, keep_versions } => cmd_delete(name, force, keep_versions),
+        Commands::Delete { name, force, keep_versions, json } => cmd_delete(name, force, keep_versions, json),
         Commands::Versions { name, json } => cmd_versions(name, json),
         Commands::Restore { name, version } => cmd_restore(name, version),
         Commands::Lint { name, strict, json } => cmd_lint(name, strict, json),
@@ -525,21 +623,23 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
             col_specs, align_specs, bold_cols, italic_cols, wrap_cols,
             fg_colors, bg_colors, color_rules, links,
             title, total_row, total_formula, formulas, row_height, header_height,
-            columns, hidden_cols, renames, col_font_sizes, dry_run,
+            columns, hidden_cols, renames, col_font_sizes, dry_run, json,
         } => cmd_excel(
             file, style, header_bg, header_fg, band_bg, font, font_size,
             col_specs, align_specs, bold_cols, italic_cols, wrap_cols,
             fg_colors, bg_colors, color_rules, links,
             title, total_row, total_formula, formulas, row_height, header_height,
-            columns, hidden_cols, renames, col_font_sizes, dry_run, config,
+            columns, hidden_cols, renames, col_font_sizes, dry_run, json, config,
         ),
         Commands::ExcelEdit {
             set_values, set_bgs, set_fgs, set_formats, set_formulas,
-            set_aligns, set_bolds, set_italics, set_wraps, dry_run,
+            set_aligns, set_bolds, set_italics, set_wraps, dry_run, json,
         } => cmd_excel_edit(
             set_values, set_bgs, set_fgs, set_formats, set_formulas,
-            set_aligns, set_bolds, set_italics, set_wraps, dry_run,
+            set_aligns, set_bolds, set_italics, set_wraps, dry_run, json,
         ),
+        Commands::Render { name, data_file, output_dir, format, json } =>
+            cmd_render(name, data_file, output_dir, format, json),
         Commands::Convert {
             from,
             to,
@@ -547,7 +647,8 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
             output,
             data,
             strategy,
-        } => cmd_convert(from, to, input, output, data, strategy, config),
+            json,
+        } => cmd_convert(from, to, input, output, data, strategy, json, config),
     }
 }
 
@@ -691,6 +792,8 @@ fn cmd_capture(
     force: bool,
     raw: bool,
     keep_classes: bool,
+    agent_command: Option<String>,
+    agent_timeout: u64,
     preview: bool,
     json: bool,
     config: &Config,
@@ -754,18 +857,25 @@ fn cmd_capture(
     } else {
         "manual"
     };
+    tracing::info!(strategy = %eff_strategy, "capture: strategy selected");
 
     let TemplatizeResult {
         template_html,
         variables,
     } = match eff_strategy {
         "agent" => {
-            let result = templatize::agent(&cleaned_html, source_app.as_deref())?;
-            result
+            let agent_cfg = templatize::AgentConfig {
+                command: agent_command.or(config.agent.command.clone()),
+                args: config.agent.args.clone(),
+                timeout_secs: agent_timeout,
+            };
+            templatize::agent(&cleaned_html, source_app.as_deref(), &agent_cfg)?
         }
         "heuristic" => templatize::heuristic(&cleaned_html),
         _ => templatize::manual(&cleaned_html),
     };
+
+    tracing::info!(variables = variables.len(), "capture: templatization complete");
 
     let is_templatized = do_templatize && eff_strategy != "manual";
 
@@ -836,6 +946,7 @@ fn cmd_paste(
     open: bool,
     from_table: bool,
     template_name: String,
+    json: bool,
     config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let templates_dir = dirs::config_dir()
@@ -856,6 +967,7 @@ fn cmd_paste(
         output.html
     } else {
         let tmpl_name = name.ok_or("template name is required unless --from-table is set")?;
+        tracing::debug!(template = %tmpl_name, "paste: loading template");
         let s = Store::new()?;
         s.load(&tmpl_name)?; // validate template exists
 
@@ -892,13 +1004,20 @@ fn cmd_paste(
 
     pb::write_html(&rendered_html, plain.as_deref())?;
 
+    if json {
+        println!("{}", serde_json::json!({
+            "ok": true,
+            "html_bytes": rendered_html.len(),
+            "plain_bytes": plain.as_ref().map(|p| p.len()),
+        }));
+    }
     Ok(())
 }
 
 fn cmd_list(
     tag: Option<String>,
     json: bool,
-    verbose: bool,
+    detail: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let s = Store::new()?;
     let filter = if tag.is_some() {
@@ -931,7 +1050,7 @@ fn cmd_list(
                 if var_count == 1 { " " } else { "s" },
                 tags_str
             );
-            if verbose && !meta.variables.is_empty() {
+            if detail && !meta.variables.is_empty() {
                 for var in &meta.variables {
                     let desc = var
                         .description
@@ -953,6 +1072,7 @@ fn cmd_show(
     meta_flag: bool,
     open: bool,
     version: Option<String>,
+    json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let s = Store::new()?;
     let loaded = if let Some(ref ver) = version {
@@ -960,6 +1080,18 @@ fn cmd_show(
     } else {
         s.load(&name)?
     };
+
+    if json {
+        let out = serde_json::json!({
+            "ok": true,
+            "meta": loaded.meta,
+            "schema": loaded.schema,
+            "html_bytes": loaded.template_html.len(),
+            "is_templatized": loaded.is_templatized,
+        });
+        println!("{}", serde_json::to_string_pretty(&out)?);
+        return Ok(());
+    }
 
     if html_flag {
         print!("{}", loaded.template_html);
@@ -1107,8 +1239,12 @@ fn cmd_edit(name: String, auto_schema: bool) -> Result<(), Box<dyn std::error::E
     Ok(())
 }
 
-fn cmd_delete(name: String, force: bool, keep_versions: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_delete(name: String, force: bool, keep_versions: bool, json: bool) -> Result<(), Box<dyn std::error::Error>> {
     let s = Store::new()?;
+
+    if json && !force {
+        return Err("--json requires --force (cannot prompt interactively)".into());
+    }
 
     if !force {
         use std::io::{BufRead, Write};
@@ -1125,10 +1261,18 @@ fn cmd_delete(name: String, force: bool, keep_versions: bool) -> Result<(), Box<
 
     if keep_versions {
         s.delete_preserving_versions(&name)?;
-        println!("Deleted template '{}' (version history preserved).", name);
+        if json {
+            println!("{}", serde_json::json!({"ok": true, "name": name, "deleted": true, "keep_versions": true}));
+        } else {
+            println!("Deleted template '{}' (version history preserved).", name);
+        }
     } else {
         s.delete(&name)?;
-        println!("Deleted template '{}'.", name);
+        if json {
+            println!("{}", serde_json::json!({"ok": true, "name": name, "deleted": true}));
+        } else {
+            println!("Deleted template '{}'.", name);
+        }
     }
     Ok(())
 }
@@ -1224,6 +1368,79 @@ fn cmd_import(file: PathBuf, force: bool, name: Option<String>) -> Result<(), Bo
     Ok(())
 }
 
+fn cmd_render(
+    name: String,
+    data_file: PathBuf,
+    output_dir: Option<PathBuf>,
+    format: String,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Verify template exists
+    let s = Store::new()?;
+    s.load(&name)?;
+
+    let templates_dir = dirs::config_dir()
+        .unwrap_or_else(|| dirs::home_dir().unwrap().join(".config"))
+        .join("clipli")
+        .join("templates");
+    let renderer = render::Renderer::new(&templates_dir)?;
+
+    // Read data file
+    let content = std::fs::read_to_string(&data_file)?;
+    let rows: Vec<serde_json::Value> = if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&content) {
+        arr
+    } else {
+        // Try newline-delimited JSON
+        content
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| serde_json::from_str(l))
+            .collect::<Result<Vec<_>, _>>()?
+    };
+
+    if rows.is_empty() {
+        return Err("data file contains no rows".into());
+    }
+
+    let results = renderer.render_batch(&name, &rows)?;
+
+    if let Some(ref dir) = output_dir {
+        std::fs::create_dir_all(dir)?;
+        for (i, output) in results.iter().enumerate() {
+            let ext = if format == "plain" { "txt" } else { "html" };
+            let filename = format!("{:03}.{}", i + 1, ext);
+            let content = if format == "plain" { &output.plain } else { &output.html };
+            std::fs::write(dir.join(&filename), content)?;
+        }
+        if json {
+            println!("{}", serde_json::json!({
+                "ok": true,
+                "rendered": results.len(),
+                "output_dir": dir.display().to_string(),
+            }));
+        } else {
+            eprintln!("Rendered {} items to {}", results.len(), dir.display());
+        }
+    } else if json {
+        let items: Vec<serde_json::Value> = results.iter().enumerate().map(|(i, o)| {
+            serde_json::json!({
+                "index": i,
+                "html": o.html,
+                "plain": o.plain,
+            })
+        }).collect();
+        println!("{}", serde_json::json!({"ok": true, "rendered": items.len(), "items": items}));
+    } else {
+        for (i, output) in results.iter().enumerate() {
+            if i > 0 { println!("---"); }
+            let content = if format == "plain" { &output.plain } else { &output.html };
+            print!("{}", content);
+        }
+    }
+
+    Ok(())
+}
+
 fn cmd_excel_edit(
     set_values: Vec<String>,
     set_bgs: Vec<String>,
@@ -1235,6 +1452,7 @@ fn cmd_excel_edit(
     set_italics: Vec<String>,
     set_wraps: Vec<String>,
     dry_run: bool,
+    json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Read HTML from clipboard
     let html_bytes = pb::read_type(PbType::Html)?;
@@ -1287,7 +1505,11 @@ fn cmd_excel_edit(
     let plain = render::html_to_plain_text(&modified);
     pb::write_html(&modified, Some(&plain))?;
 
-    eprintln!("Applied {} edit(s) to clipboard", edits.len());
+    if json {
+        println!("{}", serde_json::json!({"ok": true, "edits": edits.len()}));
+    } else {
+        eprintln!("Applied {} edit(s) to clipboard", edits.len());
+    }
     Ok(())
 }
 
@@ -1320,6 +1542,7 @@ fn cmd_excel(
     renames: Vec<String>,
     col_font_sizes: Vec<String>,
     dry_run: bool,
+    json: bool,
     config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let font = font.unwrap_or_else(|| config.defaults.font.clone());
@@ -1432,12 +1655,20 @@ fn cmd_excel(
     pb::write_html(&html, Some(&plain))?;
 
     let visible_cols = config.columns.as_ref().map(|c| c.len()).unwrap_or(headers.len());
-    eprintln!(
-        "Wrote {} rows × {} cols to clipboard ({})",
-        rows.len(),
-        visible_cols,
-        style
-    );
+    if json {
+        println!("{}", serde_json::json!({
+            "ok": true,
+            "rows": rows.len(),
+            "columns": visible_cols,
+        }));
+    } else {
+        eprintln!(
+            "Wrote {} rows × {} cols to clipboard ({})",
+            rows.len(),
+            visible_cols,
+            style
+        );
+    }
     Ok(())
 }
 
@@ -1448,7 +1679,8 @@ fn cmd_convert(
     output: Option<PathBuf>,
     data: Option<String>,
     strategy: String,
-    _config: &Config,
+    json: bool,
+    config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Read input
     let input_text = match input {
@@ -1465,7 +1697,12 @@ fn cmd_convert(
         ("html", "j2") => {
             let templatize_result = match strategy.as_str() {
                 "agent" => {
-                    templatize::agent(&input_text, None)?.template_html
+                    let agent_cfg = templatize::AgentConfig {
+                        command: config.agent.command.clone(),
+                        args: config.agent.args.clone(),
+                        timeout_secs: config.agent.timeout_secs,
+                    };
+                    templatize::agent(&input_text, None, &agent_cfg)?.template_html
                 }
                 _ => templatize::heuristic(&input_text).template_html,
             };
@@ -1499,9 +1736,17 @@ fn cmd_convert(
         }
     };
 
-    match output {
-        Some(path) => std::fs::write(&path, result.as_bytes())?,
-        None => print!("{}", result),
+    if json {
+        match output {
+            Some(path) => std::fs::write(&path, result.as_bytes())?,
+            None => {} // JSON mode doesn't print raw output
+        }
+        println!("{}", serde_json::json!({"ok": true, "output_bytes": result.len()}));
+    } else {
+        match output {
+            Some(path) => std::fs::write(&path, result.as_bytes())?,
+            None => print!("{}", result),
+        }
     }
     Ok(())
 }

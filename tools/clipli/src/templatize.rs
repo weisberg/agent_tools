@@ -27,6 +27,11 @@ pub enum TemplatizeError {
     InvalidResponse(String),
     #[error("agent returned invalid Jinja2 template: {0}")]
     InvalidTemplate(String),
+    #[error("agent template failed validation: {message}")]
+    ValidationFailed {
+        template: String,
+        message: String,
+    },
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -37,6 +42,7 @@ impl TemplatizeError {
             Self::AgentTimeout => "TEMPLATIZE_AGENT_TIMEOUT",
             Self::InvalidResponse(_) => "TEMPLATIZE_INVALID_RESPONSE",
             Self::InvalidTemplate(_) => "TEMPLATIZE_INVALID_TEMPLATE",
+            Self::ValidationFailed { .. } => "TEMPLATIZE_VALIDATION_FAILED",
             Self::Io(_) => "TEMPLATIZE_IO_ERROR",
         }
     }
@@ -413,8 +419,67 @@ fn validate_var_name(name: &str) -> bool {
     re.is_match(name)
 }
 
-/// Pipe to external agent via stdout/stdin JSON protocol.
-pub fn agent(html: &str, source_app: Option<&str>) -> Result<TemplatizeResult, TemplatizeError> {
+/// Validate that the agent's template preserves the structural elements of the original HTML.
+/// Checks that the number of tables, rows, and cells match between original and template.
+fn validate_structure(original: &str, template: &str) -> Result<(), TemplatizeError> {
+    let orig_lower = original.to_lowercase();
+    let tmpl_lower = template.to_lowercase();
+
+    let checks = [
+        ("<table", "tables"),
+        ("<tr", "rows"),
+        ("<td", "cells"),
+        ("<th", "header cells"),
+    ];
+
+    for (tag, name) in &checks {
+        let orig_count = orig_lower.matches(tag).count();
+        let tmpl_count = tmpl_lower.matches(tag).count();
+        if orig_count != tmpl_count {
+            return Err(TemplatizeError::InvalidTemplate(format!(
+                "structural mismatch: original has {} {}, template has {}",
+                orig_count, name, tmpl_count
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Detect suspicious content in an agent-generated template that could indicate
+/// injection or corruption. Rejects templates containing script tags, iframes,
+/// event handlers, or javascript: URLs.
+fn detect_suspicious(template: &str) -> Result<(), TemplatizeError> {
+    let lower = template.to_lowercase();
+    let patterns = [
+        ("<script", "script tag"),
+        ("<iframe", "iframe tag"),
+        ("onerror=", "onerror handler"),
+        ("onclick=", "onclick handler"),
+        ("onload=", "onload handler"),
+        ("onmouseover=", "onmouseover handler"),
+        ("javascript:", "javascript: URL"),
+    ];
+
+    for (pattern, name) in &patterns {
+        if lower.contains(pattern) {
+            return Err(TemplatizeError::InvalidTemplate(format!(
+                "suspicious content detected: {} — agent may have injected unsafe content",
+                name
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Configuration for the agent templatization strategy.
+pub struct AgentConfig {
+    pub command: Option<String>,
+    pub args: Vec<String>,
+    pub timeout_secs: u64,
+}
+
+/// Build the JSON payload for the agent protocol.
+fn build_agent_payload(html: &str, source_app: Option<&str>) -> serde_json::Value {
     let app_name = source_app.unwrap_or("the source application");
     let prompt = format!(
         "Identify dynamic content in this HTML captured from {}. \
@@ -425,40 +490,46 @@ pub fn agent(html: &str, source_app: Option<&str>) -> Result<TemplatizeResult, T
         app_name
     );
 
-    let payload = serde_json::json!({
+    serde_json::json!({
         "action": "templatize",
         "html": html,
         "prompt": prompt,
-    });
+    })
+}
 
-    // Write JSON payload to stdout (agent protocol).
-    let stdout = std::io::stdout();
-    let mut out = stdout.lock();
-    writeln!(out, "{}", serde_json::to_string(&payload).map_err(|e| {
-        TemplatizeError::InvalidResponse(format!("failed to serialize payload: {}", e))
-    })?)?;
-    out.flush()?;
-    drop(out);
-
-    // Read one line of JSON from stdin.
-    let stdin = std::io::stdin();
-    let mut line = String::new();
-    stdin
-        .lock()
-        .read_line(&mut line)
-        .map_err(|_| TemplatizeError::AgentTimeout)?;
-
-    if line.trim().is_empty() {
+/// Validate and convert an AgentResponse into a TemplatizeResult.
+fn finalize_agent_response(
+    html: &str,
+    raw_response: &str,
+) -> Result<TemplatizeResult, TemplatizeError> {
+    if raw_response.trim().is_empty() {
         return Err(TemplatizeError::AgentTimeout);
     }
 
-    // Parse the response.
-    let resp: AgentResponse = serde_json::from_str(line.trim()).map_err(|e| {
-        TemplatizeError::InvalidResponse(format!("JSON parse error: {}", e))
+    let resp: AgentResponse = serde_json::from_str(raw_response.trim()).map_err(|e| {
+        let snippet = &raw_response.trim()[..raw_response.trim().len().min(200)];
+        TemplatizeError::InvalidResponse(format!(
+            "JSON parse error: {}; raw response (truncated): {}",
+            e, snippet
+        ))
     })?;
 
     // Validate template.
     validate_template(&resp.template)?;
+
+    // Structural and security validation
+    if let Err(e) = validate_structure(html, &resp.template) {
+        return Err(TemplatizeError::ValidationFailed {
+            template: resp.template,
+            message: e.to_string(),
+        });
+    }
+    if let Err(e) = detect_suspicious(&resp.template) {
+        return Err(TemplatizeError::ValidationFailed {
+            template: resp.template,
+            message: e.to_string(),
+        });
+    }
 
     // Validate and convert variables.
     let mut variables: Vec<TemplateVariable> = Vec::with_capacity(resp.variables.len());
@@ -481,6 +552,120 @@ pub fn agent(html: &str, source_app: Option<&str>) -> Result<TemplatizeResult, T
         template_html: resp.template,
         variables,
     })
+}
+
+/// Original stdin/stdout agent protocol: write payload to stdout, read response from stdin.
+fn agent_stdio(html: &str, source_app: Option<&str>) -> Result<TemplatizeResult, TemplatizeError> {
+    let payload = build_agent_payload(html, source_app);
+
+    // Write JSON payload to stdout (agent protocol).
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    let payload_json = serde_json::to_string(&payload).map_err(|e| {
+        TemplatizeError::InvalidResponse(format!("failed to serialize payload: {}", e))
+    })?;
+    writeln!(out, "{}", payload_json)?;
+    out.flush()?;
+    tracing::debug!(payload_bytes = payload_json.len(), "agent: sent payload via stdio");
+    drop(out);
+
+    // Read one line of JSON from stdin.
+    let stdin = std::io::stdin();
+    let mut line = String::new();
+    stdin
+        .lock()
+        .read_line(&mut line)
+        .map_err(|_| TemplatizeError::AgentTimeout)?;
+
+    tracing::debug!(response_bytes = line.len(), "agent: received response via stdio");
+
+    finalize_agent_response(html, &line)
+}
+
+/// External command agent: spawn the command, pipe payload to its stdin, read response from stdout.
+fn agent_command(
+    html: &str,
+    source_app: Option<&str>,
+    cmd: &str,
+    args: &[String],
+    timeout_secs: u64,
+) -> Result<TemplatizeResult, TemplatizeError> {
+    use std::process::{Command, Stdio};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let payload = build_agent_payload(html, source_app);
+    let payload_json = serde_json::to_string(&payload).map_err(|e| {
+        TemplatizeError::InvalidResponse(format!("failed to serialize payload: {}", e))
+    })?;
+
+    tracing::debug!(command = %cmd, args = ?args, payload_bytes = payload_json.len(), "agent: spawning external command");
+
+    let mut child = Command::new(cmd)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            TemplatizeError::Io(std::io::Error::new(
+                e.kind(),
+                format!("failed to spawn agent command '{}': {}", cmd, e),
+            ))
+        })?;
+
+    // Write payload to child's stdin
+    if let Some(mut child_stdin) = child.stdin.take() {
+        use std::io::Write;
+        child_stdin.write_all(payload_json.as_bytes())?;
+        child_stdin.flush()?;
+        // stdin is dropped here, closing the pipe
+    }
+
+    // Wait for output with timeout using a thread + channel
+    let (tx, rx) = mpsc::channel();
+    let handle = std::thread::spawn(move || {
+        let output = child.wait_with_output();
+        let _ = tx.send(output);
+    });
+
+    let timeout = Duration::from_secs(timeout_secs);
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(output)) => {
+            let _ = handle.join();
+            if !output.status.success() {
+                let stderr_text = String::from_utf8_lossy(&output.stderr);
+                return Err(TemplatizeError::InvalidResponse(format!(
+                    "agent command exited with {}: {}",
+                    output.status,
+                    stderr_text.trim()
+                )));
+            }
+            let response = String::from_utf8_lossy(&output.stdout).into_owned();
+            tracing::debug!(response_bytes = response.len(), "agent: received response from command");
+            finalize_agent_response(html, &response)
+        }
+        Ok(Err(e)) => {
+            let _ = handle.join();
+            Err(TemplatizeError::Io(e))
+        }
+        Err(_) => {
+            // Timeout — the thread and child process will be cleaned up when dropped
+            Err(TemplatizeError::AgentTimeout)
+        }
+    }
+}
+
+/// Pipe to external agent via stdout/stdin JSON protocol, or spawn an external command.
+pub fn agent(
+    html: &str,
+    source_app: Option<&str>,
+    config: &AgentConfig,
+) -> Result<TemplatizeResult, TemplatizeError> {
+    match &config.command {
+        Some(cmd) => agent_command(html, source_app, cmd, &config.args, config.timeout_secs),
+        None => agent_stdio(html, source_app),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -709,5 +894,43 @@ mod tests {
         assert!(matches!(map_var_type("list"), VarType::List));
         assert!(matches!(map_var_type("array"), VarType::List));
         assert!(matches!(map_var_type("unknown_xyz"), VarType::String));
+    }
+
+    // --- validate_structure ---
+
+    #[test]
+    fn validate_structure_matching() {
+        let html = "<table><tr><td>A</td><td>B</td></tr></table>";
+        let tmpl = "<table><tr><td>{{ a }}</td><td>{{ b }}</td></tr></table>";
+        assert!(validate_structure(html, tmpl).is_ok());
+    }
+
+    #[test]
+    fn validate_structure_mismatch() {
+        let html = "<table><tr><td>A</td><td>B</td></tr></table>";
+        let tmpl = "<table><tr><td>{{ a }}</td></tr></table>"; // removed a cell
+        assert!(validate_structure(html, tmpl).is_err());
+    }
+
+    // --- detect_suspicious ---
+
+    #[test]
+    fn detect_suspicious_clean() {
+        assert!(detect_suspicious("<p>Hello {{ name }}</p>").is_ok());
+    }
+
+    #[test]
+    fn detect_suspicious_script() {
+        assert!(detect_suspicious("<p>Hi</p><script>alert(1)</script>").is_err());
+    }
+
+    #[test]
+    fn detect_suspicious_event_handler() {
+        assert!(detect_suspicious(r#"<img onerror="alert(1)" src="x">"#).is_err());
+    }
+
+    #[test]
+    fn detect_suspicious_javascript_url() {
+        assert!(detect_suspicious(r#"<a href="javascript:void(0)">click</a>"#).is_err());
     }
 }

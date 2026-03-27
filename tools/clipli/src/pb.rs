@@ -131,12 +131,14 @@ pub fn read_all() -> Result<PbSnapshot, PbError> {
 /// Read a single type from the pasteboard, returning raw bytes.
 pub fn read_type(pb_type: PbType) -> Result<Vec<u8>, PbError> {
     let snapshot = read_all()?;
-    snapshot
+    let data = snapshot
         .types
         .into_iter()
         .find(|e| e.pb_type == pb_type)
         .map(|e| e.data)
-        .ok_or_else(|| PbError::TypeNotFound(pb_type.uti().to_string()))
+        .ok_or_else(|| PbError::TypeNotFound(pb_type.uti().to_string()))?;
+    tracing::debug!(uti = %pb_type.uti(), bytes = data.len(), "pb: read type");
+    Ok(data)
 }
 
 /// Read a specific UTI string from the pasteboard, returning raw bytes.
@@ -186,6 +188,7 @@ pub fn write(entries: &[(PbType, &[u8])]) -> Result<(), PbError> {
 
 /// Write HTML string + optional plain-text fallback to the pasteboard.
 pub fn write_html(html: &str, plain: Option<&str>) -> Result<(), PbError> {
+    tracing::debug!(html_bytes = html.len(), "pb: writing HTML to pasteboard");
     let html_bytes = html.as_bytes();
     match plain {
         Some(p) => write(&[
