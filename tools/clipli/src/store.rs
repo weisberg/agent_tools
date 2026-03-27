@@ -25,7 +25,6 @@ pub enum StoreError {
 
 impl StoreError {
     /// Error code string suitable for structured JSON output.
-    #[allow(dead_code)]
     pub fn code(&self) -> &'static str {
         match self {
             Self::NotFound(_)     => "STORE_NOT_FOUND",

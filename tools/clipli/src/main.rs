@@ -4,6 +4,7 @@ mod excel_edit;
 mod model;
 mod pb;
 mod render;
+mod rtf;
 mod store;
 mod templatize;
 
@@ -22,7 +23,6 @@ use templatize::TemplatizeResult;
 // Config
 // ---------------------------------------------------------------------------
 
-#[allow(dead_code)]
 #[derive(Debug, Default, serde::Deserialize)]
 struct Config {
     #[serde(default)]
@@ -33,7 +33,6 @@ struct Config {
     templatize: ConfigTemplatize,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, serde::Deserialize)]
 struct ConfigDefaults {
     #[serde(default = "default_font")]
@@ -85,7 +84,6 @@ impl Default for ConfigClean {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, serde::Deserialize)]
 struct ConfigTemplatize {
     #[serde(default = "default_strategy")]
@@ -165,8 +163,8 @@ enum Commands {
         name: String,
         #[arg(long, short = 't')]
         templatize: bool,
-        #[arg(long, default_value = "heuristic")]
-        strategy: String,
+        #[arg(long)]
+        strategy: Option<String>,
         #[arg(long, short = 'd')]
         description: Option<String>,
         #[arg(long, value_delimiter = ',')]
@@ -177,6 +175,9 @@ enum Commands {
         raw: bool,
         #[arg(long)]
         keep_classes: bool,
+        /// Preview cleaned/templatized HTML in browser before saving
+        #[arg(long)]
+        preview: bool,
         #[arg(long)]
         json: bool,
     },
@@ -250,11 +251,11 @@ enum Commands {
         #[arg(long, default_value = "#D9E1F2")]
         band_bg: String,
         /// Font family
-        #[arg(long, default_value = "Calibri")]
-        font: String,
+        #[arg(long)]
+        font: Option<String>,
         /// Font size in pt
-        #[arg(long, default_value = "12")]
-        font_size: String,
+        #[arg(long)]
+        font_size: Option<String>,
         /// Column format: NAME:FORMAT[:ALIGN] (repeatable)
         #[arg(long = "col", value_name = "NAME:FMT[:ALIGN]")]
         col_specs: Vec<String>,
@@ -376,8 +377,21 @@ fn main() {
     let cli = Cli::parse();
     let config = load_config();
 
+    // Detect --json mode before dispatching (so errors can be reported as JSON)
+    let json_mode = matches!(
+        &cli.command,
+        Commands::Inspect { json: true, .. }
+            | Commands::Capture { json: true, .. }
+            | Commands::List { json: true, .. }
+    );
+
     if let Err(e) = run(cli.command, &config) {
-        eprintln!("error: {e}");
+        if json_mode {
+            let code = try_error_code(&*e);
+            print_json_error(&e.to_string(), code);
+        } else {
+            eprintln!("error: {e}");
+        }
         std::process::exit(1);
     }
 }
@@ -404,6 +418,7 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
             force,
             raw,
             keep_classes,
+            preview,
             json,
         } => cmd_capture(
             name,
@@ -414,6 +429,7 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
             force,
             raw,
             keep_classes,
+            preview,
             json,
             config,
         ),
@@ -451,7 +467,7 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
             col_specs, align_specs, bold_cols, italic_cols, wrap_cols,
             fg_colors, bg_colors, color_rules, links,
             title, total_row, total_formula, formulas, row_height, header_height,
-            columns, hidden_cols, renames, col_font_sizes, dry_run,
+            columns, hidden_cols, renames, col_font_sizes, dry_run, config,
         ),
         Commands::ExcelEdit {
             set_values, set_bgs, set_fgs, set_formats, set_formulas,
@@ -605,15 +621,17 @@ fn cmd_write(
 fn cmd_capture(
     name: String,
     do_templatize: bool,
-    strategy: String,
+    strategy: Option<String>,
     description: Option<String>,
     tags: Vec<String>,
     force: bool,
     raw: bool,
     keep_classes: bool,
+    preview: bool,
     json: bool,
     config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let strategy = strategy.unwrap_or_else(|| config.templatize.default_strategy.clone());
     if !store::validate_name(&name) {
         return Err(format!(
             "invalid template name '{}': use only letters, digits, underscores, and hyphens",
@@ -645,7 +663,14 @@ fn cmd_capture(
         .map(|s| s.types.iter().map(|e| e.uti.clone()).collect())
         .unwrap_or_else(|| vec![source_pb_type.uti().to_string()]);
 
-    let raw_html = String::from_utf8_lossy(&raw_bytes).into_owned();
+    let raw_html = if source_pb_type == PbType::Rtf {
+        match rtf::rtf_to_html(&raw_bytes) {
+            Ok(html) => html,
+            Err(_) => String::from_utf8_lossy(&raw_bytes).into_owned(),
+        }
+    } else {
+        String::from_utf8_lossy(&raw_bytes).into_owned()
+    };
 
     // Optionally clean
     let cleaned_html = if raw {
@@ -698,6 +723,12 @@ fn cmd_capture(
     } else {
         Some(variables.clone())
     };
+
+    if preview {
+        let tmp_path = std::env::temp_dir().join("clipli_preview.html");
+        std::fs::write(&tmp_path, &template_html)?;
+        open_in_browser(&tmp_path)?;
+    }
 
     let content = SaveContent {
         template_html,
@@ -779,9 +810,13 @@ fn cmd_paste(
     // Determine plain text
     let plain = match plain_text.as_str() {
         "none" => None,
-        "tab-delimited" | "auto" | _ => {
-            Some(render::html_to_plain_text(&rendered_html))
+        "auto" => {
+            match config.defaults.plain_text_strategy.as_str() {
+                "none" => None,
+                _ => Some(render::html_to_plain_text(&rendered_html)),
+            }
         }
+        _ => Some(render::html_to_plain_text(&rendered_html)),
     };
 
     if open {
@@ -793,7 +828,6 @@ fn cmd_paste(
 
     pb::write_html(&rendered_html, plain.as_deref())?;
 
-    let _ = config; // config.defaults used implicitly via strategy
     Ok(())
 }
 
@@ -1096,8 +1130,8 @@ fn cmd_excel(
     header_bg: String,
     header_fg: String,
     band_bg: String,
-    font: String,
-    font_size: String,
+    font: Option<String>,
+    font_size: Option<String>,
     col_specs: Vec<String>,
     align_specs: Vec<String>,
     bold_cols: Vec<String>,
@@ -1118,7 +1152,10 @@ fn cmd_excel(
     renames: Vec<String>,
     col_font_sizes: Vec<String>,
     dry_run: bool,
+    config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let font = font.unwrap_or_else(|| config.defaults.font.clone());
+    let font_size = font_size.unwrap_or_else(|| format!("{}", config.defaults.font_size_pt));
     // Parse CSV
     let (headers, rows) = if file.to_str() == Some("-") {
         use std::io::Read;
@@ -1285,7 +1322,7 @@ fn cmd_convert(
         }
         ("html", "plain") => render::html_to_plain_text(&input_text),
         ("rtf", "html") => {
-            return Err("RTF→HTML not yet implemented".into());
+            rtf::rtf_to_html(input_text.as_bytes())?
         }
         _ => {
             return Err(
@@ -1355,12 +1392,22 @@ fn open_in_browser(path: &std::path::Path) -> Result<(), Box<dyn std::error::Err
 }
 
 /// Print a JSON error envelope to stdout.
-#[allow(dead_code)]
 fn print_json_error(message: &str, code: &str) {
     println!(
         "{}",
-        serde_json::json!({"error": message, "code": code})
+        serde_json::json!({"ok": false, "error": message, "code": code})
     );
+}
+
+/// Try to extract an error code from a boxed error by downcasting to known types.
+fn try_error_code(e: &(dyn std::error::Error + 'static)) -> &'static str {
+    if let Some(e) = e.downcast_ref::<pb::PbError>() { return e.code(); }
+    if let Some(e) = e.downcast_ref::<store::StoreError>() { return e.code(); }
+    if let Some(e) = e.downcast_ref::<render::RenderError>() { return e.code(); }
+    if let Some(e) = e.downcast_ref::<clean::CleanError>() { return e.code(); }
+    if let Some(e) = e.downcast_ref::<templatize::TemplatizeError>() { return e.code(); }
+    if let Some(e) = e.downcast_ref::<rtf::RtfError>() { return e.code(); }
+    "UNKNOWN"
 }
 
 /// Merge data from --data > --data_file > stdin.
@@ -1398,4 +1445,73 @@ fn format_with_commas(n: u64) -> String {
         result.push(*ch);
     }
     result
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_defaults() {
+        let config: Config = toml::from_str("").unwrap();
+        assert_eq!(config.defaults.font, "Calibri");
+        assert_eq!(config.defaults.font_size_pt, 11.0);
+        assert_eq!(config.defaults.plain_text_strategy, "tab-delimited");
+        assert!(!config.clean.keep_classes);
+        assert_eq!(config.clean.target_app, "generic");
+        assert_eq!(config.templatize.default_strategy, "heuristic");
+    }
+
+    #[test]
+    fn config_override_defaults() {
+        let config: Config = toml::from_str(
+            r#"
+[defaults]
+font = "Arial"
+font_size_pt = 14.0
+plain_text_strategy = "none"
+
+[clean]
+keep_classes = true
+target_app = "excel"
+
+[templatize]
+default_strategy = "agent"
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.defaults.font, "Arial");
+        assert_eq!(config.defaults.font_size_pt, 14.0);
+        assert_eq!(config.defaults.plain_text_strategy, "none");
+        assert!(config.clean.keep_classes);
+        assert_eq!(config.clean.target_app, "excel");
+        assert_eq!(config.templatize.default_strategy, "agent");
+    }
+
+    #[test]
+    fn config_partial_sections() {
+        let config: Config = toml::from_str(
+            r#"
+[defaults]
+font = "Aptos Display"
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.defaults.font, "Aptos Display");
+        // Other fields should use defaults
+        assert_eq!(config.defaults.font_size_pt, 11.0);
+        assert_eq!(config.templatize.default_strategy, "heuristic");
+    }
+
+    #[test]
+    fn config_empty_file() {
+        let config: Config = toml::from_str("").unwrap();
+        // All defaults should be populated
+        assert_eq!(config.defaults.font, "Calibri");
+        assert_eq!(config.clean.target_app, "generic");
+    }
 }

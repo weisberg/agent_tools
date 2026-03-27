@@ -42,6 +42,17 @@ pub enum PbError {
     ObjcError(String),
 }
 
+impl PbError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Empty => "PB_EMPTY",
+            Self::TypeNotFound(_) => "PB_TYPE_NOT_FOUND",
+            Self::WriteFailed(_) => "PB_WRITE_FAILED",
+            Self::ObjcError(_) => "PB_OBJC_ERROR",
+        }
+    }
+}
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 /// Copy NSData bytes into a Rust Vec<u8>.

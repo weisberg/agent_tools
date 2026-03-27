@@ -41,9 +41,17 @@ pub enum TargetApp {
 pub enum CleanError {
     #[error("HTML rewriter error: {0}")]
     Rewriter(String),
-    #[allow(dead_code)]
     #[error("encoding error: {0}")]
     Encoding(String),
+}
+
+impl CleanError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Rewriter(_) => "CLEAN_REWRITER_ERROR",
+            Self::Encoding(_) => "CLEAN_ENCODING_ERROR",
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

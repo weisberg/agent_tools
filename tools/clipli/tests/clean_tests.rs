@@ -156,22 +156,17 @@ fn test_convert_j2_to_html_renders_variables() {
 }
 
 // ---------------------------------------------------------------------------
-// 11. RTF → HTML: unsupported conversion reports error
+// 11. RTF → HTML: conversion now works via textutil
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_convert_rtf_to_html_not_supported() {
+fn test_convert_rtf_to_html_produces_output() {
     clipli()
         .args(["convert", "--from", "rtf", "--to", "html"])
+        .write_stdin(r"{\rtf1\ansi\deff0{\fonttbl{\f0 Helvetica;}}\f0\pard This is {\b bold} text.\par}")
         .assert()
-        .failure()
-        .stderr(
-            predicate::str::contains("not yet implemented")
-                .or(predicate::str::contains("not supported"))
-                .or(predicate::str::contains("Unsupported"))
-                .or(predicate::str::contains("unsupported"))
-                .or(predicate::str::contains("invalid value")),
-        );
+        .success()
+        .stdout(predicate::str::contains("bold").or(predicate::str::contains("This is")));
 }
 
 // ---------------------------------------------------------------------------

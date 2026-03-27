@@ -44,7 +44,6 @@ pub enum RenderError {
 }
 
 impl RenderError {
-    #[allow(dead_code)]
     pub fn code(&self) -> &'static str {
         match self {
             Self::TemplateNotFound(_) => "RENDER_TEMPLATE_NOT_FOUND",

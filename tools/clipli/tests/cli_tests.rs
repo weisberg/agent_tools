@@ -167,3 +167,65 @@ fn test_list_empty_store() {
         .assert()
         .success();
 }
+
+// ---------------------------------------------------------------------------
+// 12. capture --json: invalid name produces JSON error envelope
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_error_json_capture_invalid_name() {
+    let output = clipli()
+        .args(["capture", "--name", "../evil", "--json"])
+        .output()
+        .unwrap();
+    // Should fail with exit code 1
+    assert!(!output.status.success());
+    // Error should be JSON on stdout (not stderr)
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(r#""ok":false"#) || stdout.contains(r#""ok": false"#),
+        "expected JSON error envelope on stdout, got: {stdout}"
+    );
+    assert!(
+        stdout.contains(r#""code""#),
+        "expected error code in JSON, got: {stdout}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 13. error without --json still goes to stderr
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_error_non_json_goes_to_stderr() {
+    let output = clipli()
+        .args(["show", "nonexistent_template_xyz_99999"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("error:"),
+        "expected plain text error on stderr, got: {stderr}"
+    );
+    // stdout should be empty (no JSON envelope)
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        !stdout.contains(r#""ok""#),
+        "expected no JSON on stdout without --json flag"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 14. RTF conversion now works (not "not implemented")
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_convert_rtf_to_html() {
+    clipli()
+        .args(["convert", "--from", "rtf", "--to", "html"])
+        .write_stdin(r"{\rtf1\ansi\deff0{\fonttbl{\f0 Helvetica;}}\f0\pard Hello world.\par}")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Hello").or(predicate::str::contains("world")));
+}

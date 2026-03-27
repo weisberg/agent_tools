@@ -31,6 +31,17 @@ pub enum TemplatizeError {
     Io(#[from] std::io::Error),
 }
 
+impl TemplatizeError {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::AgentTimeout => "TEMPLATIZE_AGENT_TIMEOUT",
+            Self::InvalidResponse(_) => "TEMPLATIZE_INVALID_RESPONSE",
+            Self::InvalidTemplate(_) => "TEMPLATIZE_INVALID_TEMPLATE",
+            Self::Io(_) => "TEMPLATIZE_IO_ERROR",
+        }
+    }
+}
+
 /// The strategy to use for variable extraction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(dead_code)]
