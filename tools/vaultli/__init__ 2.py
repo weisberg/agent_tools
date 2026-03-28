@@ -1,0 +1,39 @@
+"""vaultli package exports."""
+
+from .core import (
+    INDEX_FILENAME,
+    VAULT_MARKER,
+    VaultliError,
+    add_file,
+    build_index,
+    find_root,
+    infer_frontmatter,
+    init_vault,
+    is_sidecar_markdown,
+    load_index_records,
+    make_id,
+    parse_markdown_file,
+    scaffold_file,
+    search_index,
+    show_record,
+    validate_vault,
+)
+
+__all__ = [
+    "INDEX_FILENAME",
+    "VAULT_MARKER",
+    "VaultliError",
+    "add_file",
+    "build_index",
+    "find_root",
+    "infer_frontmatter",
+    "init_vault",
+    "is_sidecar_markdown",
+    "load_index_records",
+    "make_id",
+    "parse_markdown_file",
+    "scaffold_file",
+    "search_index",
+    "show_record",
+    "validate_vault",
+]

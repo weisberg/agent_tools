@@ -5,6 +5,9 @@ requires-python = ">=3.10"
 dependencies = [
     "tooli==6.6.0",
     "Pillow",
+    "pyyaml>=6.0.3",
+    "rumps>=0.4.0",
+    "watchdog>=6.0.0",
 ]
 
 [project.optional-dependencies]

@@ -1,0 +1,152 @@
+# ── Plugin Menu Bar Configuration ─────────────────────────────────
+
+# ── Variables ─────────────────────────────────────────────────────
+# Define once, reference anywhere with ${path.to.var}.
+# Supports nesting and vars referencing other vars.
+
+vars:
+  colors:
+    primary: "#1A73E8"
+    primary_light: "#4DA3FF"
+    success: "#34A853"
+    warning: "#FBBC04"
+    danger: "#D93025"
+    bg:
+      dark: "#1E1E2E"
+      medium: "#2D2D3F"
+      light: "#F8F9FA"
+    text:
+      light: "#FFFFFF"
+      muted: "#9CA3AF"
+
+  brand:
+    name: "Vanguard"
+    url: "https://www.vanguard.com"
+
+  paths:
+    downloads: "~/Downloads"
+    reports: "~/Documents/reports"
+
+  # Vars can reference other vars
+  theme:
+    header_color: "${colors.primary}"
+    alert_color: "${colors.danger}"
+
+# ── App Settings ──────────────────────────────────────────────────
+
+app:
+  title: "⚡"
+  tooltip: "Plugin Menu Bar"
+
+plugins_dir: "plugins"
+
+# ── Menu Definition ───────────────────────────────────────────────
+#
+# value types:    scalar → func(val)
+#                 list   → func(*vals)
+#                 dict   → func(**vals)
+#                 omit   → func()
+#
+# ${var} refs:    resolved before dispatch
+
+menu:
+  - label: "Barli v${barli_version}"
+
+  - separator: true
+
+  # ── Styled notifications using color vars ──────────────────────
+  - label: "Deploy Staging"
+    action: styled_notify
+    value:
+      title: "Deploying…"
+      message: "Staging deploy started"
+      color: "${colors.primary}"
+      bg: "${colors.bg.dark}"
+
+  - label: "Deploy Production"
+    action: styled_notify
+    value:
+      title: "⚠ Production Deploy"
+      message: "Pushing to prod — be careful!"
+      color: "${colors.danger}"
+      bg: "${colors.bg.dark}"
+
+  - separator: true
+
+  # ── Greetings using brand vars ─────────────────────────────────
+  - label: "Greet Team"
+    action: greet_person
+    value:
+      name: "Orion Team"
+      greeting: "Good morning from ${brand.name}"
+
+  - separator: true
+
+  # ── Status checks with themed colors ───────────────────────────
+  - label: "Status"
+    submenu:
+      - label: "All Good"
+        action: status_light
+        value:
+          status: "healthy"
+          color: "${colors.success}"
+          label: "All systems operational"
+
+      - label: "Warning"
+        action: status_light
+        value:
+          status: "degraded"
+          color: "${colors.warning}"
+          label: "Performance degraded"
+
+      - label: "Critical"
+        action: status_light
+        value:
+          status: "down"
+          color: "${theme.alert_color}"
+          label: "Service outage detected"
+
+  - separator: true
+
+  # ── Shortcuts using path vars ──────────────────────────────────
+  - label: "Open Sites"
+    submenu:
+      - label: "${brand.name}"
+        action: open_url
+        value: "${brand.url}"
+
+      - label: "GitHub"
+        action: open_url
+        value: "https://github.com"
+
+      - label: "Claude"
+        action: open_url
+        value: "https://claude.ai"
+
+  - label: "Shell"
+    submenu:
+      - label: "List Downloads"
+        action: shell_command
+        value: "ls -la ${paths.downloads} | head -20"
+
+      - label: "List Reports"
+        action: shell_command
+        value: "ls -la ${paths.reports} | head -20"
+
+  - separator: true
+
+  # ── Basic actions ──────────────────────────────────────────────
+  - label: "Say Hello"
+    action: greet
+    value: "World"
+
+  - label: "Add 2 + 3"
+    action: calculate
+    value: [2, 3]
+
+  - label: "Copy Timestamp"
+    action: clipboard_timestamp
+    value: "%Y-%m-%d %H:%M:%S"
+
+  - label: "System Info"
+    action: system_info
