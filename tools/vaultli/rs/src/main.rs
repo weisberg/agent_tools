@@ -3,10 +3,13 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand};
 use serde_json::{json, Map, Value};
 use vaultli::error::VaultliError;
-use vaultli::vault::{
-    add_file, build_index, find_root, infer_frontmatter, init_vault, load_index_records, make_id,
-    scaffold_file, search_records, show_record, validate_vault,
-};
+use vaultli::id::make_id;
+use vaultli::index::{build_index, load_index_records};
+use vaultli::infer::infer_frontmatter;
+use vaultli::paths::find_root;
+use vaultli::scaffold::{add_file, init_vault, scaffold_file};
+use vaultli::search::{search_records, show_record};
+use vaultli::validate::validate_vault;
 
 #[derive(Parser)]
 #[command(

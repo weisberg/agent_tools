@@ -1,4 +1,11 @@
 pub mod error;
 pub mod frontmatter;
+pub mod id;
+pub mod index;
+pub mod infer;
 pub mod model;
-pub mod vault;
+pub mod paths;
+pub mod scaffold;
+pub mod search;
+pub(crate) mod util;
+pub mod validate;
