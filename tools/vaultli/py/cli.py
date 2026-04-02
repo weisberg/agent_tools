@@ -21,6 +21,9 @@ from .core import (
     show_record,
     validate_vault,
 )
+from .assemble import assemble_context
+from .federation import federated_load, federated_search, resolve_federated_id
+from .git import apply_git_meta, git_meta_for_vault
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -70,6 +73,46 @@ def _build_parser() -> argparse.ArgumentParser:
 
     dump_index_parser = subparsers.add_parser("dump-index", help="Dump all current index records")
     dump_index_parser.add_argument("--root", default=".")
+
+    # --- Git integration ---
+    git_meta_parser = subparsers.add_parser("git-meta", help="Show git-derived metadata for vault files")
+    git_meta_parser.add_argument("--root", default=".")
+
+    git_apply_parser = subparsers.add_parser(
+        "git-apply", help="Apply git-derived created/updated/author to frontmatter"
+    )
+    git_apply_parser.add_argument("--root", default=".")
+    git_apply_parser.add_argument("--overwrite", action="store_true", help="Overwrite existing values")
+    git_apply_parser.add_argument("--dry-run", action="store_true", help="Preview changes without writing")
+
+    # --- Context assembly ---
+    assemble_parser = subparsers.add_parser("assemble", help="Assemble documents into a token-budgeted context")
+    assemble_parser.add_argument("query", nargs="?", default=None)
+    assemble_parser.add_argument("--root", default=".")
+    assemble_parser.add_argument("--budget", type=int, default=4000, help="Token budget (default: 4000)")
+    assemble_parser.add_argument("--id", dest="ids", action="append", default=None, help="Pin a document by ID (repeatable)")
+    assemble_parser.add_argument("--tag", dest="tags", action="append", default=None, help="Filter by tag (repeatable)")
+    assemble_parser.add_argument("--category", default=None)
+    assemble_parser.add_argument("--domain", default=None)
+    assemble_parser.add_argument("--scope", default=None)
+    assemble_parser.add_argument("--no-deps", action="store_true", help="Skip dependency resolution")
+    assemble_parser.add_argument("--include-related", action="store_true", help="Include related documents")
+
+    # --- Federation ---
+    fed_search_parser = subparsers.add_parser("fed-search", help="Search across multiple vaults")
+    fed_search_parser.add_argument("query", nargs="?", default=None)
+    fed_search_parser.add_argument("--vault", dest="vaults", action="append", required=True,
+                                   help="Vault path or alias:path (repeatable)")
+    fed_search_parser.add_argument("--jq", dest="jq_filter", default=None)
+
+    fed_load_parser = subparsers.add_parser("fed-load", help="Load all records from multiple vaults")
+    fed_load_parser.add_argument("--vault", dest="vaults", action="append", required=True,
+                                 help="Vault path or alias:path (repeatable)")
+
+    fed_resolve_parser = subparsers.add_parser("fed-resolve", help="Resolve a federated ID to its vault and record")
+    fed_resolve_parser.add_argument("federated_id")
+    fed_resolve_parser.add_argument("--vault", dest="vaults", action="append", required=True,
+                                    help="Vault path or alias:path (repeatable)")
 
     return parser
 
@@ -145,6 +188,21 @@ def _print_generic(result: Any, as_json: bool) -> None:
     print(result)
 
 
+def _parse_vault_specs(raw: list[str]) -> list[dict[str, str]]:
+    """Parse --vault arguments into vault spec dicts.
+
+    Accepts "path" or "alias:path" format.
+    """
+    specs: list[dict[str, str]] = []
+    for entry in raw:
+        if ":" in entry and not entry.startswith("/"):
+            alias, path = entry.split(":", 1)
+            specs.append({"alias": alias, "path": path})
+        else:
+            specs.append({"path": entry})
+    return specs
+
+
 def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     as_json = False
@@ -204,6 +262,49 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "dump-index":
             _print_generic({"records": load_index_records(args.root)}, as_json)
             return 0
+
+        if args.command == "git-meta":
+            _print_generic(git_meta_for_vault(root=args.root), as_json)
+            return 0
+
+        if args.command == "git-apply":
+            result = apply_git_meta(root=args.root, overwrite=args.overwrite, dry_run=args.dry_run)
+            _print_generic(result, as_json)
+            return 0
+
+        if args.command == "assemble":
+            result = assemble_context(
+                args.query,
+                root=args.root,
+                budget=args.budget,
+                ids=args.ids,
+                tags=args.tags,
+                category=args.category,
+                domain=args.domain,
+                scope=args.scope,
+                resolve_deps=not args.no_deps,
+                include_related=args.include_related,
+            )
+            _print_generic(result, as_json)
+            return 0
+
+        if args.command in ("fed-search", "fed-load", "fed-resolve"):
+            vault_specs = _parse_vault_specs(args.vaults)
+
+            if args.command == "fed-search":
+                result = federated_search(vault_specs, args.query, jq_filter=args.jq_filter)
+                _print_search_results(result.get("results", []), as_json)
+                return 0
+
+            if args.command == "fed-load":
+                result = federated_load(vault_specs)
+                _print_generic(result, as_json)
+                return 0
+
+            if args.command == "fed-resolve":
+                result = resolve_federated_id(args.federated_id, vault_specs)
+                _print_record(result.get("record", {}), as_json)
+                return 0
     except VaultliError as exc:
         _print_error(exc, as_json)
         return 1

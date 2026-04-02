@@ -13,7 +13,7 @@ vaultli has two implementations at full command parity:
 | | Python (`py/`) | Rust (`rs/`) |
 |---|---|---|
 | **Role** | Reference implementation | Performance-oriented port |
-| **Commands** | All 11 | All 11 |
+| **Commands** | All 17 (11 core + 6 new) | All 11 (core) |
 | **Run** | `python -m tools.vaultli ...` | `cd rs && cargo run -- ...` |
 
 ## Commands
@@ -31,8 +31,17 @@ vaultli has two implementations at full command parity:
 | `make-id <file>` | Derive a vault id slug from a file path |
 | `infer <file>` | Preview inferred scaffold metadata for a file without writing anything |
 | `dump-index` | Dump all current index records as JSON |
+| **Git integration** | |
+| `git-meta` | Show git-derived created/updated/author for all vault files |
+| `git-apply [--overwrite] [--dry-run]` | Apply git-derived metadata to frontmatter (fills missing fields by default) |
+| **Context assembly** | |
+| `assemble [query] [--budget N] [--id ID] [--tag TAG] [--category CAT] [--domain DOM] [--scope S] [--no-deps] [--include-related]` | Select documents that fit a token budget using greedy knapsack packing |
+| **Multi-vault federation** | |
+| `fed-search [query] --vault PATH [--vault ...]` | Search across multiple vaults with prefixed IDs |
+| `fed-load --vault PATH [--vault ...]` | Load and merge all records from multiple vaults |
+| `fed-resolve <prefix/id> --vault PATH [--vault ...]` | Resolve a federated ID back to its vault and record |
 
-All commands accept `--json` for structured JSON envelope output and `--root` to specify the vault root explicitly.
+All commands accept `--json` for structured JSON envelope output and `--root` to specify the vault root explicitly. Federation `--vault` flags accept `path` or `alias:path` format.
 
 ---
 
