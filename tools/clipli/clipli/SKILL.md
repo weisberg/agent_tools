@@ -15,11 +15,41 @@ description: |
 
 ## Setup
 
-Build: `cd /path/to/agent_tools/tools/clipli && cargo build --release`
+Build from the repo root: `cd tools/clipli && cargo build --release`
 
-Binary: `target/release/clipli` (adjust path or add to `$PATH`)
+Binary in this repo: `tools/clipli/target/release/clipli`
 
 All clipboard operations require a macOS GUI session. Non-clipboard commands (`convert`, `lint`, `excel --dry-run`) work anywhere.
+
+## Agent-first summary
+
+If a new agent is handed `clipli` as a skill, the main thing to understand is that it mixes safe inspection commands with commands that mutate live user state.
+
+- `write`, `capture`, `paste`, `excel`, and `excel-edit` change the current macOS clipboard.
+- `capture`, `edit`, `delete`, `restore`, and `import` persist changes under `~/.config/clipli/templates/`.
+- `inspect`, `read`, `convert`, `search`, `show`, `lint`, and `render` are the safest first moves.
+- `excel --dry-run`, `excel-edit --dry-run`, and `paste --dry-run` let you preview output before touching the clipboard.
+- `capture` reads whatever is on the clipboard right now. It does not capture from a file path.
+- `paste` renders from stored template data. It does not use the current clipboard as input.
+- If the clipboard format is unknown, start with `inspect`.
+
+## Safe Vs Mutating Commands
+
+| Command family | Side effect |
+|---|---|
+| `inspect`, `read`, `convert`, `list`, `show`, `search`, `versions`, `lint`, `render` | Safe read/preview operations |
+| `excel --dry-run`, `excel-edit --dry-run`, `paste --dry-run` | Safe preview operations |
+| `write`, `paste`, `excel`, `excel-edit` | Mutate the live clipboard |
+| `capture`, `edit`, `delete`, `restore`, `import` | Change the persistent template store |
+
+## Safe Default Workflow
+
+When the user has not explicitly asked you to overwrite the clipboard, the safest sequence is:
+
+1. Use `inspect` to see what is on the clipboard now.
+2. Use `read`, `show`, `search`, or `lint` to understand the existing content or template.
+3. Use `convert`, `render`, `excel --dry-run`, `excel-edit --dry-run`, or `paste --dry-run` to preview the exact output.
+4. Only then use a clipboard-mutating command.
 
 ## The Core Loop
 
@@ -46,6 +76,7 @@ CSV file  →  clipli excel  →  clipboard  →  Cmd+V into Excel
 | Fill a saved template with new data | `clipli paste my_template -D '{...}'` |
 | See what's on the clipboard | `clipli inspect` |
 | Convert RTF to HTML | `clipli convert --from rtf --to html` |
+| Render many outputs without touching the clipboard | `clipli render my_template --data-file rows.json` |
 
 ## 1. CSV to Excel Table
 
@@ -218,9 +249,11 @@ clipli capture --name quarterly_report \
   --strategy heuristic \
   --description "Q1 earnings table from Excel" \
   --tags finance,quarterly \
-  --preview \       # open in browser before saving
-  --force           # overwrite if template exists (auto-snapshots previous version)
+  --preview \
+  --force
 ```
+
+`--preview` opens the cleaned or templatized HTML in the browser before saving. `--force` overwrites an existing template and snapshots the previous version first.
 
 **Pipeline:** read clipboard (HTML > RTF > plain text fallback) -> clean Office HTML -> extract variables -> save to `~/.config/clipli/templates/<name>/`.
 
