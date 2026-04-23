@@ -1,0 +1,16 @@
+[package]
+name = "docli-patch"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+docli-core = { path = "../docli-core" }
+docli-query = { path = "../docli-query" }
+docli-schema = { path = "../docli-schema" }
+quick-xml.workspace = true
+regex.workspace = true
+serde.workspace = true
+roxmltree.workspace = true
+zip.workspace = true

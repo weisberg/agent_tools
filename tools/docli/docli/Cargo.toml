@@ -1,0 +1,39 @@
+[workspace]
+members = [
+    "docli-cli",
+    "docli-core",
+    "docli-query",
+    "docli-patch",
+    "docli-create",
+    "docli-schema",
+    "docli-render",
+    "docli-kb",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+rust-version = "1.78"
+version = "0.1.0"
+
+[workspace.dependencies]
+anyhow = "1"
+atomicfile = "0.1"
+clap = { version = "4", features = ["derive"] }
+docx-rs = "0.4"
+hex = "0.4"
+minijinja = { version = "2", features = ["loader"] }
+ooxmlsdk = "0.2"
+quick-xml = { version = "0.36", features = ["serialize"] }
+regex = "1"
+roxmltree = "0.20"
+schemars = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.10"
+similar = "2"
+tempfile = "3"
+thiserror = "2"
+zip = "2"

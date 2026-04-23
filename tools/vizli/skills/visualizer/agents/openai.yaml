@@ -1,0 +1,4 @@
+interface:
+  display_name: "Visualizer"
+  short_description: "Operate vizli template rendering workflows"
+  default_prompt: "Use $visualizer to select a vizli template, resolve its payload, and render the requested visualization."

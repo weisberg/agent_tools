@@ -1,0 +1,31 @@
+[package]
+name = "docli-cli"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "docli"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+docli-core = { path = "../docli-core" }
+docli-create = { path = "../docli-create" }
+docli-kb = { path = "../docli-kb" }
+docli-patch = { path = "../docli-patch" }
+docli-query = { path = "../docli-query" }
+docli-render = { path = "../docli-render" }
+docli-schema = { path = "../docli-schema" }
+roxmltree.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+zip.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
+zip.workspace = true

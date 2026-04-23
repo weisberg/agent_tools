@@ -1,0 +1,14 @@
+[package]
+name = "docli-render"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+docli-core = { path = "../docli-core" }
+docli-query = { path = "../docli-query" }
+anyhow.workspace = true
+serde.workspace = true
+similar.workspace = true
+tempfile.workspace = true

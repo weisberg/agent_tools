@@ -1,0 +1,11 @@
+/target/
+.DS_Store
+*.docx
+*.pdf
+!tests/fixtures/*.docx
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+docli/target/
+target/

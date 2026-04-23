@@ -1,0 +1,19 @@
+[package]
+name = "xli-ooxml"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+version.workspace = true
+
+[dependencies]
+quick-xml.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+umya-spreadsheet.workspace = true
+zip.workspace = true
+xli-core = { path = "../xli-core" }
+
+[dev-dependencies]
+rust_xlsxwriter.workspace = true
+tempfile.workspace = true

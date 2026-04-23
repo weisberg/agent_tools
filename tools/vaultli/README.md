@@ -4,7 +4,76 @@ A CLI for managing a file-based knowledge vault with YAML frontmatter metadata a
 
 Core principles: markdown files are the universal unit of knowledge, YAML frontmatter is the universal metadata format, JSONL is the universal index format. The vault is a directory tree of human-readable files — no databases, no proprietary formats. The `INDEX.jsonl` file is a derived cache, never the source of truth.
 
-The v1.0 specification lives in `vaultli-spec-v1.0.md`.
+The v1.0 specification lives in `vaultli-spec-v1.0.md`. The short operational guide for agent use lives in `SKILL.md`.
+
+## Agent-first summary
+
+If a new agent is handed `vaultli` as a skill, the main thing it needs to understand is that `vaultli` manages metadata and index state, not the full knowledge-retrieval loop.
+
+- `search` and `show` read `INDEX.jsonl`, which contains frontmatter-derived records plus `file` and `hash`.
+- `search` does not search markdown bodies or the contents of non-markdown source assets.
+- After finding a relevant record, the agent still needs to open the file named in `file`, and for sidecars often the `source` asset as well.
+- `add` and `scaffold` create draft metadata quickly, but the inferred `title`, `description`, and `tags` are placeholders and usually need refinement before the vault is useful.
+- `INDEX.jsonl` is a derived artifact. Do not hand-edit it; rebuild it with `index`.
+- `validate` audits the vault and reports issues. It does not repair them automatically.
+
+## Quickstart For A New Agent
+
+Prefer the Python implementation for first use:
+
+```bash
+uv run python -m tools.vaultli --help
+```
+
+Recommended first-use loop:
+
+```bash
+# 1. See whether a vault already exists
+uv run python -m tools.vaultli root .
+
+# 2. Create one only if .kbroot is missing
+uv run python -m tools.vaultli init ./kb
+
+# 3. Add metadata to native markdown in one step
+uv run python -m tools.vaultli add ./kb/docs/guide.md --root ./kb
+
+# 4. Or create a sidecar for a non-markdown asset
+uv run python -m tools.vaultli scaffold ./kb/queries/retention.sql --root ./kb
+
+# 5. Edit the generated markdown to improve title/description/tags/body
+
+# 6. Rebuild and validate
+uv run python -m tools.vaultli index --root ./kb --json
+uv run python -m tools.vaultli validate --root ./kb --json
+
+# 7. Retrieve candidate records by metadata, then open the files yourself
+uv run python -m tools.vaultli search retention --root ./kb --json
+uv run python -m tools.vaultli show queries/retention --root ./kb --json
+```
+
+## Common First-use Mistakes
+
+| Mistake | What vaultli actually does |
+|---|---|
+| "Search will find text inside the document body." | Search matches the indexed JSON record, which is derived from frontmatter plus `file` and `hash`. |
+| "A `.sql` or `.j2` file will show up automatically." | Non-markdown assets are invisible until they have a same-directory sidecar like `query.sql.md`. |
+| "The scaffolded metadata is good enough to keep." | Inferred metadata is intentionally generic. Retrieval quality depends heavily on rewriting `description`, `tags`, and often `category`. |
+| "Editing `INDEX.jsonl` is a quick fix." | `INDEX.jsonl` is disposable cache state and should always be rebuilt, not edited manually. |
+| "Changing sidecar prose updates the indexed content hash." | Sidecar hashes are based on the `source` asset bytes, not the sidecar body. |
+| "`validate` will fix broken links or duplicate IDs." | `validate` only reports issues; the agent must repair the files and then re-run `index` and `validate`. |
+| "`search --jq` is always available." | Structured filtering depends on `jq` being installed on the machine. |
+
+## Recommended Agent Workflow
+
+When using `vaultli` as part of a knowledge base implementation, this sequence is the safest default:
+
+1. Discover the vault root with `root` or pass `--root` explicitly.
+2. Use `add` for markdown files when you want scaffold + index in one step.
+3. Use `scaffold` for non-markdown assets or when the generated metadata should be reviewed before indexing.
+4. Improve the generated frontmatter immediately, especially `description`, `tags`, and relationship fields.
+5. Run `index` after metadata edits.
+6. Run `validate` before depending on the vault for retrieval.
+7. Use `search` to shortlist candidates, then read the actual files.
 
 ## Implementations
 
@@ -14,7 +83,7 @@ vaultli has two implementations at full command parity:
 |---|---|---|
 | **Role** | Reference implementation | Performance-oriented port |
 | **Commands** | All 11 | All 11 |
-| **Run** | `python -m tools.vaultli ...` | `cd rs && cargo run -- ...` |
+| **Run** | `uv run python -m tools.vaultli ...` | `cd rs && cargo run -- ...` |
 
 ## Commands
 

@@ -39,6 +39,34 @@ Unwrap hard-wrapped paragraphs, strip `<span>`/`<div>` tags, and normalize EPUB 
 uv run tools/md_clean.py clean <file> [--out-file out.md] [--in-place] [--keep-divs] [--convert-index] [--json]
 ```
 
+### Knowledge Vault — `tools/vaultli/`
+
+Manage a file-based knowledge base with YAML frontmatter, sidecar markdown for non-markdown assets, and a derived `INDEX.jsonl` for metadata search.
+
+```bash
+uv run python -m tools.vaultli init ./kb
+uv run python -m tools.vaultli add ./kb/docs/guide.md --root ./kb
+uv run python -m tools.vaultli scaffold ./kb/queries/report.sql --root ./kb
+uv run python -m tools.vaultli validate --root ./kb --json
+uv run python -m tools.vaultli search report --root ./kb --json
+```
+
+See `tools/vaultli/README.md` for the full guide and `tools/vaultli/SKILL.md` for the agent-oriented workflow.
+
+### Clipboard Intelligence — `tools/clipli/`
+
+Capture clipboard content as reusable templates, render formatted output back to the clipboard, generate Excel-native HTML from CSV, and convert between clipboard-friendly formats.
+
+```bash
+tools/clipli/target/release/clipli inspect
+tools/clipli/target/release/clipli excel data.csv --dry-run
+tools/clipli/target/release/clipli capture --name quarterly_report --preview
+tools/clipli/target/release/clipli paste quarterly_report -D '{"title":"Q2"}' --dry-run
+tools/clipli/target/release/clipli lint quarterly_report --json
+```
+
+See `tools/clipli/clipli/SKILL.md` for the agent-oriented workflow and `tools/clipli/CLIPLI_SPEC.md` for the full command surface.
+
 ## Output Format
 
 All tools return a consistent JSON envelope:
@@ -70,4 +98,4 @@ The `skills/` directory contains Claude Code skills used during development of t
 
 - [`TOOLI_DEV_GUIDE.md`](TOOLI_DEV_GUIDE.md) — Comprehensive developer guide for building tooli-based tools.
 - [`tooli_feedback.md`](tooli_feedback.md) — Bug reports and improvement requests filed against the tooli framework.
-- [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md) — Agent instructions for working in this repo (symlinked).
+- [`CLAUDE.md`](CLAUDE.md) / [`AGENTS.md`](AGENTS.md) — Agent instructions for working in this repo.

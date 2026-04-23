@@ -1,0 +1,15 @@
+[package]
+name = "docli-query"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+docli-core = { path = "../docli-core" }
+hex.workspace = true
+quick-xml.workspace = true
+regex.workspace = true
+roxmltree.workspace = true
+serde.workspace = true
+sha2.workspace = true

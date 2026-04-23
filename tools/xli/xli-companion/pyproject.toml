@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "xli-companion"
+version = "0.1.0"
+description = "Python companion for XLI — heavyweight validation, reconciliation, and reporting for Excel workbooks"
+requires-python = ">= 3.11"
+dependencies = [
+    "python-calamine",
+    "polars",
+    "openpyxl",
+    "pydantic >= 2.0",
+    "lxml",
+    "jinja2",
+    "rich",
+    "XlsxWriter",
+]
+
+[project.optional-dependencies]
+pandas = ["pandas", "pandera"]
+engine = ["xlwings"]
+commercial = []
+dev = ["pytest", "pytest-cov", "ruff", "mypy"]
+all = [
+    "xli-companion[pandas]",
+    "xli-companion[engine]",
+    "xli-companion[commercial]",
+    "xli-companion[dev]",
+]
+
+[project.scripts]
+xli-companion = "xli_companion.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/xli_companion"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+strict = true

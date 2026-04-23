@@ -1,0 +1,13 @@
+[package]
+name = "xli-kb"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true
+tera.workspace = true
+xli-core = { path = "../xli-core" }

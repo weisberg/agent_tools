@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<OfficeApp
+  xmlns="http://schemas.microsoft.com/office/appforoffice/1.1"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
+  xmlns:ov="http://schemas.microsoft.com/office/taskpaneappversionoverrides"
+  xsi:type="TaskPaneApp">
+
+  <Id>deckli-bridge-addin-00000001</Id>
+  <Version>0.1.0</Version>
+  <ProviderName>deckli</ProviderName>
+  <DefaultLocale>en-US</DefaultLocale>
+  <DisplayName DefaultValue="deckli Bridge"/>
+  <Description DefaultValue="WebSocket bridge for CLI-driven PowerPoint control"/>
+
+  <SupportUrl DefaultValue="https://github.com/deckli/deckli"/>
+
+  <Hosts>
+    <Host Name="Presentation"/>
+  </Hosts>
+
+  <DefaultSettings>
+    <SourceLocation DefaultValue="https://localhost:3000/taskpane.html"/>
+  </DefaultSettings>
+
+  <Permissions>ReadWriteDocument</Permissions>
+
+  <Requirements>
+    <Sets DefaultMinVersion="1.1">
+      <Set Name="PowerPointApi" MinVersion="1.1"/>
+    </Sets>
+  </Requirements>
+
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
+    <Hosts>
+      <Host xsi:type="Presentation">
+        <DesktopFormFactor>
+          <ExtensionPoint xsi:type="PrimaryCommandSurface">
+            <OfficeTab id="TabHome">
+              <Group id="deckli.Group">
+                <Label resid="GroupLabel"/>
+                <Control xsi:type="Button" id="deckli.ShowTaskpane">
+                  <Label resid="ButtonLabel"/>
+                  <Supertip>
+                    <Title resid="ButtonLabel"/>
+                    <Description resid="ButtonTooltip"/>
+                  </Supertip>
+                  <Icon>
+                    <bt:Image size="16" resid="Icon16"/>
+                    <bt:Image size="32" resid="Icon32"/>
+                    <bt:Image size="80" resid="Icon80"/>
+                  </Icon>
+                  <Action xsi:type="ShowTaskpane">
+                    <TaskpaneId>deckli.Taskpane</TaskpaneId>
+                    <SourceLocation resid="TaskpaneUrl"/>
+                  </Action>
+                </Control>
+              </Group>
+            </OfficeTab>
+          </ExtensionPoint>
+        </DesktopFormFactor>
+      </Host>
+    </Hosts>
+
+    <Resources>
+      <bt:Urls>
+        <bt:Url id="TaskpaneUrl" DefaultValue="https://localhost:3000/taskpane.html"/>
+      </bt:Urls>
+      <bt:ShortStrings>
+        <bt:String id="GroupLabel" DefaultValue="deckli"/>
+        <bt:String id="ButtonLabel" DefaultValue="deckli Bridge"/>
+        <bt:String id="ButtonTooltip" DefaultValue="Open deckli CLI bridge"/>
+      </bt:ShortStrings>
+      <bt:Images>
+        <bt:Image id="Icon16" DefaultValue="https://localhost:3000/assets/icon-16.png"/>
+        <bt:Image id="Icon32" DefaultValue="https://localhost:3000/assets/icon-32.png"/>
+        <bt:Image id="Icon80" DefaultValue="https://localhost:3000/assets/icon-80.png"/>
+      </bt:Images>
+    </Resources>
+  </VersionOverrides>
+</OfficeApp>

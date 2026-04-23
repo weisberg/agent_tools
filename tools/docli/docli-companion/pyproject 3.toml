@@ -1,0 +1,30 @@
+[project]
+name = "docli-companion"
+version = "0.1.0"
+description = "Python companion for docli — heavyweight verification, policy checks, and document QA"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "lxml>=5.0",
+    "pydantic>=2.0",
+    "jsonschema>=4.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+standard = ["docx2python>=2.0", "mammoth>=1.8", "pypandoc-binary>=1.13"]
+authoring = ["python-docx>=1.1", "docxtpl>=0.18"]
+analysis = ["duckdb>=1.0", "pyarrow>=15.0"]
+
+[project.scripts]
+docli-companion = "docli_companion.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/docli_companion"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

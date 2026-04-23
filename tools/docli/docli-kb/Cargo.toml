@@ -1,0 +1,17 @@
+[package]
+name = "docli-kb"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+docli-core = { path = "../docli-core" }
+minijinja.workspace = true
+regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

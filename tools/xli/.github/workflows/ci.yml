@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Check
+        run: cargo check
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+      - name: Test
+        run: cargo test
+
+  python:
+    name: Python checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: xli-companion
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check src/ tests/
+      - name: Type check
+        run: mypy src/xli_companion/ --ignore-missing-imports
+      - name: Test
+        run: pytest tests/ -v

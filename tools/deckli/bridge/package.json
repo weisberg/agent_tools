@@ -1,0 +1,13 @@
+{
+  "name": "deckli-bridge",
+  "version": "0.1.0",
+  "description": "WebSocket sidecar bridge between deckli CLI and PowerPoint add-in",
+  "type": "module",
+  "main": "deckli-bridge.mjs",
+  "scripts": {
+    "start": "node deckli-bridge.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

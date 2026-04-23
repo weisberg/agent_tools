@@ -1,0 +1,29 @@
+[package]
+name = "xli-cli"
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+version.workspace = true
+
+[[bin]]
+name = "xli"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+xli-calc = { path = "../xli-calc" }
+xli-core = { path = "../xli-core" }
+xli-fs = { path = "../xli-fs" }
+xli-kb = { path = "../xli-kb" }
+xli-new = { path = "../xli-new" }
+xli-ooxml = { path = "../xli-ooxml" }
+xli-read = { path = "../xli-read" }
+xli-schema = { path = "../xli-schema" }
+
+[dev-dependencies]
+rust_xlsxwriter.workspace = true
+tempfile.workspace = true

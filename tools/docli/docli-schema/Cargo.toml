@@ -1,0 +1,20 @@
+[package]
+name = "docli-schema"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+version.workspace = true
+
+[dependencies]
+docli-core = { path = "../docli-core" }
+docli-query = { path = "../docli-query" }
+ooxmlsdk.workspace = true
+quick-xml.workspace = true
+roxmltree.workspace = true
+schemars.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+zip.workspace = true

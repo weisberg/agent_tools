@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>deckli Bridge</title>
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      padding: 12px;
+      color: #333;
+      background: #fafafa;
+    }
+    h1 { font-size: 16px; margin-bottom: 8px; }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #ccc;
+    }
+    .dot.connected { background: #4caf50; }
+    .dot.disconnected { background: #f44336; }
+    .dot.connecting { background: #ff9800; }
+    #log {
+      font-family: "SF Mono", "Menlo", monospace;
+      font-size: 11px;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 8px;
+      border-radius: 4px;
+      height: 300px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .log-entry { margin-bottom: 2px; }
+    .log-cmd { color: #569cd6; }
+    .log-ok { color: #4ec9b0; }
+    .log-err { color: #f44747; }
+  </style>
+</head>
+<body>
+  <h1>deckli Bridge</h1>
+  <div class="status">
+    <div id="statusDot" class="dot disconnected"></div>
+    <span id="statusText">Disconnected</span>
+  </div>
+  <div id="log"></div>
+</body>
+</html>
