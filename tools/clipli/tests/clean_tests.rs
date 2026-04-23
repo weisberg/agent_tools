@@ -145,9 +145,12 @@ fn test_convert_j2_to_html_renders_variables() {
     clipli()
         .args([
             "convert",
-            "--from", "j2",
-            "--to", "html",
-            "-D", r#"{"name":"Alice","amount":"$1000"}"#,
+            "--from",
+            "j2",
+            "--to",
+            "html",
+            "-D",
+            r#"{"name":"Alice","amount":"$1000"}"#,
         ])
         .write_stdin("<p>{{ name }} earned {{ amount }}</p>")
         .assert()
@@ -163,7 +166,9 @@ fn test_convert_j2_to_html_renders_variables() {
 fn test_convert_rtf_to_html_produces_output() {
     clipli()
         .args(["convert", "--from", "rtf", "--to", "html"])
-        .write_stdin(r"{\rtf1\ansi\deff0{\fonttbl{\f0 Helvetica;}}\f0\pard This is {\b bold} text.\par}")
+        .write_stdin(
+            r"{\rtf1\ansi\deff0{\fonttbl{\f0 Helvetica;}}\f0\pard This is {\b bold} text.\par}",
+        )
         .assert()
         .success()
         .stdout(predicate::str::contains("bold").or(predicate::str::contains("This is")));

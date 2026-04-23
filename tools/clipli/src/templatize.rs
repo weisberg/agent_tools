@@ -28,10 +28,7 @@ pub enum TemplatizeError {
     #[error("agent returned invalid Jinja2 template: {0}")]
     InvalidTemplate(String),
     #[error("agent template failed validation: {message}")]
-    ValidationFailed {
-        template: String,
-        message: String,
-    },
+    ValidationFailed { template: String, message: String },
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -181,8 +178,8 @@ impl HeuristicState {
 
 // Structural labels to skip in Pass 7.
 const STRUCTURAL_LABELS: &[&str] = &[
-    "Total", "Name", "Date", "Amount", "Value", "Count", "Type", "Status", "ID",
-    "No.", "#", "N/A", "-", "Yes", "No",
+    "Total", "Name", "Date", "Amount", "Value", "Count", "Type", "Status", "ID", "No.", "#", "N/A",
+    "-", "Yes", "No",
 ];
 
 /// Apply all detection passes to a single text segment, returning the
@@ -222,7 +219,13 @@ fn process_text_segment(text: &str, state: &mut HeuristicState, in_cell: bool) -
             for m in re.find_iter(text) {
                 if try_claim(&mut claimed, m.start(), m.end()) {
                     let name = state.next_date();
-                    replacements.push((m.start(), m.end(), name, VarType::Date, m.as_str().to_owned()));
+                    replacements.push((
+                        m.start(),
+                        m.end(),
+                        name,
+                        VarType::Date,
+                        m.as_str().to_owned(),
+                    ));
                 }
             }
         }
@@ -234,7 +237,13 @@ fn process_text_segment(text: &str, state: &mut HeuristicState, in_cell: bool) -
         for m in currency_re.find_iter(text) {
             if try_claim(&mut claimed, m.start(), m.end()) {
                 let name = state.next_currency();
-                replacements.push((m.start(), m.end(), name, VarType::Currency, m.as_str().to_owned()));
+                replacements.push((
+                    m.start(),
+                    m.end(),
+                    name,
+                    VarType::Currency,
+                    m.as_str().to_owned(),
+                ));
             }
         }
     }
@@ -245,19 +254,30 @@ fn process_text_segment(text: &str, state: &mut HeuristicState, in_cell: bool) -
         for m in pct_re.find_iter(text) {
             if try_claim(&mut claimed, m.start(), m.end()) {
                 let name = state.next_pct();
-                replacements.push((m.start(), m.end(), name, VarType::Percentage, m.as_str().to_owned()));
+                replacements.push((
+                    m.start(),
+                    m.end(),
+                    name,
+                    VarType::Percentage,
+                    m.as_str().to_owned(),
+                ));
             }
         }
     }
 
     // --- Pass 4: Email addresses ---
     {
-        let email_re =
-            Regex::new(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b").unwrap();
+        let email_re = Regex::new(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b").unwrap();
         for m in email_re.find_iter(text) {
             if try_claim(&mut claimed, m.start(), m.end()) {
                 let name = state.next_email();
-                replacements.push((m.start(), m.end(), name, VarType::String, m.as_str().to_owned()));
+                replacements.push((
+                    m.start(),
+                    m.end(),
+                    name,
+                    VarType::String,
+                    m.as_str().to_owned(),
+                ));
             }
         }
     }
@@ -268,7 +288,13 @@ fn process_text_segment(text: &str, state: &mut HeuristicState, in_cell: bool) -
         for m in num_re.find_iter(text) {
             if try_claim(&mut claimed, m.start(), m.end()) {
                 let name = state.next_number();
-                replacements.push((m.start(), m.end(), name, VarType::Number, m.as_str().to_owned()));
+                replacements.push((
+                    m.start(),
+                    m.end(),
+                    name,
+                    VarType::Number,
+                    m.as_str().to_owned(),
+                ));
             }
         }
     }
@@ -279,7 +305,13 @@ fn process_text_segment(text: &str, state: &mut HeuristicState, in_cell: bool) -
         for m in q_re.find_iter(text) {
             if try_claim(&mut claimed, m.start(), m.end()) {
                 let name = state.next_quarter();
-                replacements.push((m.start(), m.end(), name, VarType::String, m.as_str().to_owned()));
+                replacements.push((
+                    m.start(),
+                    m.end(),
+                    name,
+                    VarType::String,
+                    m.as_str().to_owned(),
+                ));
             }
         }
     }
@@ -298,13 +330,7 @@ fn process_text_segment(text: &str, state: &mut HeuristicState, in_cell: bool) -
                 let end = start + trimmed.len();
                 if try_claim(&mut claimed, start, end) {
                     let name = state.next_field();
-                    replacements.push((
-                        start,
-                        end,
-                        name,
-                        VarType::String,
-                        trimmed.to_owned(),
-                    ));
+                    replacements.push((start, end, name, VarType::String, trimmed.to_owned()));
                 }
             }
         }
@@ -566,7 +592,10 @@ fn agent_stdio(html: &str, source_app: Option<&str>) -> Result<TemplatizeResult,
     })?;
     writeln!(out, "{}", payload_json)?;
     out.flush()?;
-    tracing::debug!(payload_bytes = payload_json.len(), "agent: sent payload via stdio");
+    tracing::debug!(
+        payload_bytes = payload_json.len(),
+        "agent: sent payload via stdio"
+    );
     drop(out);
 
     // Read one line of JSON from stdin.
@@ -577,7 +606,10 @@ fn agent_stdio(html: &str, source_app: Option<&str>) -> Result<TemplatizeResult,
         .read_line(&mut line)
         .map_err(|_| TemplatizeError::AgentTimeout)?;
 
-    tracing::debug!(response_bytes = line.len(), "agent: received response via stdio");
+    tracing::debug!(
+        response_bytes = line.len(),
+        "agent: received response via stdio"
+    );
 
     finalize_agent_response(html, &line)
 }
@@ -642,7 +674,10 @@ fn agent_command(
                 )));
             }
             let response = String::from_utf8_lossy(&output.stdout).into_owned();
-            tracing::debug!(response_bytes = response.len(), "agent: received response from command");
+            tracing::debug!(
+                response_bytes = response.len(),
+                "agent: received response from command"
+            );
             finalize_agent_response(html, &response)
         }
         Ok(Err(e)) => {
@@ -703,6 +738,43 @@ mod tests {
         );
     }
 
+    #[test]
+    fn agent_command_templatizes_with_external_process() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let script = dir.path().join("agent.sh");
+        std::fs::write(
+            &script,
+            r#"#!/bin/sh
+cat >/dev/null
+printf '%s\n' '{"template":"<table><tr><td>{{ name }}</td></tr></table>","variables":[{"name":"name","type":"string","default_value":"Alice","description":"Person name"}]}'
+"#,
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&script).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&script, perms).unwrap();
+
+        let result = agent(
+            "<table><tr><td>Alice</td></tr></table>",
+            Some("test"),
+            &AgentConfig {
+                command: Some(script.display().to_string()),
+                args: vec![],
+                timeout_secs: 5,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            result.template_html,
+            "<table><tr><td>{{ name }}</td></tr></table>"
+        );
+        assert_eq!(result.variables.len(), 1);
+        assert_eq!(result.variables[0].name, "name");
+    }
+
     // --- Pass 1: ISO date ---
 
     #[test]
@@ -758,8 +830,10 @@ mod tests {
         // We can't call the renderer here, so verify structural properties.
         assert!(
             !result.template_html.contains("$1,234")
-                || result.variables.iter().any(|v| v.default_value
-                    == Some(serde_json::json!("$1,234")))
+                || result
+                    .variables
+                    .iter()
+                    .any(|v| v.default_value == Some(serde_json::json!("$1,234")))
         );
     }
 

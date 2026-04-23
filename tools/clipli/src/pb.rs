@@ -61,12 +61,12 @@ impl PbError {
 /// We use .as_ptr() to get a *const c_void, cast to *const u8, then build
 /// a slice.  A zero-length NSData is valid; we return an empty vec.
 fn nsdata_to_vec(d: &NSData) -> Vec<u8> {
-    let len = d.length() as usize;
+    let len = d.length();
     if len == 0 {
         return vec![];
     }
     // bytes() → NonNull<c_void>
-    let ptr = d.bytes().as_ptr() as *const u8;
+    let ptr = d.bytes().as_ptr();
     unsafe { std::slice::from_raw_parts(ptr, len) }.to_vec()
 }
 
@@ -103,7 +103,7 @@ pub fn read_all() -> Result<PbSnapshot, PbError> {
         let pb_type = PbType::from_uti(&uti);
 
         // dataForType takes &NSPasteboardType which is &NSString.
-        let data = match unsafe { pb.dataForType(&*uti_retained) } {
+        let data = match unsafe { pb.dataForType(&uti_retained) } {
             Some(d) => nsdata_to_vec(&d),
             None => vec![],
         };
@@ -146,7 +146,7 @@ pub fn read_type(pb_type: PbType) -> Result<Vec<u8>, PbError> {
 pub fn read_uti(uti: &str) -> Result<Vec<u8>, PbError> {
     let pb = unsafe { NSPasteboard::generalPasteboard() };
     let uti_key = NSString::from_str(uti);
-    match unsafe { pb.dataForType(&*uti_key) } {
+    match unsafe { pb.dataForType(&uti_key) } {
         Some(d) => Ok(nsdata_to_vec(&d)),
         None => Err(PbError::TypeNotFound(uti.to_string())),
     }
@@ -174,7 +174,7 @@ pub fn write(entries: &[(PbType, &[u8])]) -> Result<(), PbError> {
         // NSData::with_bytes is the safe constructor available in
         // objc2-foundation 0.2 that takes a &[u8] slice.
         let ns_data = NSData::with_bytes(data);
-        let ok = unsafe { pb.setData_forType(Some(&ns_data), &*uti_key) };
+        let ok = unsafe { pb.setData_forType(Some(&ns_data), &uti_key) };
         if !ok {
             return Err(PbError::WriteFailed(format!(
                 "setData:forType: returned NO for {}",

@@ -10,6 +10,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+pub type CsvData = (Vec<String>, Vec<Vec<String>>);
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
@@ -120,7 +122,7 @@ impl Default for ExcelConfig {
 // CSV parsing
 // ---------------------------------------------------------------------------
 
-pub fn read_csv(path: &Path) -> Result<(Vec<String>, Vec<Vec<String>>), Box<dyn std::error::Error>> {
+pub fn read_csv(path: &Path) -> Result<CsvData, Box<dyn std::error::Error>> {
     let mut rdr = csv::Reader::from_path(path)?;
     let headers: Vec<String> = rdr.headers()?.iter().map(|s| s.to_string()).collect();
     let mut rows: Vec<Vec<String>> = Vec::new();
@@ -131,7 +133,7 @@ pub fn read_csv(path: &Path) -> Result<(Vec<String>, Vec<Vec<String>>), Box<dyn 
     Ok((headers, rows))
 }
 
-pub fn read_csv_from_str(data: &str) -> Result<(Vec<String>, Vec<Vec<String>>), Box<dyn std::error::Error>> {
+pub fn read_csv_from_str(data: &str) -> Result<CsvData, Box<dyn std::error::Error>> {
     let mut rdr = csv::Reader::from_reader(data.as_bytes());
     let headers: Vec<String> = rdr.headers()?.iter().map(|s| s.to_string()).collect();
     let mut rows: Vec<Vec<String>> = Vec::new();
@@ -148,10 +150,7 @@ pub fn read_csv_from_str(data: &str) -> Result<(Vec<String>, Vec<Vec<String>>), 
 
 /// Resolve which columns to include and in what order.
 /// Returns indices into the original CSV headers.
-fn resolve_columns(
-    csv_headers: &[String],
-    config: &ExcelConfig,
-) -> Vec<usize> {
+fn resolve_columns(csv_headers: &[String], config: &ExcelConfig) -> Vec<usize> {
     let indices: Vec<usize> = if let Some(ref cols) = config.columns {
         // Use specified order — look up each name in csv_headers
         cols.iter()
@@ -188,8 +187,12 @@ pub fn number_format_css_owned(fmt: &str) -> String {
 
 fn number_format_css(fmt: &str) -> &'static str {
     match fmt {
-        "currency" => r#"mso-number-format:"\0022$\0022\#\,\#\#0_\)\;\[Red\]\\\(\0022$\0022\#\,\#\#0\\\)";"#,
-        "accounting" => r#"mso-number-format:"_\(* \#\,\#\#0_\)\;_\(* \\\(\#\,\#\#0\\\)\;_\(* \0022-\0022??_\)\;_\(\@_\)";"#,
+        "currency" => {
+            r#"mso-number-format:"\0022$\0022\#\,\#\#0_\)\;\[Red\]\\\(\0022$\0022\#\,\#\#0\\\)";"#
+        }
+        "accounting" => {
+            r#"mso-number-format:"_\(* \#\,\#\#0_\)\;_\(* \\\(\#\,\#\#0\\\)\;_\(* \0022-\0022??_\)\;_\(\@_\)";"#
+        }
         "percent" => "mso-number-format:Percent;",
         "percent_int" => "mso-number-format:0%;",
         "percent_1dp" => r#"mso-number-format:"0\.0%";"#,
@@ -223,30 +226,22 @@ fn evaluate_rule(rule: &ColorRule, cell_value: &str) -> bool {
         "contains" => cell_value.contains(&rule.value),
         "==" | "eq" => cell_value.trim() == rule.value,
         "!=" | "ne" => cell_value.trim() != rule.value,
-        ">=" => {
-            match (parse_numeric(cell_value), parse_numeric(&rule.value)) {
-                (Some(a), Some(b)) => a >= b,
-                _ => false,
-            }
-        }
-        "<=" => {
-            match (parse_numeric(cell_value), parse_numeric(&rule.value)) {
-                (Some(a), Some(b)) => a <= b,
-                _ => false,
-            }
-        }
-        ">" => {
-            match (parse_numeric(cell_value), parse_numeric(&rule.value)) {
-                (Some(a), Some(b)) => a > b,
-                _ => false,
-            }
-        }
-        "<" => {
-            match (parse_numeric(cell_value), parse_numeric(&rule.value)) {
-                (Some(a), Some(b)) => a < b,
-                _ => false,
-            }
-        }
+        ">=" => match (parse_numeric(cell_value), parse_numeric(&rule.value)) {
+            (Some(a), Some(b)) => a >= b,
+            _ => false,
+        },
+        "<=" => match (parse_numeric(cell_value), parse_numeric(&rule.value)) {
+            (Some(a), Some(b)) => a <= b,
+            _ => false,
+        },
+        ">" => match (parse_numeric(cell_value), parse_numeric(&rule.value)) {
+            (Some(a), Some(b)) => a > b,
+            _ => false,
+        },
+        "<" => match (parse_numeric(cell_value), parse_numeric(&rule.value)) {
+            (Some(a), Some(b)) => a < b,
+            _ => false,
+        },
         _ => false,
     }
 }
@@ -286,7 +281,18 @@ fn compute_total_row(
         let cf = config.col_formats.get(col_name);
         let has_numeric_format = cf
             .and_then(|f| f.number_format.as_deref())
-            .map(|nf| matches!(nf, "currency" | "accounting" | "integer" | "standard" | "percent" | "percent_int" | "percent_1dp"))
+            .map(|nf| {
+                matches!(
+                    nf,
+                    "currency"
+                        | "accounting"
+                        | "integer"
+                        | "standard"
+                        | "percent"
+                        | "percent_int"
+                        | "percent_1dp"
+                )
+            })
             .unwrap_or(false);
 
         // Try to sum the column
@@ -399,9 +405,10 @@ fn resolve_cell_props<'a>(
     let fg_color = rule_fg.or_else(|| config.fg_colors.get(col_name).map(|s| s.as_str()));
     let bg_color = rule_bg.or_else(|| config.bg_colors.get(col_name).map(|s| s.as_str()));
 
-    let link_url = config.links.get(col_name).map(|pattern| {
-        pattern.replace("{}", value)
-    });
+    let link_url = config
+        .links
+        .get(col_name)
+        .map(|pattern| pattern.replace("{}", value));
 
     let formula = config
         .cell_formulas
@@ -428,14 +435,14 @@ fn resolve_cell_props<'a>(
 // HTML generation
 // ---------------------------------------------------------------------------
 
-pub fn generate_html(
-    headers: &[String],
-    rows: &[Vec<String>],
-    config: &ExcelConfig,
-) -> String {
+pub fn generate_html(headers: &[String], rows: &[Vec<String>], config: &ExcelConfig) -> String {
     let col_indices = resolve_columns(headers, config);
     let ncols = col_indices.len();
-    let charset = if config.font.contains("Aptos") { "1" } else { "0" };
+    let charset = if config.font.contains("Aptos") {
+        "1"
+    } else {
+        "0"
+    };
     let rh = config.row_height.unwrap_or(21);
     let rh_pt = (rh as f32 * 0.75).round();
     let hh = config.header_height.unwrap_or(21);
@@ -470,7 +477,9 @@ pub fn generate_html(
     }
 
     html.push_str("-->\n</style>\n</head>\n<body>\n");
-    html.push_str("<table border=0 cellpadding=0 cellspacing=0 style='border-collapse:collapse'>\n");
+    html.push_str(
+        "<table border=0 cellpadding=0 cellspacing=0 style='border-collapse:collapse'>\n",
+    );
     html.push_str("<!--StartFragment-->\n");
 
     // Title row
@@ -480,18 +489,50 @@ pub fn generate_html(
 
     // Header row
     let has_title = config.title.is_some();
-    write_header_row(&mut html, headers, &col_indices, config, ncols, hh, hh_pt, has_title);
+    write_header_row(
+        &mut html,
+        headers,
+        &col_indices,
+        config,
+        ncols,
+        hh,
+        hh_pt,
+        has_title,
+    );
 
     // Data rows
     let is_table = config.style == TableStyle::Table;
     for (row_idx, row) in rows.iter().enumerate() {
         let is_last = row_idx == rows.len() - 1 && total_row_data.is_none();
-        write_data_row(&mut html, row, headers, &col_indices, config, ncols, rh, rh_pt, is_last, is_table, row_idx);
+        write_data_row(
+            &mut html,
+            row,
+            headers,
+            &col_indices,
+            config,
+            ncols,
+            rh,
+            rh_pt,
+            is_last,
+            is_table,
+            row_idx,
+        );
     }
 
     // Total row
     if let Some(ref total_data) = total_row_data {
-        write_total_row(&mut html, total_data, headers, &col_indices, config, ncols, rh, rh_pt, is_table, rows.len());
+        write_total_row(
+            &mut html,
+            total_data,
+            headers,
+            &col_indices,
+            config,
+            ncols,
+            rh,
+            rh_pt,
+            is_table,
+            rows.len(),
+        );
     }
 
     html.push_str("<!--EndFragment-->\n</table>\n</body>\n</html>");
@@ -507,7 +548,7 @@ fn write_envelope(html: &mut String) {
          <head>\n\
          <meta http-equiv=Content-Type content=\"text/html; charset=utf-8\">\n\
          <meta name=ProgId content=Excel.Sheet>\n\
-         <meta name=Generator content=\"clipli\">\n"
+         <meta name=Generator content=\"clipli\">\n",
     );
 }
 
@@ -570,6 +611,7 @@ fn write_title_row(html: &mut String, title: &str, ncols: usize, config: &ExcelC
     ));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_header_row(
     html: &mut String,
     headers: &[String],
@@ -607,8 +649,18 @@ fn write_header_row(
         TableStyle::Plain => {
             for (pos, &idx) in col_indices.iter().enumerate() {
                 let name = display_name(&headers[idx], config);
-                let cls = if pos == 0 { "hdr_l" } else if pos == ncols - 1 { "hdr_r" } else { "hdr_m" };
-                let bt_override = if has_title { " style='border-top:none'" } else { "" };
+                let cls = if pos == 0 {
+                    "hdr_l"
+                } else if pos == ncols - 1 {
+                    "hdr_r"
+                } else {
+                    "hdr_m"
+                };
+                let bt_override = if has_title {
+                    " style='border-top:none'"
+                } else {
+                    ""
+                };
                 html.push_str(&format!("  <td class={cls}{bt_override}>{name}</td>\n"));
             }
         }
@@ -616,6 +668,7 @@ fn write_header_row(
     html.push_str(" </tr>\n");
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_data_row(
     html: &mut String,
     row: &[String],
@@ -645,6 +698,7 @@ fn write_data_row(
     html.push_str(" </tr>\n");
 }
 
+#[allow(clippy::too_many_arguments)]
 fn write_total_row(
     html: &mut String,
     total_data: &[String],
@@ -678,7 +732,9 @@ fn write_total_row(
         // Build formula for this cell if --total-formula and it's a numeric column
         let formula = if config.total_formula && pos > 0 && !value.is_empty() {
             let col_ltr = col_letter(pos);
-            Some(format!("=SUM({col_ltr}{data_start_row}:{col_ltr}{data_end_row})"))
+            Some(format!(
+                "=SUM({col_ltr}{data_start_row}:{col_ltr}{data_end_row})"
+            ))
         } else {
             None
         };
@@ -741,12 +797,22 @@ fn write_table_cell(
         extra.push_str(nf_css);
     }
 
-    let align_attr = props.alignment.map(|a| format!(" align={a}")).unwrap_or_default();
-    let fmla_attr = props.formula.map(|f| {
-        let escaped = f.replace('&', "&amp;").replace('"', "&quot;");
-        format!(" x:fmla=\"{escaped}\"")
-    }).unwrap_or_default();
-    let num_attr = if props.formula.is_some() { " x:num" } else { "" };
+    let align_attr = props
+        .alignment
+        .map(|a| format!(" align={a}"))
+        .unwrap_or_default();
+    let fmla_attr = props
+        .formula
+        .map(|f| {
+            let escaped = f.replace('&', "&amp;").replace('"', "&quot;");
+            format!(" x:fmla=\"{escaped}\"")
+        })
+        .unwrap_or_default();
+    let num_attr = if props.formula.is_some() {
+        " x:num"
+    } else {
+        ""
+    };
     let cell_val = render_cell_value(props, fnt, fsz, fg);
 
     html.push_str(&format!(
@@ -768,32 +834,70 @@ fn write_plain_cell(
     is_total: bool,
 ) {
     let cls = if is_total || is_last {
-        if pos == 0 { "tl" } else if pos == ncols - 1 { "tr" } else { "tm" }
+        if pos == 0 {
+            "tl"
+        } else if pos == ncols - 1 {
+            "tr"
+        } else {
+            "tm"
+        }
     } else {
-        if pos == 0 { "cl" } else if pos == ncols - 1 { "cr" } else { "cm" }
+        if pos == 0 {
+            "cl"
+        } else if pos == ncols - 1 {
+            "cr"
+        } else {
+            "cm"
+        }
     };
 
     let mut inline = String::from("border-top:none;");
-    if props.is_bold { inline.push_str("font-weight:700;"); }
-    if props.is_italic { inline.push_str("font-style:italic;"); }
-    if let Some(fg) = props.fg_color { inline.push_str(&format!("color:{fg};")); }
+    if props.is_bold {
+        inline.push_str("font-weight:700;");
+    }
+    if props.is_italic {
+        inline.push_str("font-style:italic;");
+    }
+    if let Some(fg) = props.fg_color {
+        inline.push_str(&format!("color:{fg};"));
+    }
     if let Some(bg) = props.bg_color {
         if !is_total {
             inline.push_str(&format!("background:{bg};mso-pattern:black none;"));
         }
     }
-    if let Some(align) = props.alignment { inline.push_str(&format!("text-align:{align};")); }
-    if props.is_wrap { inline.push_str("white-space:normal;"); }
+    if let Some(align) = props.alignment {
+        inline.push_str(&format!("text-align:{align};"));
+    }
+    if props.is_wrap {
+        inline.push_str("white-space:normal;");
+    }
     let nf_css = number_format_css(props.number_format);
-    if !nf_css.is_empty() { inline.push_str(nf_css); }
+    if !nf_css.is_empty() {
+        inline.push_str(nf_css);
+    }
 
-    let align_attr = props.alignment.map(|a| format!(" align={a}")).unwrap_or_default();
-    let fmla_attr = props.formula.map(|f| {
-        let escaped = f.replace('&', "&amp;").replace('"', "&quot;");
-        format!(" x:fmla=\"{escaped}\"")
-    }).unwrap_or_default();
-    let num_attr = if props.formula.is_some() { " x:num" } else { "" };
-    let cell_val = if props.value.is_empty() { "&nbsp;" } else { props.value };
+    let align_attr = props
+        .alignment
+        .map(|a| format!(" align={a}"))
+        .unwrap_or_default();
+    let fmla_attr = props
+        .formula
+        .map(|f| {
+            let escaped = f.replace('&', "&amp;").replace('"', "&quot;");
+            format!(" x:fmla=\"{escaped}\"")
+        })
+        .unwrap_or_default();
+    let num_attr = if props.formula.is_some() {
+        " x:num"
+    } else {
+        ""
+    };
+    let cell_val = if props.value.is_empty() {
+        "&nbsp;"
+    } else {
+        props.value
+    };
 
     html.push_str(&format!(
         "  <td{fmla_attr}{num_attr} class={cls} style='{inline}'{align_attr}>{cell_val}</td>\n"
@@ -801,7 +905,11 @@ fn write_plain_cell(
 }
 
 fn render_cell_value(props: &CellProps, fnt: &str, fsz: &str, fg: &str) -> String {
-    let display = if props.value.is_empty() { "&nbsp;" } else { props.value };
+    let display = if props.value.is_empty() {
+        "&nbsp;"
+    } else {
+        props.value
+    };
     if let Some(ref url) = props.link_url {
         if !props.value.is_empty() {
             return format!(
@@ -822,12 +930,26 @@ pub fn parse_col_spec(spec: &str) -> (String, ColFormat) {
     let parts: Vec<&str> = spec.splitn(3, ':').collect();
     let name = parts[0].to_string();
     let number_format = parts.get(1).and_then(|s| {
-        if s.is_empty() { None } else { Some(s.to_string()) }
+        if s.is_empty() {
+            None
+        } else {
+            Some(s.to_string())
+        }
     });
     let alignment = parts.get(2).and_then(|s| {
-        if s.is_empty() { None } else { Some(s.to_string()) }
+        if s.is_empty() {
+            None
+        } else {
+            Some(s.to_string())
+        }
     });
-    (name, ColFormat { number_format, alignment })
+    (
+        name,
+        ColFormat {
+            number_format,
+            alignment,
+        },
+    )
 }
 
 /// Parse --color-if flag: COLUMN:OP:VALUE:BG:FG
@@ -854,7 +976,10 @@ pub fn parse_color_rule(spec: &str) -> Result<ColorRule, String> {
 pub fn parse_rename(spec: &str) -> (String, String) {
     let parts: Vec<&str> = spec.splitn(2, ':').collect();
     let old = parts[0].to_string();
-    let new = parts.get(1).map(|s| s.to_string()).unwrap_or_else(|| old.clone());
+    let new = parts
+        .get(1)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| old.clone());
     (old, new)
 }
 
@@ -882,9 +1007,9 @@ pub fn parse_formula_spec(spec: &str) -> Result<(String, usize, String), String>
         ));
     }
     let col = parts[0].to_string();
-    let row: usize = parts[1].parse().map_err(|_| {
-        format!("invalid row index '{}' in --formula spec", parts[1])
-    })?;
+    let row: usize = parts[1]
+        .parse()
+        .map_err(|_| format!("invalid row index '{}' in --formula spec", parts[1]))?;
     let formula = parts[2].to_string();
     Ok((col, row, formula))
 }

@@ -15,12 +15,8 @@ fn test_help_output() {
         .arg("--help")
         .assert()
         .success()
-        .stdout(
-            predicate::str::contains("clipboard").or(predicate::str::contains("Clipboard")),
-        )
-        .stdout(
-            predicate::str::contains("SUBCOMMAND").or(predicate::str::contains("Commands")),
-        );
+        .stdout(predicate::str::contains("clipboard").or(predicate::str::contains("Clipboard")))
+        .stdout(predicate::str::contains("SUBCOMMAND").or(predicate::str::contains("Commands")));
 }
 
 // ---------------------------------------------------------------------------
@@ -33,7 +29,7 @@ fn test_version_output() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("clipli"));
+        .stdout(predicate::str::contains("clipli 0.4.0"));
 }
 
 // ---------------------------------------------------------------------------
@@ -54,10 +50,7 @@ fn test_no_args_shows_help() {
 
 #[test]
 fn test_invalid_subcommand() {
-    clipli()
-        .arg("nonexistent")
-        .assert()
-        .failure();
+    clipli().arg("nonexistent").assert().failure();
 }
 
 // ---------------------------------------------------------------------------
@@ -98,9 +91,12 @@ fn test_convert_j2_to_html() {
     clipli()
         .args([
             "convert",
-            "--from", "j2",
-            "--to", "html",
-            "-D", r#"{"name":"Alice"}"#,
+            "--from",
+            "j2",
+            "--to",
+            "html",
+            "-D",
+            r#"{"name":"Alice"}"#,
         ])
         .write_stdin("<p>Hello {{ name }}</p>")
         .assert()
@@ -137,8 +133,7 @@ fn test_read_binary_without_output() {
         .assert()
         .failure()
         .stderr(
-            predicate::str::contains("requires --output")
-                .or(predicate::str::contains("binary")),
+            predicate::str::contains("requires --output").or(predicate::str::contains("binary")),
         );
 }
 
@@ -162,10 +157,7 @@ fn test_capture_invalid_name() {
 
 #[test]
 fn test_list_empty_store() {
-    clipli()
-        .arg("list")
-        .assert()
-        .success();
+    clipli().arg("list").assert().success();
 }
 
 // ---------------------------------------------------------------------------
@@ -228,4 +220,15 @@ fn test_convert_rtf_to_html() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Hello").or(predicate::str::contains("world")));
+}
+
+#[test]
+fn test_doctor_json_skip_clipboard() {
+    clipli()
+        .args(["doctor", "--json", "--skip-clipboard"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""checks""#))
+        .stdout(predicate::str::contains(r#""pasteboard""#))
+        .stdout(predicate::str::contains(r#""skipped""#));
 }

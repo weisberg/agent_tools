@@ -1,8 +1,8 @@
 // Template linter — validates templates for variable mismatches and syntax issues.
 
+use crate::model::TemplateVariable;
 use regex::Regex;
 use serde::Serialize;
-use crate::model::TemplateVariable;
 
 // Public types
 
@@ -46,15 +46,21 @@ pub fn lint(template_html: &str, schema: &[TemplateVariable]) -> LintReport {
     check_duplicate_schema_vars(schema, &mut diagnostics);
 
     // 5. Variables in template not in schema (warning)
-    let schema_names: std::collections::HashSet<&str> = schema.iter().map(|v| v.name.as_str()).collect();
+    let schema_names: std::collections::HashSet<&str> =
+        schema.iter().map(|v| v.name.as_str()).collect();
     for (var_name, line_num) in &template_vars {
         if !schema_names.contains(var_name.as_str()) {
             // Skip Jinja2 built-in variables (loop, self, etc.)
-            if is_jinja_builtin(var_name) { continue; }
+            if is_jinja_builtin(var_name) {
+                continue;
+            }
             diagnostics.push(LintDiagnostic {
                 severity: Severity::Warning,
                 code: "LINT_VAR_NOT_IN_SCHEMA",
-                message: format!("variable '{}' used in template but not defined in schema", var_name),
+                message: format!(
+                    "variable '{}' used in template but not defined in schema",
+                    var_name
+                ),
                 line: Some(*line_num),
                 context: None,
             });
@@ -62,23 +68,37 @@ pub fn lint(template_html: &str, schema: &[TemplateVariable]) -> LintReport {
     }
 
     // 6. Variables in schema not in template (warning)
-    let template_var_names: std::collections::HashSet<&str> = template_vars.iter().map(|(n, _)| n.as_str()).collect();
+    let template_var_names: std::collections::HashSet<&str> =
+        template_vars.iter().map(|(n, _)| n.as_str()).collect();
     for var in schema {
         if !template_var_names.contains(var.name.as_str()) {
             diagnostics.push(LintDiagnostic {
                 severity: Severity::Warning,
                 code: "LINT_SCHEMA_VAR_UNUSED",
-                message: format!("variable '{}' defined in schema but not used in template", var.name),
+                message: format!(
+                    "variable '{}' defined in schema but not used in template",
+                    var.name
+                ),
                 line: None,
                 context: None,
             });
         }
     }
 
-    let error_count = diagnostics.iter().filter(|d| matches!(d.severity, Severity::Error)).count();
-    let warning_count = diagnostics.iter().filter(|d| matches!(d.severity, Severity::Warning)).count();
+    let error_count = diagnostics
+        .iter()
+        .filter(|d| matches!(d.severity, Severity::Error))
+        .count();
+    let warning_count = diagnostics
+        .iter()
+        .filter(|d| matches!(d.severity, Severity::Warning))
+        .count();
 
-    LintReport { diagnostics, error_count, warning_count }
+    LintReport {
+        diagnostics,
+        error_count,
+        warning_count,
+    }
 }
 
 // Implementation helpers
@@ -114,7 +134,10 @@ fn check_unbalanced_markers(html: &str, diagnostics: &mut Vec<LintDiagnostic>) {
             diagnostics.push(LintDiagnostic {
                 severity: Severity::Warning,
                 code: "LINT_POSSIBLE_UNBALANCED_LINE",
-                message: format!("possible unbalanced expression markers on this line ({} '{{{{' vs {} '}}}}')", open_expr, close_expr),
+                message: format!(
+                    "possible unbalanced expression markers on this line ({} '{{{{' vs {} '}}}}')",
+                    open_expr, close_expr
+                ),
                 line: Some(line_num + 1),
                 context: Some(line.trim().chars().take(80).collect()),
             });
@@ -157,7 +180,9 @@ fn check_invalid_identifiers(html: &str, diagnostics: &mut Vec<LintDiagnostic>) 
                 continue;
             }
             // Skip empty
-            if content.is_empty() { continue; }
+            if content.is_empty() {
+                continue;
+            }
             // Check if it's a valid identifier
             if !ident_re.is_match(content) {
                 diagnostics.push(LintDiagnostic {
@@ -224,7 +249,10 @@ mod tests {
         let schema = vec![make_var("title")];
         let report = lint(html, &schema);
         assert!(report.warning_count > 0);
-        assert!(report.diagnostics.iter().any(|d| d.code == "LINT_VAR_NOT_IN_SCHEMA"));
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "LINT_VAR_NOT_IN_SCHEMA"));
     }
 
     #[test]
@@ -233,7 +261,10 @@ mod tests {
         let schema = vec![make_var("title"), make_var("unused_var")];
         let report = lint(html, &schema);
         assert!(report.warning_count > 0);
-        assert!(report.diagnostics.iter().any(|d| d.code == "LINT_SCHEMA_VAR_UNUSED"));
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "LINT_SCHEMA_VAR_UNUSED"));
     }
 
     #[test]
@@ -242,7 +273,10 @@ mod tests {
         let schema = vec![make_var("title"), make_var("title")];
         let report = lint(html, &schema);
         assert!(report.error_count > 0);
-        assert!(report.diagnostics.iter().any(|d| d.code == "LINT_DUPLICATE_SCHEMA_VAR"));
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "LINT_DUPLICATE_SCHEMA_VAR"));
     }
 
     #[test]
@@ -251,7 +285,10 @@ mod tests {
         let schema = vec![];
         let report = lint(html, &schema);
         assert!(report.error_count > 0);
-        assert!(report.diagnostics.iter().any(|d| d.code == "LINT_UNBALANCED_MARKERS"));
+        assert!(report
+            .diagnostics
+            .iter()
+            .any(|d| d.code == "LINT_UNBALANCED_MARKERS"));
     }
 
     #[test]
@@ -260,7 +297,10 @@ mod tests {
         let schema = vec![make_var("title")];
         let report = lint(html, &schema);
         // "loop" should not trigger LINT_VAR_NOT_IN_SCHEMA
-        assert!(!report.diagnostics.iter().any(|d| d.message.contains("loop")));
+        assert!(!report
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("loop")));
     }
 
     #[test]

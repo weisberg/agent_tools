@@ -5,7 +5,7 @@ use serde_json::{Map, Value};
 
 use crate::error::VaultliError;
 use crate::index::load_index_records;
-use crate::util::which;
+use crate::util::{to_sorted_json_string, which};
 
 pub fn show_record(root: &std::path::Path, doc_id: &str) -> Result<Map<String, Value>, VaultliError> {
     for record in load_index_records(root)? {
@@ -25,8 +25,7 @@ pub fn search_records(
     if let Some(query) = query {
         let needle = query.to_lowercase();
         records.retain(|record| {
-            serde_json::to_string(record)
-                .unwrap_or_default()
+            to_sorted_json_string(&Value::Object(record.clone()))
                 .to_lowercase()
                 .contains(&needle)
         });
@@ -36,8 +35,8 @@ pub fn search_records(
         let jq_path = which("jq").ok_or(VaultliError::JqUnavailable)?;
         let payload = records
             .iter()
-            .map(serde_json::to_string)
-            .collect::<Result<Vec<_>, _>>()?
+            .map(|record| to_sorted_json_string(&Value::Object(record.clone())))
+            .collect::<Vec<_>>()
             .join("\n");
         let mut child = Command::new(jq_path)
             .arg("-c")

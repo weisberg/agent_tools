@@ -52,15 +52,16 @@ pub fn load_index_records(root: &Path) -> Result<Vec<Map<String, Value>>, Vaultl
     Ok(records)
 }
 
-#[allow(clippy::manual_map)] // clippy's suggestion doesn't compile (borrow + move)
 pub fn build_index(root: &Path, full: bool) -> Result<IndexBuildResult, VaultliError> {
     let root = resolve_root(root)?;
     let existing = load_index_records(&root).unwrap_or_default();
     let existing_by_id = existing
         .into_iter()
-        .filter_map(|record| match record.get("id").and_then(Value::as_str) {
-            Some(id) => Some((id.to_string(), record)),
-            None => None,
+        .filter_map(|record| {
+            record
+                .get("id")
+                .and_then(Value::as_str)
+                .map(|id| (id.to_string(), record.clone()))
         })
         .collect::<BTreeMap<_, _>>();
 
@@ -74,58 +75,79 @@ pub fn build_index(root: &Path, full: bool) -> Result<IndexBuildResult, VaultliE
         warnings: Vec::new(),
     };
 
-    let mut next_records = Vec::new();
-    let mut emitted_ids = BTreeSet::new();
+    let mut next_records: Vec<Map<String, Value>> = Vec::new();
+    let mut emitted_ids: BTreeSet<String> = BTreeSet::new();
 
     for path in iter_markdown_files(&root)? {
-        match parse_markdown_file(&path, &root) {
-            Ok(document) => match build_index_record(&root, &path, &document) {
-                Ok(record) => {
-                    let doc_id = record
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .unwrap_or_default()
-                        .to_string();
-                    if doc_id.is_empty() {
-                        result.warnings.push(WarningRecord {
-                            code: "MISSING_REQUIRED_FIELDS".into(),
-                            message: format!(
-                                "Missing required fields in {}",
-                                document.relative_path
-                            ),
-                            file: Some(document.relative_path.clone()),
-                        });
-                        continue;
-                    }
-                    emitted_ids.insert(doc_id.clone());
-                    if full {
-                        result.indexed += 1;
-                    } else if let Some(previous) = existing_by_id.get(&doc_id) {
-                        if previous == &record {
-                            result.skipped += 1;
-                        } else {
-                            result.updated += 1;
-                        }
-                    } else {
-                        result.indexed += 1;
-                    }
-                    next_records.push(record);
-                }
-                Err(error) => result.warnings.push(WarningRecord {
+        let rel = relative_path(&path, &root).unwrap_or_else(|_| path.display().to_string());
+        let document = match parse_markdown_file(&path, &root) {
+            Ok(doc) => doc,
+            Err(error) => {
+                result.warnings.push(WarningRecord {
                     code: error.code().into(),
                     message: error.to_string(),
-                    file: Some(
-                        relative_path(&path, &root).unwrap_or_else(|_| path.display().to_string()),
-                    ),
-                }),
-            },
-            Err(error) => result.warnings.push(WarningRecord {
-                code: error.code().into(),
-                message: error.to_string(),
-                file: Some(
-                    relative_path(&path, &root).unwrap_or_else(|_| path.display().to_string()),
+                    file: Some(rel.clone()),
+                });
+                continue;
+            }
+        };
+
+        let blocking = collect_blocking_issues(&path, &document);
+        if !blocking.is_empty() {
+            result.warnings.extend(blocking);
+            continue;
+        }
+
+        let doc_id = document
+            .doc_id()
+            .expect("blocking check should have caught missing id")
+            .to_string();
+
+        if emitted_ids.contains(&doc_id) {
+            result.warnings.push(WarningRecord {
+                code: "DUPLICATE_ID".into(),
+                message: format!(
+                    "Duplicate id {:?} encountered during indexing",
+                    doc_id
                 ),
-            }),
+                file: Some(document.relative_path.clone()),
+            });
+            continue;
+        }
+
+        let record = match build_index_record(&root, &path, &document) {
+            Ok(record) => record,
+            Err(error) => {
+                result.warnings.push(WarningRecord {
+                    code: error.code().into(),
+                    message: error.to_string(),
+                    file: Some(document.relative_path.clone()),
+                });
+                continue;
+            }
+        };
+
+        emitted_ids.insert(doc_id.clone());
+
+        if full {
+            result.indexed += 1;
+            next_records.push(record);
+            continue;
+        }
+
+        match existing_by_id.get(&doc_id) {
+            None => {
+                result.indexed += 1;
+                next_records.push(record);
+            }
+            Some(previous) if previous == &record => {
+                result.skipped += 1;
+                next_records.push(previous.clone());
+            }
+            Some(_) => {
+                result.updated += 1;
+                next_records.push(record);
+            }
         }
     }
 
@@ -138,6 +160,55 @@ pub fn build_index(root: &Path, full: bool) -> Result<IndexBuildResult, VaultliE
 
     write_index_records(&root, &next_records)?;
     Ok(result)
+}
+
+/// Build the list of blocking warnings that prevent a document from being
+/// indexed (missing required fields, missing source on sidecars, broken source).
+fn collect_blocking_issues(path: &Path, document: &ParsedDocument) -> Vec<WarningRecord> {
+    let mut issues = Vec::new();
+    let missing: Vec<&str> = REQUIRED_FIELDS
+        .iter()
+        .filter(|field| {
+            document
+                .metadata
+                .get(**field)
+                .and_then(Value::as_str)
+                .map(|value| value.trim().is_empty())
+                .unwrap_or(true)
+        })
+        .copied()
+        .collect();
+    if !missing.is_empty() {
+        issues.push(WarningRecord {
+            code: "MISSING_REQUIRED_FIELDS".into(),
+            message: format!("Missing required fields: {}", missing.join(", ")),
+            file: Some(document.relative_path.clone()),
+        });
+    }
+
+    let source = document.metadata.get("source").and_then(Value::as_str);
+    if document.is_sidecar() && source.map(|value| value.trim().is_empty()).unwrap_or(true) {
+        issues.push(WarningRecord {
+            code: "MISSING_SOURCE_FIELD".into(),
+            message: "Sidecar markdown is missing required source field".into(),
+            file: Some(document.relative_path.clone()),
+        });
+    }
+
+    if let Some(source) = source {
+        if !source.trim().is_empty() {
+            let source_path = path.parent().unwrap_or_else(|| Path::new(".")).join(source);
+            if !source_path.exists() {
+                issues.push(WarningRecord {
+                    code: "BROKEN_SOURCE".into(),
+                    message: format!("source target does not exist: {source}"),
+                    file: Some(document.relative_path.clone()),
+                });
+            }
+        }
+    }
+
+    issues
 }
 
 pub(crate) fn build_index_record(

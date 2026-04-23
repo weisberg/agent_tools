@@ -12,7 +12,15 @@ fn clipli() -> Command {
 #[test]
 fn test_j2_render_simple_variable() {
     clipli()
-        .args(["convert", "--from", "j2", "--to", "html", "-D", r#"{"name":"World"}"#])
+        .args([
+            "convert",
+            "--from",
+            "j2",
+            "--to",
+            "html",
+            "-D",
+            r#"{"name":"World"}"#,
+        ])
         .write_stdin("<p>Hello {{ name }}</p>")
         .assert()
         .success()

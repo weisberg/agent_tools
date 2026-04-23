@@ -83,42 +83,30 @@ All commands support `--root`, and agent workflows should usually use `--json`.
 
 ## Quickstart
 
-Use the Python implementation from the repo root:
+The Rust binary is the default implementation. Build once:
 
 ```bash
-uv run python -m tools.vaultli --help
+cd rs && cargo build --release
+# binary is now at ./rs/target/release/vaultli
 ```
 
-Create a vault:
+Then (either put it on your PATH or invoke by full path):
 
 ```bash
-uv run python -m tools.vaultli init ./kb
+vaultli --help
+vaultli --json init ./kb
+vaultli --json add ./kb/docs/guide.md --root ./kb
+vaultli --json scaffold ./kb/queries/retention.sql --root ./kb
+vaultli --json index --root ./kb
+vaultli --json validate --root ./kb
+vaultli --json search retention --root ./kb
+vaultli --json show queries/retention --root ./kb
 ```
 
-Add a markdown file:
+Python fallback (invoke with the parent of the `vaultli` package on `PYTHONPATH`):
 
 ```bash
-uv run python -m tools.vaultli add ./kb/docs/guide.md --root ./kb
-```
-
-Create a sidecar for a non-markdown asset:
-
-```bash
-uv run python -m tools.vaultli scaffold ./kb/queries/retention.sql --root ./kb
-```
-
-Rebuild and validate:
-
-```bash
-uv run python -m tools.vaultli index --root ./kb --json
-uv run python -m tools.vaultli validate --root ./kb --json
-```
-
-Search the vault:
-
-```bash
-uv run python -m tools.vaultli search retention --root ./kb --json
-uv run python -m tools.vaultli show queries/retention --root ./kb --json
+PYTHONPATH=<parent-of-vaultli> python -m vaultli --help
 ```
 
 ## Sidecars
@@ -154,12 +142,17 @@ vaultli currently ships in two implementations:
 
 | Implementation | Role | Run |
 |---|---|---|
-| Python | Reference implementation | `uv run python -m tools.vaultli ...` |
-| Rust | Performance-oriented port | `cd tools/vaultli/rs && cargo run -- ...` |
+| Rust | Primary implementation | `cd rs && cargo build --release && ./rs/target/release/vaultli ...` |
+| Python | Reference / parity oracle | `PYTHONPATH=<parent-of-vaultli> python -m vaultli ...` |
+
+Both implementations are behaviorally identical — the Rust crate's parity test
+suite compares their outputs byte-for-byte. The package can be relocated freely;
+set `VAULTLI_PY_PATH` if you want to run the parity tests from outside the
+default in-repo layout.
 
 ## Related Docs
 
 - `vaultli-spec-v1.0.md` — storage format and metadata spec
 - `SKILL.md` — agent-first operating guide
+- `rs/` — primary (Rust) implementation
 - `py/core.py` — Python reference implementation
-- `rs/` — Rust port

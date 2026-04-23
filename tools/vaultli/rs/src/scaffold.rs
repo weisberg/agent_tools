@@ -4,10 +4,11 @@ use std::path::{Path, PathBuf};
 use serde_json::{Map, Value};
 
 use crate::error::VaultliError;
+use crate::frontmatter::render_frontmatter_yaml;
 use crate::index::{build_index, parse_markdown_file};
 use crate::infer::infer_frontmatter;
 use crate::paths::{canonicalize_or_join, relative_path, resolve_root};
-use crate::util::{map_from_pairs, order_metadata, yaml_scalar, INDEX_FILENAME, VAULT_MARKER};
+use crate::util::{map_from_pairs, order_metadata, INDEX_FILENAME, VAULT_MARKER};
 
 pub fn init_vault(target: &Path) -> Result<Map<String, Value>, VaultliError> {
     let target = canonicalize_or_join(target)?;
@@ -109,34 +110,13 @@ pub fn add_file(root: &Path, file: &Path) -> Result<Map<String, Value>, VaultliE
 }
 
 pub(crate) fn render_document(metadata: &Map<String, Value>, body: &str) -> String {
-    let frontmatter = render_metadata_yaml(&order_metadata(metadata));
+    let ordered = order_metadata(metadata);
+    let frontmatter = render_frontmatter_yaml(&ordered).unwrap_or_default();
     let mut rendered_body = body.to_string();
     if !rendered_body.is_empty() && !rendered_body.starts_with('\n') {
         rendered_body = format!("\n{rendered_body}");
     }
     format!("---\n{frontmatter}\n---{rendered_body}")
-}
-
-fn render_metadata_yaml(metadata: &Map<String, Value>) -> String {
-    let mut lines = Vec::new();
-    for (key, value) in metadata {
-        match value {
-            Value::Array(items) => {
-                lines.push(format!("{key}:"));
-                for item in items {
-                    lines.push(format!("  - {}", yaml_scalar(item)));
-                }
-            }
-            Value::String(text) if text.contains('\n') => {
-                lines.push(format!("{key}: >-"));
-                for line in text.lines() {
-                    lines.push(format!("  {line}"));
-                }
-            }
-            _ => lines.push(format!("{key}: {}", yaml_scalar(value))),
-        }
-    }
-    lines.join("\n")
 }
 
 fn default_sidecar_body(source_path: &Path) -> String {

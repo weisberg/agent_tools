@@ -11,10 +11,7 @@ fn clipli() -> Command {
 
 #[test]
 fn test_list_succeeds() {
-    clipli()
-        .arg("list")
-        .assert()
-        .success();
+    clipli().arg("list").assert().success();
 }
 
 // ---------------------------------------------------------------------------
@@ -23,10 +20,7 @@ fn test_list_succeeds() {
 
 #[test]
 fn test_list_json_succeeds() {
-    let output = clipli()
-        .args(["list", "--json"])
-        .assert()
-        .success();
+    let output = clipli().args(["list", "--json"]).assert().success();
 
     let raw = output.get_output().stdout.clone();
     let stdout = String::from_utf8(raw).unwrap();

@@ -10,26 +10,26 @@ use serde::{Deserialize, Serialize};
 /// Recognized pasteboard UTI types, in priority order for capture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PbType {
-    Html,       // public.html
-    Rtf,        // public.rtf
-    PlainText,  // public.utf8-plain-text
-    Png,        // public.png
-    Tiff,       // public.tiff
-    Pdf,        // com.adobe.pdf
-    Unknown,    // anything else (logged but not processed)
+    Html,      // public.html
+    Rtf,       // public.rtf
+    PlainText, // public.utf8-plain-text
+    Png,       // public.png
+    Tiff,      // public.tiff
+    Pdf,       // com.adobe.pdf
+    Unknown,   // anything else (logged but not processed)
 }
 
 impl PbType {
     /// Return the canonical UTI string for this type.
     pub fn uti(&self) -> &'static str {
         match self {
-            Self::Html      => "public.html",
-            Self::Rtf       => "public.rtf",
+            Self::Html => "public.html",
+            Self::Rtf => "public.rtf",
             Self::PlainText => "public.utf8-plain-text",
-            Self::Png       => "public.png",
-            Self::Tiff      => "public.tiff",
-            Self::Pdf       => "com.adobe.pdf",
-            Self::Unknown   => "unknown",
+            Self::Png => "public.png",
+            Self::Tiff => "public.tiff",
+            Self::Pdf => "com.adobe.pdf",
+            Self::Unknown => "unknown",
         }
     }
 
@@ -37,13 +37,13 @@ impl PbType {
     /// Returns `PbType::Unknown` for unrecognised strings.
     pub fn from_uti(s: &str) -> Self {
         match s {
-            "public.html"            => Self::Html,
-            "public.rtf"             => Self::Rtf,
+            "public.html" => Self::Html,
+            "public.rtf" => Self::Rtf,
             "public.utf8-plain-text" => Self::PlainText,
-            "public.png"             => Self::Png,
-            "public.tiff"            => Self::Tiff,
-            "com.adobe.pdf"          => Self::Pdf,
-            _                        => Self::Unknown,
+            "public.png" => Self::Png,
+            "public.tiff" => Self::Tiff,
+            "com.adobe.pdf" => Self::Pdf,
+            _ => Self::Unknown,
         }
     }
 }
@@ -74,9 +74,7 @@ impl PbTypeEntry {
     #[allow(dead_code)]
     pub fn as_utf8_str(&self) -> Option<&str> {
         match self.pb_type {
-            PbType::Html | PbType::Rtf | PbType::PlainText => {
-                std::str::from_utf8(&self.data).ok()
-            }
+            PbType::Html | PbType::Rtf | PbType::PlainText => std::str::from_utf8(&self.data).ok(),
             _ => None,
         }
     }
@@ -515,18 +513,9 @@ mod tests {
 
     #[test]
     fn align_serde_snake_case() {
-        assert_eq!(
-            serde_json::to_string(&Align::Left).unwrap(),
-            "\"left\""
-        );
-        assert_eq!(
-            serde_json::to_string(&Align::Center).unwrap(),
-            "\"center\""
-        );
-        assert_eq!(
-            serde_json::to_string(&Align::Right).unwrap(),
-            "\"right\""
-        );
+        assert_eq!(serde_json::to_string(&Align::Left).unwrap(), "\"left\"");
+        assert_eq!(serde_json::to_string(&Align::Center).unwrap(), "\"center\"");
+        assert_eq!(serde_json::to_string(&Align::Right).unwrap(), "\"right\"");
 
         let recovered: Align = serde_json::from_str("\"center\"").unwrap();
         assert!(matches!(recovered, Align::Center));
@@ -537,13 +526,13 @@ mod tests {
     #[test]
     fn var_type_serde_snake_case() {
         let variants = [
-            (VarType::String,     "\"string\""),
-            (VarType::Number,     "\"number\""),
-            (VarType::Currency,   "\"currency\""),
+            (VarType::String, "\"string\""),
+            (VarType::Number, "\"number\""),
+            (VarType::Currency, "\"currency\""),
             (VarType::Percentage, "\"percentage\""),
-            (VarType::Date,       "\"date\""),
-            (VarType::Boolean,    "\"boolean\""),
-            (VarType::List,       "\"list\""),
+            (VarType::Date, "\"date\""),
+            (VarType::Boolean, "\"boolean\""),
+            (VarType::List, "\"list\""),
         ];
         for (v, expected) in variants {
             assert_eq!(serde_json::to_string(&v).unwrap(), expected);

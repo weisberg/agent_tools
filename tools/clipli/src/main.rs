@@ -129,10 +129,7 @@ impl Default for ConfigAgent {
 }
 
 fn load_config() -> Config {
-    let config_path = dirs::config_dir()
-        .unwrap_or_else(|| dirs::home_dir().unwrap().join(".config"))
-        .join("clipli")
-        .join("config.toml");
+    let config_path = config_file_path();
     if config_path.exists() {
         if let Ok(s) = std::fs::read_to_string(&config_path) {
             if let Ok(c) = toml::from_str::<Config>(&s) {
@@ -163,6 +160,7 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+#[allow(clippy::large_enum_variant)]
 enum Commands {
     /// Show all types currently on the clipboard
     Inspect {
@@ -485,6 +483,14 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Check local environment, config, and clipboard readiness
+    Doctor {
+        #[arg(long)]
+        json: bool,
+        /// Do not touch the macOS pasteboard; useful for CI
+        #[arg(long)]
+        skip_clipboard: bool,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -532,6 +538,7 @@ fn main() {
             | Commands::ExcelEdit { json: true, .. }
             | Commands::Render { json: true, .. }
             | Commands::Convert { json: true, .. }
+            | Commands::Doctor { json: true, .. }
     );
 
     if let Err(e) = run(cli.command, &config) {
@@ -598,7 +605,8 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
             template,
             json,
         } => cmd_paste(
-            name, data, data_file, stdin, dry_run, plain_text, open, from_table, template, json, config,
+            name, data, data_file, stdin, dry_run, plain_text, open, from_table, template, json,
+            config,
         ),
         Commands::List { tag, json, detail } => cmd_list(tag, json, detail),
         Commands::Show {
@@ -611,7 +619,12 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
             json,
         } => cmd_show(name, html, schema, meta, open, version, json),
         Commands::Edit { name, auto_schema } => cmd_edit(name, auto_schema),
-        Commands::Delete { name, force, keep_versions, json } => cmd_delete(name, force, keep_versions, json),
+        Commands::Delete {
+            name,
+            force,
+            keep_versions,
+            json,
+        } => cmd_delete(name, force, keep_versions, json),
         Commands::Versions { name, json } => cmd_versions(name, json),
         Commands::Restore { name, version } => cmd_restore(name, version),
         Commands::Lint { name, strict, json } => cmd_lint(name, strict, json),
@@ -619,27 +632,97 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
         Commands::Export { name, output } => cmd_export(name, output),
         Commands::Import { file, force, name } => cmd_import(file, force, name),
         Commands::Excel {
-            file, style, header_bg, header_fg, band_bg, font, font_size,
-            col_specs, align_specs, bold_cols, italic_cols, wrap_cols,
-            fg_colors, bg_colors, color_rules, links,
-            title, total_row, total_formula, formulas, row_height, header_height,
-            columns, hidden_cols, renames, col_font_sizes, dry_run, json,
+            file,
+            style,
+            header_bg,
+            header_fg,
+            band_bg,
+            font,
+            font_size,
+            col_specs,
+            align_specs,
+            bold_cols,
+            italic_cols,
+            wrap_cols,
+            fg_colors,
+            bg_colors,
+            color_rules,
+            links,
+            title,
+            total_row,
+            total_formula,
+            formulas,
+            row_height,
+            header_height,
+            columns,
+            hidden_cols,
+            renames,
+            col_font_sizes,
+            dry_run,
+            json,
         } => cmd_excel(
-            file, style, header_bg, header_fg, band_bg, font, font_size,
-            col_specs, align_specs, bold_cols, italic_cols, wrap_cols,
-            fg_colors, bg_colors, color_rules, links,
-            title, total_row, total_formula, formulas, row_height, header_height,
-            columns, hidden_cols, renames, col_font_sizes, dry_run, json, config,
+            file,
+            style,
+            header_bg,
+            header_fg,
+            band_bg,
+            font,
+            font_size,
+            col_specs,
+            align_specs,
+            bold_cols,
+            italic_cols,
+            wrap_cols,
+            fg_colors,
+            bg_colors,
+            color_rules,
+            links,
+            title,
+            total_row,
+            total_formula,
+            formulas,
+            row_height,
+            header_height,
+            columns,
+            hidden_cols,
+            renames,
+            col_font_sizes,
+            dry_run,
+            json,
+            config,
         ),
         Commands::ExcelEdit {
-            set_values, set_bgs, set_fgs, set_formats, set_formulas,
-            set_aligns, set_bolds, set_italics, set_wraps, dry_run, json,
+            set_values,
+            set_bgs,
+            set_fgs,
+            set_formats,
+            set_formulas,
+            set_aligns,
+            set_bolds,
+            set_italics,
+            set_wraps,
+            dry_run,
+            json,
         } => cmd_excel_edit(
-            set_values, set_bgs, set_fgs, set_formats, set_formulas,
-            set_aligns, set_bolds, set_italics, set_wraps, dry_run, json,
+            set_values,
+            set_bgs,
+            set_fgs,
+            set_formats,
+            set_formulas,
+            set_aligns,
+            set_bolds,
+            set_italics,
+            set_wraps,
+            dry_run,
+            json,
         ),
-        Commands::Render { name, data_file, output_dir, format, json } =>
-            cmd_render(name, data_file, output_dir, format, json),
+        Commands::Render {
+            name,
+            data_file,
+            output_dir,
+            format,
+            json,
+        } => cmd_render(name, data_file, output_dir, format, json),
         Commands::Convert {
             from,
             to,
@@ -649,6 +732,10 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
             strategy,
             json,
         } => cmd_convert(from, to, input, output, data, strategy, json, config),
+        Commands::Doctor {
+            json,
+            skip_clipboard,
+        } => cmd_doctor(json, skip_clipboard, config),
     }
 }
 
@@ -676,10 +763,7 @@ fn cmd_inspect(json: bool) -> Result<(), Box<dyn std::error::Error>> {
                 });
                 println!("{}", serde_json::to_string_pretty(&out)?);
             } else {
-                println!(
-                    "Pasteboard contents ({} types):",
-                    snapshot.types.len()
-                );
+                println!("Pasteboard contents ({} types):", snapshot.types.len());
                 for entry in &snapshot.types {
                     println!(
                         "  {:<35} {:>10} bytes",
@@ -715,11 +799,7 @@ fn cmd_read(
     // Binary types require --output
     let is_binary = matches!(pb_type, PbType::Png | PbType::Tiff | PbType::Pdf);
     if is_binary && output.is_none() {
-        return Err(format!(
-            "binary type '{}' requires --output <file>",
-            type_
-        )
-        .into());
+        return Err(format!("binary type '{}' requires --output <file>", type_).into());
     }
 
     let data = pb::read_type(pb_type)?;
@@ -783,6 +863,7 @@ fn cmd_write(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_capture(
     name: String,
     do_templatize: bool,
@@ -875,7 +956,10 @@ fn cmd_capture(
         _ => templatize::manual(&cleaned_html),
     };
 
-    tracing::info!(variables = variables.len(), "capture: templatization complete");
+    tracing::info!(
+        variables = variables.len(),
+        "capture: templatization complete"
+    );
 
     let is_templatized = do_templatize && eff_strategy != "manual";
 
@@ -936,6 +1020,7 @@ fn cmd_capture(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_paste(
     name: Option<String>,
     data: Option<String>,
@@ -986,12 +1071,10 @@ fn cmd_paste(
     // Determine plain text
     let plain = match plain_text.as_str() {
         "none" => None,
-        "auto" => {
-            match config.defaults.plain_text_strategy.as_str() {
-                "none" => None,
-                _ => Some(render::html_to_plain_text(&rendered_html)),
-            }
-        }
+        "auto" => match config.defaults.plain_text_strategy.as_str() {
+            "none" => None,
+            _ => Some(render::html_to_plain_text(&rendered_html)),
+        },
         _ => Some(render::html_to_plain_text(&rendered_html)),
     };
 
@@ -1005,11 +1088,14 @@ fn cmd_paste(
     pb::write_html(&rendered_html, plain.as_deref())?;
 
     if json {
-        println!("{}", serde_json::json!({
-            "ok": true,
-            "html_bytes": rendered_html.len(),
-            "plain_bytes": plain.as_ref().map(|p| p.len()),
-        }));
+        println!(
+            "{}",
+            serde_json::json!({
+                "ok": true,
+                "html_bytes": rendered_html.len(),
+                "plain_bytes": plain.as_ref().map(|p| p.len()),
+            })
+        );
     }
     Ok(())
 }
@@ -1035,7 +1121,11 @@ fn cmd_list(
     } else {
         println!("Templates ({}):", metas.len());
         for meta in &metas {
-            let status = if meta.templatized { "templatized" } else { "raw" };
+            let status = if meta.templatized {
+                "templatized"
+            } else {
+                "raw"
+            };
             let var_count = meta.variables.len();
             let tags_str = if meta.tags.is_empty() {
                 String::new()
@@ -1162,9 +1252,7 @@ fn cmd_edit(name: String, auto_schema: bool) -> Result<(), Box<dyn std::error::E
 
     let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".to_string());
 
-    let status = std::process::Command::new(&editor)
-        .arg(&path)
-        .status()?;
+    let status = std::process::Command::new(&editor).arg(&path).status()?;
 
     if !status.success() {
         return Err(format!("editor '{}' exited with non-zero status", editor).into());
@@ -1239,7 +1327,12 @@ fn cmd_edit(name: String, auto_schema: bool) -> Result<(), Box<dyn std::error::E
     Ok(())
 }
 
-fn cmd_delete(name: String, force: bool, keep_versions: bool, json: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_delete(
+    name: String,
+    force: bool,
+    keep_versions: bool,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     let s = Store::new()?;
 
     if json && !force {
@@ -1262,14 +1355,20 @@ fn cmd_delete(name: String, force: bool, keep_versions: bool, json: bool) -> Res
     if keep_versions {
         s.delete_preserving_versions(&name)?;
         if json {
-            println!("{}", serde_json::json!({"ok": true, "name": name, "deleted": true, "keep_versions": true}));
+            println!(
+                "{}",
+                serde_json::json!({"ok": true, "name": name, "deleted": true, "keep_versions": true})
+            );
         } else {
             println!("Deleted template '{}' (version history preserved).", name);
         }
     } else {
         s.delete(&name)?;
         if json {
-            println!("{}", serde_json::json!({"ok": true, "name": name, "deleted": true}));
+            println!(
+                "{}",
+                serde_json::json!({"ok": true, "name": name, "deleted": true})
+            );
         } else {
             println!("Deleted template '{}'.", name);
         }
@@ -1288,7 +1387,12 @@ fn cmd_versions(name: String, json: bool) -> Result<(), Box<dyn std::error::Erro
     } else {
         println!("Versions for '{}' ({}):", name, versions.len());
         for v in &versions {
-            println!("  {}  ({})  {}", v.id, v.change_type, v.timestamp.format("%Y-%m-%d %H:%M:%S UTC"));
+            println!(
+                "  {}  ({})  {}",
+                v.id,
+                v.change_type,
+                v.timestamp.format("%Y-%m-%d %H:%M:%S UTC")
+            );
         }
     }
     Ok(())
@@ -1323,7 +1427,10 @@ fn cmd_lint(name: String, strict: bool, json: bool) -> Result<(), Box<dyn std::e
                 eprintln!("  | {}", ctx);
             }
         }
-        println!("{} error(s), {} warning(s)", report.error_count, report.warning_count);
+        println!(
+            "{} error(s), {} warning(s)",
+            report.error_count, report.warning_count
+        );
     }
 
     if report.error_count > 0 || (strict && report.warning_count > 0) {
@@ -1332,7 +1439,11 @@ fn cmd_lint(name: String, strict: bool, json: bool) -> Result<(), Box<dyn std::e
     Ok(())
 }
 
-fn cmd_search(query: String, tag: Option<String>, json: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_search(
+    query: String,
+    tag: Option<String>,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     let s = Store::new()?;
     let results = s.search(&query, tag.as_deref())?;
 
@@ -1361,7 +1472,11 @@ fn cmd_export(name: String, output: Option<PathBuf>) -> Result<(), Box<dyn std::
     Ok(())
 }
 
-fn cmd_import(file: PathBuf, force: bool, name: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_import(
+    file: PathBuf,
+    force: bool,
+    name: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let s = Store::new()?;
     let imported_name = s.import(&file, force, name.as_deref())?;
     println!("Imported template '{}'.", imported_name);
@@ -1387,16 +1502,17 @@ fn cmd_render(
 
     // Read data file
     let content = std::fs::read_to_string(&data_file)?;
-    let rows: Vec<serde_json::Value> = if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&content) {
-        arr
-    } else {
-        // Try newline-delimited JSON
-        content
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .map(|l| serde_json::from_str(l))
-            .collect::<Result<Vec<_>, _>>()?
-    };
+    let rows: Vec<serde_json::Value> =
+        if let Ok(arr) = serde_json::from_str::<Vec<serde_json::Value>>(&content) {
+            arr
+        } else {
+            // Try newline-delimited JSON
+            content
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .map(serde_json::from_str)
+                .collect::<Result<Vec<_>, _>>()?
+        };
 
     if rows.is_empty() {
         return Err("data file contains no rows".into());
@@ -1409,31 +1525,51 @@ fn cmd_render(
         for (i, output) in results.iter().enumerate() {
             let ext = if format == "plain" { "txt" } else { "html" };
             let filename = format!("{:03}.{}", i + 1, ext);
-            let content = if format == "plain" { &output.plain } else { &output.html };
+            let content = if format == "plain" {
+                &output.plain
+            } else {
+                &output.html
+            };
             std::fs::write(dir.join(&filename), content)?;
         }
         if json {
-            println!("{}", serde_json::json!({
-                "ok": true,
-                "rendered": results.len(),
-                "output_dir": dir.display().to_string(),
-            }));
+            println!(
+                "{}",
+                serde_json::json!({
+                    "ok": true,
+                    "rendered": results.len(),
+                    "output_dir": dir.display().to_string(),
+                })
+            );
         } else {
             eprintln!("Rendered {} items to {}", results.len(), dir.display());
         }
     } else if json {
-        let items: Vec<serde_json::Value> = results.iter().enumerate().map(|(i, o)| {
-            serde_json::json!({
-                "index": i,
-                "html": o.html,
-                "plain": o.plain,
+        let items: Vec<serde_json::Value> = results
+            .iter()
+            .enumerate()
+            .map(|(i, o)| {
+                serde_json::json!({
+                    "index": i,
+                    "html": o.html,
+                    "plain": o.plain,
+                })
             })
-        }).collect();
-        println!("{}", serde_json::json!({"ok": true, "rendered": items.len(), "items": items}));
+            .collect();
+        println!(
+            "{}",
+            serde_json::json!({"ok": true, "rendered": items.len(), "items": items})
+        );
     } else {
         for (i, output) in results.iter().enumerate() {
-            if i > 0 { println!("---"); }
-            let content = if format == "plain" { &output.plain } else { &output.html };
+            if i > 0 {
+                println!("---");
+            }
+            let content = if format == "plain" {
+                &output.plain
+            } else {
+                &output.html
+            };
             print!("{}", content);
         }
     }
@@ -1441,6 +1577,7 @@ fn cmd_render(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_excel_edit(
     set_values: Vec<String>,
     set_bgs: Vec<String>,
@@ -1654,13 +1791,20 @@ fn cmd_excel(
     let plain = render::html_to_plain_text(&html);
     pb::write_html(&html, Some(&plain))?;
 
-    let visible_cols = config.columns.as_ref().map(|c| c.len()).unwrap_or(headers.len());
+    let visible_cols = config
+        .columns
+        .as_ref()
+        .map(|c| c.len())
+        .unwrap_or(headers.len());
     if json {
-        println!("{}", serde_json::json!({
-            "ok": true,
-            "rows": rows.len(),
-            "columns": visible_cols,
-        }));
+        println!(
+            "{}",
+            serde_json::json!({
+                "ok": true,
+                "rows": rows.len(),
+                "columns": visible_cols,
+            })
+        );
     } else {
         eprintln!(
             "Wrote {} rows × {} cols to clipboard ({})",
@@ -1672,6 +1816,7 @@ fn cmd_excel(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_convert(
     from: String,
     to: String,
@@ -1726,22 +1871,20 @@ fn cmd_convert(
                 .map_err(|e| format!("render error: {}", e))?
         }
         ("html", "plain") => render::html_to_plain_text(&input_text),
-        ("rtf", "html") => {
-            rtf::rtf_to_html(input_text.as_bytes())?
-        }
+        ("rtf", "html") => rtf::rtf_to_html(input_text.as_bytes())?,
         _ => {
-            return Err(
-                format!("unsupported conversion: {} → {}", from, to).into()
-            );
+            return Err(format!("unsupported conversion: {} → {}", from, to).into());
         }
     };
 
     if json {
-        match output {
-            Some(path) => std::fs::write(&path, result.as_bytes())?,
-            None => {} // JSON mode doesn't print raw output
+        if let Some(path) = output {
+            std::fs::write(&path, result.as_bytes())?;
         }
-        println!("{}", serde_json::json!({"ok": true, "output_bytes": result.len()}));
+        println!(
+            "{}",
+            serde_json::json!({"ok": true, "output_bytes": result.len()})
+        );
     } else {
         match output {
             Some(path) => std::fs::write(&path, result.as_bytes())?,
@@ -1751,9 +1894,216 @@ fn cmd_convert(
     Ok(())
 }
 
+#[derive(Debug, serde::Serialize)]
+struct DoctorCheck {
+    name: &'static str,
+    status: &'static str,
+    message: String,
+}
+
+fn check_ok(name: &'static str, message: impl Into<String>) -> DoctorCheck {
+    DoctorCheck {
+        name,
+        status: "ok",
+        message: message.into(),
+    }
+}
+
+fn check_warn(name: &'static str, message: impl Into<String>) -> DoctorCheck {
+    DoctorCheck {
+        name,
+        status: "warn",
+        message: message.into(),
+    }
+}
+
+fn check_error(name: &'static str, message: impl Into<String>) -> DoctorCheck {
+    DoctorCheck {
+        name,
+        status: "error",
+        message: message.into(),
+    }
+}
+
+fn check_skipped(name: &'static str, message: impl Into<String>) -> DoctorCheck {
+    DoctorCheck {
+        name,
+        status: "skipped",
+        message: message.into(),
+    }
+}
+
+fn cmd_doctor(
+    json: bool,
+    skip_clipboard: bool,
+    config: &Config,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut checks = Vec::new();
+
+    checks.push(check_ok(
+        "platform",
+        format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
+    ));
+
+    let config_path = config_file_path();
+    if config_path.exists() {
+        match std::fs::read_to_string(&config_path) {
+            Ok(contents) => match toml::from_str::<Config>(&contents) {
+                Ok(_) => checks.push(check_ok(
+                    "config",
+                    format!("loaded {}", config_path.display()),
+                )),
+                Err(e) => checks.push(check_error(
+                    "config",
+                    format!("could not parse {}: {}", config_path.display(), e),
+                )),
+            },
+            Err(e) => checks.push(check_error(
+                "config",
+                format!("could not read {}: {}", config_path.display(), e),
+            )),
+        }
+    } else {
+        checks.push(check_warn(
+            "config",
+            format!(
+                "no config file at {}; using defaults",
+                config_path.display()
+            ),
+        ));
+    }
+
+    let templates_dir = templates_dir();
+    match std::fs::create_dir_all(&templates_dir) {
+        Ok(_) => {
+            let probe = templates_dir.join(".clipli-doctor-write-test");
+            match std::fs::write(&probe, b"ok").and_then(|_| std::fs::remove_file(&probe)) {
+                Ok(_) => checks.push(check_ok(
+                    "template_store",
+                    format!("writable {}", templates_dir.display()),
+                )),
+                Err(e) => checks.push(check_error(
+                    "template_store",
+                    format!("not writable {}: {}", templates_dir.display(), e),
+                )),
+            }
+        }
+        Err(e) => checks.push(check_error(
+            "template_store",
+            format!("could not create {}: {}", templates_dir.display(), e),
+        )),
+    }
+
+    match std::process::Command::new("textutil").arg("-help").output() {
+        Ok(output)
+            if output.status.success()
+                || !output.stderr.is_empty()
+                || !output.stdout.is_empty() =>
+        {
+            checks.push(check_ok("textutil", "available for RTF to HTML conversion"));
+        }
+        Ok(output) => checks.push(check_warn(
+            "textutil",
+            format!("found textutil but it exited with {}", output.status),
+        )),
+        Err(e) => checks.push(check_error("textutil", format!("not available: {}", e))),
+    }
+
+    if skip_clipboard {
+        checks.push(check_skipped(
+            "pasteboard",
+            "clipboard check skipped by --skip-clipboard",
+        ));
+    } else {
+        match pb::read_all() {
+            Ok(snapshot) => checks.push(check_ok(
+                "pasteboard",
+                format!(
+                    "read {} type(s) from the macOS pasteboard",
+                    snapshot.types.len()
+                ),
+            )),
+            Err(PbError::Empty) => checks.push(check_warn(
+                "pasteboard",
+                "pasteboard is reachable but currently empty",
+            )),
+            Err(e) => checks.push(check_error(
+                "pasteboard",
+                format!("could not read pasteboard: {}", e),
+            )),
+        }
+    }
+
+    match &config.agent.command {
+        Some(cmd) => {
+            let mut command = std::process::Command::new(cmd);
+            command.args(["--help"]);
+            match command.output() {
+                Ok(_) => checks.push(check_ok(
+                    "agent_command",
+                    format!("configured command '{}' can be launched", cmd),
+                )),
+                Err(e) => checks.push(check_error(
+                    "agent_command",
+                    format!("configured command '{}' could not be launched: {}", cmd, e),
+                )),
+            }
+        }
+        None => checks.push(check_warn(
+            "agent_command",
+            "no external agent command configured; --strategy agent will use stdio protocol unless --agent-command is provided",
+        )),
+    }
+
+    let has_errors = checks.iter().any(|check| check.status == "error");
+    let has_warnings = checks.iter().any(|check| check.status == "warn");
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "ok": !has_errors,
+                "warnings": has_warnings,
+                "checks": checks,
+            }))?
+        );
+    } else {
+        println!("clipli doctor");
+        for check in &checks {
+            println!(
+                "  [{:<7}] {:<15} {}",
+                check.status, check.name, check.message
+            );
+        }
+        if has_errors {
+            println!("Result: errors found");
+        } else if has_warnings {
+            println!("Result: usable with warnings");
+        } else {
+            println!("Result: ready");
+        }
+    }
+
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------
+
+fn config_dir() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| dirs::home_dir().unwrap().join(".config"))
+        .join("clipli")
+}
+
+fn config_file_path() -> PathBuf {
+    config_dir().join("config.toml")
+}
+
+fn templates_dir() -> PathBuf {
+    config_dir().join("templates")
+}
 
 /// Map a type string to PbType.
 fn parse_pb_type(s: &str) -> Result<PbType, Box<dyn std::error::Error>> {
@@ -1764,7 +2114,11 @@ fn parse_pb_type(s: &str) -> Result<PbType, Box<dyn std::error::Error>> {
         "png" => Ok(PbType::Png),
         "tiff" => Ok(PbType::Tiff),
         "pdf" => Ok(PbType::Pdf),
-        other => Err(format!("unknown pasteboard type '{}': use html, rtf, plain, png, tiff, or pdf", other).into()),
+        other => Err(format!(
+            "unknown pasteboard type '{}': use html, rtf, plain, png, tiff, or pdf",
+            other
+        )
+        .into()),
     }
 }
 
@@ -1814,12 +2168,24 @@ fn print_json_error(message: &str, code: &str) {
 
 /// Try to extract an error code from a boxed error by downcasting to known types.
 fn try_error_code(e: &(dyn std::error::Error + 'static)) -> &'static str {
-    if let Some(e) = e.downcast_ref::<pb::PbError>() { return e.code(); }
-    if let Some(e) = e.downcast_ref::<store::StoreError>() { return e.code(); }
-    if let Some(e) = e.downcast_ref::<render::RenderError>() { return e.code(); }
-    if let Some(e) = e.downcast_ref::<clean::CleanError>() { return e.code(); }
-    if let Some(e) = e.downcast_ref::<templatize::TemplatizeError>() { return e.code(); }
-    if let Some(e) = e.downcast_ref::<rtf::RtfError>() { return e.code(); }
+    if let Some(e) = e.downcast_ref::<pb::PbError>() {
+        return e.code();
+    }
+    if let Some(e) = e.downcast_ref::<store::StoreError>() {
+        return e.code();
+    }
+    if let Some(e) = e.downcast_ref::<render::RenderError>() {
+        return e.code();
+    }
+    if let Some(e) = e.downcast_ref::<clean::CleanError>() {
+        return e.code();
+    }
+    if let Some(e) = e.downcast_ref::<templatize::TemplatizeError>() {
+        return e.code();
+    }
+    if let Some(e) = e.downcast_ref::<rtf::RtfError>() {
+        return e.code();
+    }
     "UNKNOWN"
 }
 

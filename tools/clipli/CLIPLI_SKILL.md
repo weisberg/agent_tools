@@ -7,7 +7,9 @@ description: |
   plain text, Jinja2). Triggers on: (1) clipboard read/write/inspect operations,
   (2) creating Excel-pasteable tables from data, (3) editing cell formatting in clipboard
   HTML, (4) capturing clipboard content as reusable templates, (5) RTF/HTML/plain text
-  conversion, (6) template management (versioning, linting, search, import/export).
+  conversion, (6) template management (versioning, linting, search, import/export),
+  (7) checking local clipboard/config readiness with doctor, (8) agent-command
+  templatization and batch rendering.
   Requires macOS. Binary must be built first with cargo build --release.
 ---
 
@@ -19,25 +21,43 @@ Build from the repo root: `cd tools/clipli && cargo build --release`
 
 Binary in this repo: `tools/clipli/target/release/clipli`
 
-All clipboard operations require a macOS GUI session. Non-clipboard commands (`convert`, `lint`, `excel --dry-run`) work anywhere.
+Current binary version: `clipli 0.4.0`
+
+All clipboard operations require a macOS GUI session. Non-clipboard commands (`doctor --skip-clipboard`, `convert`, `lint`, `render`, `excel --dry-run`) work in automation and CI-like contexts.
+
+## Readiness Check
+
+Run `doctor` first when the environment is unknown, when clipboard access fails, or before using `clipli` from automation:
+
+```bash
+clipli doctor
+clipli doctor --json
+clipli doctor --json --skip-clipboard
+```
+
+`doctor` checks platform, config parsing, template-store writability, `textutil` availability, pasteboard access, and external agent command launchability when configured.
+
+In sandboxed agent environments, `doctor` may report the template store as not writable if the sandbox blocks `~/Library/Application Support/clipli`. Treat that as environment signal, not necessarily a product failure.
 
 ## Agent-first summary
 
 If a new agent is handed `clipli` as a skill, the main thing to understand is that it mixes safe inspection commands with commands that mutate live user state.
 
 - `write`, `capture`, `paste`, `excel`, and `excel-edit` change the current macOS clipboard.
-- `capture`, `edit`, `delete`, `restore`, and `import` persist changes under `~/.config/clipli/templates/`.
-- `inspect`, `read`, `convert`, `search`, `show`, `lint`, and `render` are the safest first moves.
+- `capture`, `edit`, `delete`, `restore`, and `import` persist changes under the clipli config store, typically `~/Library/Application Support/clipli/templates/` on macOS.
+- `doctor`, `inspect`, `read`, `convert`, `search`, `show`, `lint`, and `render` are the safest first moves.
 - `excel --dry-run`, `excel-edit --dry-run`, and `paste --dry-run` let you preview output before touching the clipboard.
 - `capture` reads whatever is on the clipboard right now. It does not capture from a file path.
 - `paste` renders from stored template data. It does not use the current clipboard as input.
+- `render` writes files or stdout only. It does not touch the clipboard.
+- `capture --strategy agent --agent-command <cmd>` invokes an external process directly, passes a JSON request on stdin, and validates JSON from stdout.
 - If the clipboard format is unknown, start with `inspect`.
 
 ## Safe Vs Mutating Commands
 
 | Command family | Side effect |
 |---|---|
-| `inspect`, `read`, `convert`, `list`, `show`, `search`, `versions`, `lint`, `render` | Safe read/preview operations |
+| `doctor`, `inspect`, `read`, `convert`, `list`, `show`, `search`, `versions`, `lint`, `render` | Safe read/preview operations |
 | `excel --dry-run`, `excel-edit --dry-run`, `paste --dry-run` | Safe preview operations |
 | `write`, `paste`, `excel`, `excel-edit` | Mutate the live clipboard |
 | `capture`, `edit`, `delete`, `restore`, `import` | Change the persistent template store |
@@ -50,6 +70,8 @@ When the user has not explicitly asked you to overwrite the clipboard, the safes
 2. Use `read`, `show`, `search`, or `lint` to understand the existing content or template.
 3. Use `convert`, `render`, `excel --dry-run`, `excel-edit --dry-run`, or `paste --dry-run` to preview the exact output.
 4. Only then use a clipboard-mutating command.
+
+If the environment itself is uncertain, run `clipli doctor --json --skip-clipboard` before step 1.
 
 ## The Core Loop
 
@@ -75,8 +97,10 @@ CSV file  →  clipli excel  →  clipboard  →  Cmd+V into Excel
 | Save clipboard content for reuse later | `clipli capture --name my_template` |
 | Fill a saved template with new data | `clipli paste my_template -D '{...}'` |
 | See what's on the clipboard | `clipli inspect` |
+| Check whether clipli is usable here | `clipli doctor --json` |
 | Convert RTF to HTML | `clipli convert --from rtf --to html` |
 | Render many outputs without touching the clipboard | `clipli render my_template --data-file rows.json` |
+| Let an external LLM tool templatize captured HTML | `clipli capture --name my_template --templatize --strategy agent --agent-command my-agent` |
 
 ## 1. CSV to Excel Table
 
@@ -255,11 +279,42 @@ clipli capture --name quarterly_report \
 
 `--preview` opens the cleaned or templatized HTML in the browser before saving. `--force` overwrites an existing template and snapshots the previous version first.
 
-**Pipeline:** read clipboard (HTML > RTF > plain text fallback) -> clean Office HTML -> extract variables -> save to `~/.config/clipli/templates/<name>/`.
+**Pipeline:** read clipboard (HTML > RTF > plain text fallback) -> clean Office HTML -> extract variables -> save to the clipli template store.
 
-**Strategies:** `heuristic` (fast regex: dates, currency, %, emails, numbers), `agent` (pipe to external LLM for smarter extraction), `manual` (save as-is, edit by hand later).
+**Strategies:** `heuristic` (fast regex: dates, currency, %, emails, numbers), `agent` (stdio protocol or direct external command for smarter extraction), `manual` (save as-is, edit by hand later).
 
 **`--raw`** skips HTML cleaning — preserves original Office markup.
+
+**External agent command mode:**
+
+```bash
+clipli capture --name slide_snippet \
+  --templatize \
+  --strategy agent \
+  --agent-command my-agent \
+  --agent-timeout 60 \
+  --json
+```
+
+When `--agent-command` is set, `clipli` launches the command without a shell, writes one JSON request to stdin, reads one JSON response from stdout, captures stderr/exit status on failure, and validates the returned template before saving.
+
+Expected agent response:
+
+```json
+{
+  "template": "<p>Hello {{ name }}</p>",
+  "variables": [
+    {
+      "name": "name",
+      "type": "string",
+      "default_value": "Alice",
+      "description": "Person name"
+    }
+  ]
+}
+```
+
+Validation rejects invalid Jinja, invalid variable names, structural mismatches, scripts, iframes, event handlers, and `javascript:` URLs.
 
 ## 6. Render and Paste Templates
 
@@ -296,6 +351,15 @@ echo '{
 
 # Choose template: table_default, table_striped, table_excel, slide_default
 echo '...' | clipli paste --from-table -t table_excel
+```
+
+**Batch render without touching the clipboard:**
+
+```bash
+# rows.json may be an array of objects or newline-delimited JSON
+clipli render quarterly_report --data-file rows.json --output-dir ./out
+clipli render quarterly_report --data-file rows.json --format plain
+clipli render quarterly_report --data-file rows.json --json
 ```
 
 ## 7. Template Lifecycle
@@ -372,7 +436,7 @@ For hand-crafted Excel HTML via `clipli write --type html`, see [references/exce
 
 ## Config
 
-Optional `~/.config/clipli/config.toml` — CLI flags always override these values:
+Optional config file, typically `~/Library/Application Support/clipli/config.toml` on macOS. CLI flags always override these values:
 
 ```toml
 [defaults]
@@ -386,12 +450,17 @@ target_app = "generic"        # excel | powerpoint | google_sheets | generic
 
 [templatize]
 default_strategy = "heuristic"  # capture --strategy default when flag omitted
+
+[agent]
+command = "my-agent"             # optional external command for strategy=agent
+args = []                         # optional command arguments
+timeout_secs = 30
 ```
 
 ## Error Handling
 
 Without `--json`: errors go to stderr as plain text, exit code 1.
 
-With `--json` (on inspect, capture, list, versions, lint, search): errors go to stdout as `{"ok":false,"error":"...","code":"STORE_NOT_FOUND"}`.
+With `--json`, errors go to stdout as `{"ok":false,"error":"...","code":"STORE_NOT_FOUND"}`. JSON mode is available on the automation-oriented commands, including `inspect`, `capture`, `paste`, `list`, `show`, `delete`, `versions`, `lint`, `search`, `excel`, `excel-edit`, `render`, `convert`, and `doctor`.
 
 Error code prefixes: `PB_` (pasteboard), `STORE_` (template store), `RENDER_` (template engine), `CLEAN_` (HTML cleaner), `TEMPLATIZE_` (variable extraction), `RTF_` (conversion).

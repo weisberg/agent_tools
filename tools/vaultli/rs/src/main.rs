@@ -15,7 +15,7 @@ use vaultli::validate::validate_vault;
 #[command(
     name = "vaultli",
     version,
-    about = "Rust preview of the vaultli knowledge-vault CLI"
+    about = "Rust implementation of the vaultli knowledge-vault CLI"
 )]
 struct Cli {
     #[arg(long, global = true)]

@@ -1,172 +1,69 @@
-use serde_json::{Map, Number, Value};
+use serde_json::{Map, Value};
 
 use crate::error::VaultliError;
+use crate::util::order_metadata;
 
 pub fn parse_frontmatter_text(
     text: &str,
     display_path: &str,
 ) -> Result<(Map<String, Value>, String, bool), VaultliError> {
-    if !text.starts_with("---\n") && text.trim() != "---" {
+    let mut lines = text.split_inclusive('\n');
+    let first = match lines.next() {
+        Some(line) => line,
+        None => return Ok((Map::new(), text.to_string(), false)),
+    };
+    if first.trim_end_matches(['\r', '\n']) != "---" {
         return Ok((Map::new(), text.to_string(), false));
     }
 
-    let mut lines = text.lines();
-    let first = lines.next();
-    if first != Some("---") {
-        return Ok((Map::new(), text.to_string(), false));
-    }
-
-    let mut metadata_lines = Vec::new();
+    let mut metadata_text = String::new();
+    let mut body = String::new();
     let mut found_closing = false;
-    for line in lines.by_ref() {
-        if line.trim() == "---" {
-            found_closing = true;
-            break;
+    let mut closing_seen = false;
+    for line in lines {
+        if !closing_seen {
+            if line.trim_end_matches(['\r', '\n']) == "---" {
+                closing_seen = true;
+                found_closing = true;
+                continue;
+            }
+            metadata_text.push_str(line);
+        } else {
+            body.push_str(line);
         }
-        metadata_lines.push(line.to_string());
     }
 
     if !found_closing {
         return Err(VaultliError::MalformedFrontmatter(display_path.to_string()));
     }
 
-    let body = lines.collect::<Vec<_>>().join("\n");
-    let metadata = parse_frontmatter_map(&metadata_lines, display_path)?;
-    Ok((metadata, body, true))
-}
+    let parsed: Value = if metadata_text.trim().is_empty() {
+        Value::Object(Map::new())
+    } else {
+        serde_yaml::from_str(&metadata_text).map_err(|err| {
+            VaultliError::InvalidFrontmatter(display_path.to_string(), err.to_string())
+        })?
+    };
 
-fn parse_frontmatter_map(
-    lines: &[String],
-    display_path: &str,
-) -> Result<Map<String, Value>, VaultliError> {
-    let mut result = Map::new();
-    let mut index = 0;
-
-    while index < lines.len() {
-        let raw = &lines[index];
-        if raw.trim().is_empty() || raw.trim_start().starts_with('#') {
-            index += 1;
-            continue;
-        }
-        if raw.starts_with(' ') || raw.starts_with('\t') {
+    let metadata = match parsed {
+        Value::Object(map) => map,
+        Value::Null => Map::new(),
+        _ => {
             return Err(VaultliError::InvalidFrontmatter(
                 display_path.to_string(),
-                format!("unexpected indentation at line {}", index + 1),
+                "Frontmatter must deserialize to a mapping".into(),
             ));
         }
+    };
 
-        let (key, value_part) = raw.split_once(':').ok_or_else(|| {
-            VaultliError::InvalidFrontmatter(display_path.to_string(), raw.clone())
-        })?;
-        let key = key.trim().to_string();
-        let value_part = value_part.trim();
-
-        if value_part.is_empty() {
-            let mut items = Vec::new();
-            let mut probe = index + 1;
-            while probe < lines.len() {
-                let candidate = &lines[probe];
-                let trimmed = candidate.trim();
-                if trimmed.is_empty() {
-                    probe += 1;
-                    continue;
-                }
-                if candidate.starts_with("  - ") || candidate.starts_with("\t- ") {
-                    let value = candidate
-                        .trim_start()
-                        .strip_prefix("- ")
-                        .unwrap_or_default()
-                        .trim();
-                    items.push(parse_scalar(value));
-                    probe += 1;
-                    continue;
-                }
-                if candidate.starts_with(' ') || candidate.starts_with('\t') {
-                    return Err(VaultliError::InvalidFrontmatter(
-                        display_path.to_string(),
-                        format!("unsupported indented block for key {}", key),
-                    ));
-                }
-                break;
-            }
-            result.insert(key, Value::Array(items));
-            index = probe;
-            continue;
-        }
-
-        if value_part == ">-" || value_part == ">" || value_part == "|" {
-            let folded = value_part != "|";
-            let mut collected = Vec::new();
-            let mut probe = index + 1;
-            while probe < lines.len() {
-                let candidate = &lines[probe];
-                if candidate.starts_with("  ") || candidate.starts_with('\t') {
-                    collected.push(candidate.trim().to_string());
-                    probe += 1;
-                    continue;
-                }
-                if candidate.trim().is_empty() {
-                    collected.push(String::new());
-                    probe += 1;
-                    continue;
-                }
-                break;
-            }
-            let rendered = if folded {
-                collected
-                    .into_iter()
-                    .filter(|line| !line.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            } else {
-                collected.join("\n")
-            };
-            result.insert(key, Value::String(rendered));
-            index = probe;
-            continue;
-        }
-
-        result.insert(key, parse_scalar(value_part));
-        index += 1;
-    }
-
-    Ok(result)
+    Ok((order_metadata(&metadata), body, true))
 }
 
-fn parse_scalar(raw: &str) -> Value {
-    if raw.starts_with('[') && raw.ends_with(']') {
-        let inner = &raw[1..raw.len() - 1];
-        let items = inner
-            .split(',')
-            .map(|item| item.trim())
-            .filter(|item| !item.is_empty())
-            .map(parse_scalar)
-            .collect::<Vec<_>>();
-        return Value::Array(items);
-    }
-
-    if let Some(stripped) = raw
-        .strip_prefix('"')
-        .and_then(|value| value.strip_suffix('"'))
-    {
-        return Value::String(stripped.to_string());
-    }
-    if let Some(stripped) = raw
-        .strip_prefix('\'')
-        .and_then(|value| value.strip_suffix('\''))
-    {
-        return Value::String(stripped.to_string());
-    }
-    if let Ok(number) = raw.parse::<i64>() {
-        return Value::Number(Number::from(number));
-    }
-    if raw == "true" {
-        return Value::Bool(true);
-    }
-    if raw == "false" {
-        return Value::Bool(false);
-    }
-    Value::String(raw.to_string())
+pub fn render_frontmatter_yaml(metadata: &Map<String, Value>) -> Result<String, VaultliError> {
+    let value = Value::Object(metadata.clone());
+    let rendered = serde_yaml::to_string(&value)
+        .map_err(|err| VaultliError::Unsupported(format!("yaml serialization failed: {err}")))?;
+    Ok(rendered.trim_end_matches('\n').to_string())
 }
 
 #[cfg(test)]
@@ -189,5 +86,34 @@ mod tests {
         let text = "---\ndescription: >-\n  one\n  two\n---\nBody";
         let (metadata, _, _) = parse_frontmatter_text(text, "docs/guide.md").unwrap();
         assert_eq!(metadata["description"], "one two");
+    }
+
+    #[test]
+    fn parses_flow_sequence() {
+        let text = "---\nid: a\ntitle: t\ndescription: d\ntags: [alpha, beta]\n---\n";
+        let (metadata, _, _) = parse_frontmatter_text(text, "a.md").unwrap();
+        assert_eq!(metadata["tags"][0], "alpha");
+        assert_eq!(metadata["tags"][1], "beta");
+    }
+
+    #[test]
+    fn quoted_strings_preserve_colons() {
+        let text = "---\ntitle: \"a: b\"\n---\n";
+        let (metadata, _, _) = parse_frontmatter_text(text, "a.md").unwrap();
+        assert_eq!(metadata["title"], "a: b");
+    }
+
+    #[test]
+    fn no_frontmatter_returns_false() {
+        let text = "Just body\n";
+        let (_, body, has_frontmatter) = parse_frontmatter_text(text, "a.md").unwrap();
+        assert!(!has_frontmatter);
+        assert_eq!(body, text);
+    }
+
+    #[test]
+    fn malformed_frontmatter_errors() {
+        let text = "---\nfoo: bar\nno closing\n";
+        assert!(parse_frontmatter_text(text, "a.md").is_err());
     }
 }

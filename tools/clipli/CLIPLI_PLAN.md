@@ -1,8 +1,8 @@
 # clipli Development Plan
 
 **Spec:** `CLIPLI_SPEC.md` v1.0.0-spec  
-**Current crate version:** `0.3.0`
-**Plan updated:** 2026-03-27
+**Current crate version:** `0.4.0`
+**Plan updated:** 2026-04-23
 
 ---
 
@@ -45,10 +45,14 @@ The next stage is to turn that solid core into a more complete product: close th
 - [x] full-text template search across name, description, tags, and content
 - [x] template import/export as ZIP bundles with `manifest.json`
 - [x] store durability with atomic writes (temp dir + rename) and `delete --keep-versions`
+- [x] external agent command execution for `capture --strategy agent`
+- [x] batch template rendering via `render`
+- [x] `-v` / `-vv` / `-vvv` tracing for automation debugging
+- [x] `doctor` environment readiness checks with JSON output
 
 ### Verified baseline
 
-`cargo test` passes 197 tests with 0 failures and 0 warnings, including the unit and integration suites, with GUI-dependent pasteboard tests still ignored as expected.
+`cargo test` passes 205 tests with 0 failures, including the unit and integration suites, with 7 GUI-dependent pasteboard tests still ignored as expected.
 
 ### Completed so far
 
@@ -60,19 +64,22 @@ The next stage is to turn that solid core into a more complete product: close th
 - [x] Excel HTML generation and clipboard editing workflows are implemented beyond the original MVP scope
 - [x] the current automated baseline is green across unit and integration tests, with only GUI-dependent clipboard tests ignored
 - [x] **v0.2 complete:** RTF conversion via `textutil` (`src/rtf.rs`), config cascade with all 6 fields wired, `capture --preview`, JSON error output with `code()` on all error types and `--json` detection in `main()`, 186 tests passing
-- [x] **v0.3 complete:** template versioning (snapshot/list/load/restore, prune to 20 max), template linting (`src/lint.rs`, 5 checks), full-text search, import/export ZIP bundles with `manifest.json`, store durability (atomic writes via temp dir + rename, `delete --keep-versions`), auto-snapshots on `edit`, 197 tests passing
+- [x] **v0.3 complete:** template versioning (snapshot/list/load/restore, prune to 20 max), template linting (`src/lint.rs`, 5 checks), full-text search, import/export ZIP bundles with `manifest.json`, store durability (atomic writes via temp dir + rename, `delete --keep-versions`), auto-snapshots on `edit`
+- [x] **v0.4 implemented:** external agent command execution, agent response validation, batch `render`, JSON-oriented automation output, debug tracing, and `doctor` readiness checks, 205 tests passing
 
 ### Highest-confidence gaps from the current implementation
 
 - [x] ~~`convert --from rtf --to html` is still explicitly unimplemented~~ (done in v0.2)
 - [x] ~~config is loaded, but defaults are not consistently honored across commands~~ (done in v0.2)
-- [ ] agent templatization uses a stdin/stdout protocol only; clipli does not yet invoke an external agent command itself
+- [x] ~~agent templatization uses a stdin/stdout protocol only; clipli does not yet invoke an external agent command itself~~ (done in v0.4)
 - [x] ~~template storage has no versioning, rollback, locking, or import/export story~~ (done in v0.3)
 - [x] ~~`capture` does not yet provide the preview workflow described in the spec~~ (done in v0.2)
-- [ ] shell completions, richer diagnostics, and release/distribution work are still missing
-- [ ] batch rendering workflows do not exist yet
-- [ ] external agent command execution (beyond stdin/stdout protocol) is not yet supported
-- [ ] `-v` / `-vv` debug logging is not yet available
+- [ ] shell completions and release/distribution work are still missing
+- [x] ~~batch rendering workflows do not exist yet~~ (done in v0.4)
+- [x] ~~external agent command execution (beyond stdin/stdout protocol) is not yet supported~~ (done in v0.4)
+- [x] ~~`-v` / `-vv` debug logging is not yet available~~ (done in v0.4)
+- [ ] JSON output is broad, but the project still needs explicit compatibility guarantees before a stable release
+- [ ] clipboard watch/history needs privacy controls before implementation
 
 ### Strategic implication
 
@@ -275,79 +282,79 @@ The version roadmap below is sequenced around those layers.
 
 ---
 
-## v0.4 — Agent-Native Workflows
+## v0.4 — Agent-Native Workflows ✅ IMPLEMENTED
 
 **Goal:** Make clipli a first-class primitive in AI and automation pipelines, not just a CLI a user manually chains.
 
 ### Primary deliverables
 
-- [ ] external agent command execution for templatization
-- [ ] stronger agent-response validation
-- [ ] richer machine-readable command outputs
-- [ ] batch rendering workflows
-- [ ] better debugging and observability for automation use
+- [x] external agent command execution for templatization
+- [x] stronger agent-response validation
+- [x] richer machine-readable command outputs
+- [x] batch rendering workflows
+- [x] better debugging and observability for automation use
 
 ### Detailed scope
 
 #### 0.4.1 External agent command integration
 
-- [ ] Extend `capture --strategy agent` to optionally invoke an external command directly
+- [x] Extend `capture --strategy agent` to optionally invoke an external command directly
 - [ ] Add flags such as:
-  - [ ] `--agent-command`
-  - [ ] `--agent-timeout`
+  - [x] `--agent-command`
+  - [x] `--agent-timeout`
   - [ ] `--agent-arg` if needed, or support a shell-free command/args shape
-- [ ] Continue to support the current stdin/stdout protocol mode for advanced users
-- [ ] Capture stderr and exit status cleanly
+- [x] Continue to support the current stdin/stdout protocol mode for advanced users
+- [x] Capture stderr and exit status cleanly
 
 **Acceptance:**
 
-- [ ] users can run a single clipli command that delegates templatization to an external LLM tool
+- [x] users can run a single clipli command that delegates templatization to an external LLM tool
 
 #### 0.4.2 Agent validation hardening
 
-- [ ] Validate variable names more strictly
-- [ ] Validate returned template structure against the input in a practical way
-- [ ] Detect suspicious changes such as removed tables, added scripts, or attribute rewrites outside expected bounds
-- [ ] Add fallback behavior when the agent response is malformed
+- [x] Validate variable names more strictly
+- [x] Validate returned template structure against the input in a practical way
+- [x] Detect suspicious changes such as removed tables, added scripts, or attribute rewrites outside expected bounds
+- [x] Add failure behavior when the agent response is malformed
 
 **Acceptance:**
 
-- [ ] agent-powered capture is safe enough to trust in semi-automated workflows
+- [x] agent-powered capture is safe enough to trust in semi-automated workflows
 
 #### 0.4.3 Batch rendering
 
-- [ ] Add batch render/paste workflow, for example:
+- [x] Add batch render/paste workflow, for example:
   - [ ] `clipli paste-batch <NAME> --data-file rows.json`
-  - [ ] `clipli render <NAME> --output-dir ...`
-- [ ] Support arrays of objects, newline-delimited JSON, and CSV-backed input as follow-on formats if needed
-- [ ] Allow file output as well as clipboard output
+  - [x] `clipli render <NAME> --output-dir ...`
+- [x] Support arrays of objects and newline-delimited JSON
+- [x] Allow file output as well as stdout output
 
 **Acceptance:**
 
-- [ ] clipli can generate many outputs from one template without forcing users to script the loop themselves
+- [x] clipli can generate many outputs from one template without forcing users to script the loop themselves
 
 #### 0.4.4 Machine-readable command contracts
 
-- [ ] Audit JSON output across `capture`, `paste`, `list`, `show`, `convert`, and future batch flows
-- [ ] Make success outputs stable and explicit enough for programmatic callers
-- [ ] Add example automation docs to the spec or README
+- [x] Audit JSON output across `capture`, `paste`, `list`, `show`, `convert`, and batch flows
+- [x] Make success outputs explicit enough for programmatic callers
+- [x] Add example automation docs to the README
 
 #### 0.4.5 Debuggability
 
-- [ ] Add `-v` / `-vv` style logging or an equivalent debug mode
-- [ ] Log which source type was captured, which strategy was used, and which template was loaded
-- [ ] Provide enough visibility for users diagnosing agent failures or data merge mistakes
+- [x] Add `-v` / `-vv` style logging or an equivalent debug mode
+- [x] Log useful capture, store, paste, and agent workflow details
+- [x] Provide enough visibility for users diagnosing agent failures or data merge mistakes
 
 ### Risks
 
-- [ ] external process execution can introduce quoting and security hazards; avoid shell-based execution
-- [ ] stronger validation can reject useful agent output if rules are too strict; start with conservative structural checks
+- [x] external process execution can introduce quoting and security hazards; avoid shell-based execution
+- [x] stronger validation can reject useful agent output if rules are too strict; start with conservative structural checks
 
 ### Exit criteria
 
-- [ ] agent templatization supports a one-command workflow
-- [ ] batch rendering exists for automation-heavy use
-- [ ] JSON output and logging are strong enough for scripted use
+- [x] agent templatization supports a one-command workflow
+- [x] batch rendering exists for automation-heavy use
+- [x] JSON output and logging are strong enough for scripted use
 
 ---
 
@@ -531,12 +538,12 @@ These workstreams should progress alongside the version milestones rather than b
 
 1. ~~`v0.2` core completion and correctness~~ ✅ COMPLETE
 2. ~~`v0.3` template lifecycle and safety~~ ✅ COMPLETE
-3. `v0.4` agent-native workflows ← **current**
+3. ~~`v0.4` agent-native workflows~~ ✅ IMPLEMENTED
 
 ### Next wave
 
-4. `v0.5` automation and history
-5. `v0.6` distribution, interfaces, and ecosystem
+4. `v0.6` distribution, interfaces, and ecosystem ← **recommended next**
+5. `v0.5` automation and history, after privacy controls are designed
 
 ### Why this order
 

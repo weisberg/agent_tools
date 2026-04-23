@@ -32,6 +32,7 @@ Typical commands:
 clipli inspect
 clipli read --type html
 clipli write --type html -i snippet.html
+clipli doctor
 ```
 
 ### Template capture and reuse
@@ -103,6 +104,38 @@ Current top-level commands:
 - `excel`, `excel-edit` — build and tweak Excel-friendly clipboard content
 - `render` — render a template to files or stdout without touching the clipboard
 - `convert` — convert between supported formats
+- `doctor` — check local environment, config, store, pasteboard, and agent readiness
+
+## Automation Notes
+
+Most commands that are useful to agents or scripts support `--json`. Failures in JSON mode use a consistent envelope:
+
+```json
+{"ok": false, "error": "message", "code": "ERROR_CODE"}
+```
+
+`capture --strategy agent` supports two modes:
+
+- without `--agent-command`, `clipli` writes a JSON templatization request to stdout and reads one JSON response from stdin
+- with `--agent-command`, `clipli` launches the command directly, writes the request to its stdin, and reads the response from stdout
+
+The agent response shape is:
+
+```json
+{
+  "template": "<p>Hello {{ name }}</p>",
+  "variables": [
+    {
+      "name": "name",
+      "type": "string",
+      "default_value": "Alice",
+      "description": "Person name"
+    }
+  ]
+}
+```
+
+`clipli` validates agent responses before saving them, including Jinja syntax, variable names, basic HTML structure preservation, and suspicious content such as scripts, event handlers, iframes, and `javascript:` URLs.
 
 ## Platform Notes
 
@@ -123,6 +156,13 @@ Then run it from `target/release/clipli`, or during development with:
 
 ```bash
 cargo run -- --help
+```
+
+Check local readiness with:
+
+```bash
+cargo run -- doctor
+cargo run -- doctor --json --skip-clipboard
 ```
 
 ## Where to Look Next

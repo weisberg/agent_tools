@@ -61,23 +61,17 @@ fn map_minijinja_error(err: minijinja::Error) -> RenderError {
     match err.kind() {
         ErrorKind::TemplateNotFound => {
             // Extract the template name from the error message if possible.
-            let name = err
-                .name()
-                .unwrap_or("unknown")
-                .to_string();
+            let name = err.name().unwrap_or("unknown").to_string();
             RenderError::TemplateNotFound(name)
         }
         ErrorKind::UndefinedError => {
             // Try to extract the variable name from the detail string.
             let msg = err.to_string();
             // minijinja messages look like: "undefined value 'foo'"
-            let var_name = extract_undefined_var_name(&msg)
-                .unwrap_or_else(|| msg.clone());
+            let var_name = extract_undefined_var_name(&msg).unwrap_or_else(|| msg.clone());
             RenderError::MissingVariable(var_name)
         }
-        ErrorKind::SyntaxError => {
-            RenderError::SyntaxError(err.to_string())
-        }
+        ErrorKind::SyntaxError => RenderError::SyntaxError(err.to_string()),
         _ => {
             // Check message for "syntax" to catch any additional syntax-related variants.
             let msg = err.to_string();
@@ -148,13 +142,13 @@ fn filter_date_fmt(val: String, fmt: Option<String>) -> String {
 
     // Try common date formats in order.
     let formats = [
-        "%Y-%m-%d",   // ISO: 2026-03-25
-        "%m/%d/%Y",   // US: 03/25/2026
-        "%d/%m/%Y",   // EU: 25/03/2026
-        "%m-%d-%Y",   // 03-25-2026
-        "%B %d, %Y",  // March 25, 2026
-        "%b %d, %Y",  // Mar 25, 2026
-        "%Y%m%d",     // compact: 20260325
+        "%Y-%m-%d",  // ISO: 2026-03-25
+        "%m/%d/%Y",  // US: 03/25/2026
+        "%d/%m/%Y",  // EU: 25/03/2026
+        "%m-%d-%Y",  // 03-25-2026
+        "%B %d, %Y", // March 25, 2026
+        "%b %d, %Y", // Mar 25, 2026
+        "%Y%m%d",    // compact: 20260325
     ];
 
     for parse_fmt in &formats {
@@ -225,7 +219,7 @@ pub fn html_to_plain_text(html: &str) -> String {
 
     // 2. <p> and </p> → \n
     s = replace_ci(&s, "<p>", "\n");
-    s = replace_ci(&s, "<p ", "\n<p ");   // preserve attributes for tag stripper
+    s = replace_ci(&s, "<p ", "\n<p "); // preserve attributes for tag stripper
     s = replace_ci(&s, "</p>", "\n");
 
     // 3. </tr> → \n
@@ -280,9 +274,15 @@ fn strip_html_tags(s: &str) -> String {
     let mut in_tag = false;
     for ch in s.chars() {
         match ch {
-            '<' => { in_tag = true; }
-            '>' => { in_tag = false; }
-            _ if !in_tag => { result.push(ch); }
+            '<' => {
+                in_tag = true;
+            }
+            '>' => {
+                in_tag = false;
+            }
+            _ if !in_tag => {
+                result.push(ch);
+            }
             _ => {}
         }
     }
@@ -375,17 +375,14 @@ impl Renderer {
         data: &serde_json::Value,
     ) -> Result<RenderedOutput, RenderError> {
         tracing::debug!(template = %template_name, "render: rendering template");
-        let tmpl = self
-            .env
-            .get_template(template_name)
-            .map_err(|e| {
-                // get_template returns TemplateNotFound for missing templates.
-                if e.kind() == minijinja::ErrorKind::TemplateNotFound {
-                    RenderError::TemplateNotFound(template_name.to_string())
-                } else {
-                    map_minijinja_error(e)
-                }
-            })?;
+        let tmpl = self.env.get_template(template_name).map_err(|e| {
+            // get_template returns TemplateNotFound for missing templates.
+            if e.kind() == minijinja::ErrorKind::TemplateNotFound {
+                RenderError::TemplateNotFound(template_name.to_string())
+            } else {
+                map_minijinja_error(e)
+            }
+        })?;
 
         let ctx = minijinja::Value::from_serialize(data);
         let html = tmpl.render(ctx).map_err(map_minijinja_error)?;
@@ -464,11 +461,18 @@ mod tests {
 
     #[test]
     fn html_to_plain_text_table_conversion() {
-        let html = "<table><tr><th>Name</th><th>Score</th></tr><tr><td>Alice</td><td>95</td></tr></table>";
+        let html =
+            "<table><tr><th>Name</th><th>Score</th></tr><tr><td>Alice</td><td>95</td></tr></table>";
         let plain = html_to_plain_text(html);
         // Each row ends with \n, cells separated by \t
-        assert!(plain.contains("Name\tScore"), "headers should be tab-separated");
-        assert!(plain.contains("Alice\t95"), "row cells should be tab-separated");
+        assert!(
+            plain.contains("Name\tScore"),
+            "headers should be tab-separated"
+        );
+        assert!(
+            plain.contains("Alice\t95"),
+            "row cells should be tab-separated"
+        );
     }
 
     // -------------------------------------------------------------------------
@@ -625,7 +629,10 @@ mod tests {
         // The MissingVariable error is raised when `strict_undefined` mode is used
         // or when a filter/test operates on undefined. Test that slide renders OK
         // (empty title) with missing variables in lenient mode.
-        assert!(result.is_ok(), "slide_default with empty data should render (empty title)");
+        assert!(
+            result.is_ok(),
+            "slide_default with empty data should render (empty title)"
+        );
     }
 
     /// Test that template-not-found produces the correct error variant.
@@ -651,8 +658,14 @@ mod tests {
     #[test]
     fn html_to_plain_text_p_tags() {
         let plain = html_to_plain_text("<p>First paragraph</p><p>Second paragraph</p>");
-        assert!(plain.contains("First paragraph"), "should contain first paragraph text");
-        assert!(plain.contains("Second paragraph"), "should contain second paragraph text");
+        assert!(
+            plain.contains("First paragraph"),
+            "should contain first paragraph text"
+        );
+        assert!(
+            plain.contains("Second paragraph"),
+            "should contain second paragraph text"
+        );
         // There should be line separation
         assert!(plain.contains('\n'));
     }
@@ -660,8 +673,14 @@ mod tests {
     #[test]
     fn html_to_plain_text_li_tags() {
         let plain = html_to_plain_text("<ul><li>Item one</li><li>Item two</li></ul>");
-        assert!(plain.contains("\u{2022} Item one"), "li should become bullet");
-        assert!(plain.contains("\u{2022} Item two"), "li should become bullet");
+        assert!(
+            plain.contains("\u{2022} Item one"),
+            "li should become bullet"
+        );
+        assert!(
+            plain.contains("\u{2022} Item two"),
+            "li should become bullet"
+        );
     }
 
     #[test]
@@ -700,7 +719,10 @@ mod tests {
         .unwrap();
 
         let r = Renderer::new(tmp.path()).unwrap();
-        assert!(r.has_template("my_custom"), "user template should be loaded");
+        assert!(
+            r.has_template("my_custom"),
+            "user template should be loaded"
+        );
 
         let data = json!({"greeting": "Hello, world!"});
         let out = r.render("my_custom", &data).unwrap();

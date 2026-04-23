@@ -89,10 +89,9 @@ pub fn clean(html: &str, opts: &CleanOptions) -> Result<String, CleanError> {
                         if cleaned.trim().is_empty() {
                             el.remove_attribute("style");
                         } else {
-                            el.set_attribute("style", &cleaned)
-                                .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-                                    e.into()
-                                })?;
+                            el.set_attribute("style", &cleaned).map_err(
+                                |e| -> Box<dyn std::error::Error + Send + Sync> { e.into() },
+                            )?;
                         }
                     }
                     Ok(())
@@ -155,8 +154,7 @@ pub fn decode_bytes(bytes: &[u8]) -> Result<String, CleanError> {
             .chunks_exact(2)
             .map(|c| u16::from_le_bytes([c[0], c[1]]))
             .collect();
-        return String::from_utf16(&utf16)
-            .map_err(|e| CleanError::Encoding(e.to_string()));
+        return String::from_utf16(&utf16).map_err(|e| CleanError::Encoding(e.to_string()));
     }
 
     // UTF-16 BE BOM: FE FF
@@ -165,8 +163,7 @@ pub fn decode_bytes(bytes: &[u8]) -> Result<String, CleanError> {
             .chunks_exact(2)
             .map(|c| u16::from_be_bytes([c[0], c[1]]))
             .collect();
-        return String::from_utf16(&utf16)
-            .map_err(|e| CleanError::Encoding(e.to_string()));
+        return String::from_utf16(&utf16).map_err(|e| CleanError::Encoding(e.to_string()));
     }
 
     // UTF-8 BOM: EF BB BF — strip the BOM then validate as UTF-8.
@@ -199,12 +196,11 @@ pub fn clean_bytes(bytes: &[u8], opts: &CleanOptions) -> Result<String, CleanErr
 fn windows1252_to_char(b: u8) -> char {
     // The 0x80–0x9F range has special Windows-1252 mappings.
     const TABLE: [char; 32] = [
-        '\u{20AC}', '\u{FFFD}', '\u{201A}', '\u{0192}', '\u{201E}', '\u{2026}',
-        '\u{2020}', '\u{2021}', '\u{02C6}', '\u{2030}', '\u{0160}', '\u{2039}',
-        '\u{0152}', '\u{FFFD}', '\u{017D}', '\u{FFFD}', '\u{FFFD}', '\u{2018}',
-        '\u{2019}', '\u{201C}', '\u{201D}', '\u{2022}', '\u{2013}', '\u{2014}',
-        '\u{02DC}', '\u{2122}', '\u{0161}', '\u{203A}', '\u{0153}', '\u{FFFD}',
-        '\u{017E}', '\u{0178}',
+        '\u{20AC}', '\u{FFFD}', '\u{201A}', '\u{0192}', '\u{201E}', '\u{2026}', '\u{2020}',
+        '\u{2021}', '\u{02C6}', '\u{2030}', '\u{0160}', '\u{2039}', '\u{0152}', '\u{FFFD}',
+        '\u{017D}', '\u{FFFD}', '\u{FFFD}', '\u{2018}', '\u{2019}', '\u{201C}', '\u{201D}',
+        '\u{2022}', '\u{2013}', '\u{2014}', '\u{02DC}', '\u{2122}', '\u{0161}', '\u{203A}',
+        '\u{0153}', '\u{FFFD}', '\u{017E}', '\u{0178}',
     ];
     match b {
         0x00..=0x7F => b as char,
@@ -669,7 +665,10 @@ mod tests {
     #[test]
     fn empty_input_returns_empty() {
         let result = clean("", &opts()).unwrap();
-        assert!(result.is_empty(), "empty input should produce empty output, got: {result}");
+        assert!(
+            result.is_empty(),
+            "empty input should produce empty output, got: {result}"
+        );
     }
 
     // 9. Plain text (no HTML tags) passes through.
@@ -701,7 +700,8 @@ mod tests {
     // Additional: <style> blocks are removed.
     #[test]
     fn style_blocks_removed() {
-        let html = "<html><head><style>p { color: red; }</style></head><body><p>Text</p></body></html>";
+        let html =
+            "<html><head><style>p { color: red; }</style></head><body><p>Text</p></body></html>";
         let result = clean(html, &opts()).unwrap();
         assert!(
             !result.contains("<style"),
@@ -902,13 +902,22 @@ mod tests {
         .unwrap();
 
         // Must NOT contain mso-* properties.
-        assert!(!result.contains("mso-"), "mso-* properties must be stripped, got: {result}");
+        assert!(
+            !result.contains("mso-"),
+            "mso-* properties must be stripped, got: {result}"
+        );
 
         // Must NOT contain class or id attributes.
-        assert!(!result.contains("class="), "class attrs must be stripped, got: {result}");
+        assert!(
+            !result.contains("class="),
+            "class attrs must be stripped, got: {result}"
+        );
 
         // Must NOT contain conditional comments.
-        assert!(!result.contains("<!--[if"), "conditional comments must be stripped");
+        assert!(
+            !result.contains("<!--[if"),
+            "conditional comments must be stripped"
+        );
 
         // Must NOT contain <meta> or <style> elements.
         assert!(!result.contains("<meta"), "<meta> must be stripped");
@@ -916,15 +925,27 @@ mod tests {
 
         // Must NOT contain rgb() or windowtext color notations.
         assert!(!result.contains("rgb("), "rgb() must be converted to hex");
-        assert!(!result.contains("windowtext"), "windowtext must be replaced");
+        assert!(
+            !result.contains("windowtext"),
+            "windowtext must be replaced"
+        );
 
         // Must NOT contain Office font alias.
         assert!(!result.contains("+mj-lt"), "font alias must be replaced");
 
         // Allowed CSS properties must be present where they were set.
-        assert!(result.contains("font-size"), "font-size should be preserved");
-        assert!(result.contains("font-weight"), "font-weight should be preserved");
-        assert!(result.contains("border"), "border should be preserved for Excel");
+        assert!(
+            result.contains("font-size"),
+            "font-size should be preserved"
+        );
+        assert!(
+            result.contains("font-weight"),
+            "font-weight should be preserved"
+        );
+        assert!(
+            result.contains("border"),
+            "border should be preserved for Excel"
+        );
 
         // Content must be preserved.
         assert!(result.contains("Header"), "cell content must be preserved");

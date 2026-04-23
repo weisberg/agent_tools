@@ -38,15 +38,32 @@ The source of truth is the files on disk. `INDEX.jsonl` is a derived cache.
 
 ## Default Invocation
 
-Use the Python CLI unless you specifically need the Rust port:
+Prefer the Rust binary — it is at behavioral parity with the Python reference
+(verified by cross-language parity tests) and starts an order of magnitude
+faster, which matters in tight agent loops:
+
+```bash
+# one-time build from the vaultli directory
+cd <vaultli>/rs && cargo build --release
+
+# then invoke the binary directly (or put it on your PATH)
+<vaultli>/rs/target/release/vaultli --json <command> ...
+```
+
+`<vaultli>` is wherever this package lives; the binary has no other install-time
+dependencies and the directory can be relocated freely.
+
+Fall back to the Python CLI only when the Rust binary is unavailable (no Rust
+toolchain, or debugging a suspected Rust-specific bug):
 
 ```bash
 uv run python -m tools.vaultli ...
 ```
 
-Prefer `--json` in agent flows so results are machine-readable.
-All commands also accept `--root` so you can target the vault explicitly instead of
-depending on the current working directory.
+Both implementations accept the same subcommands, the same flags (including
+`--json` and `--root`), and produce byte-identical index records. Prefer
+`--json` in agent flows so results are machine-readable. Use `--root` to target
+the vault explicitly instead of depending on the current working directory.
 
 ## Core model
 
@@ -77,13 +94,13 @@ kb/
 1. Find or confirm the vault root.
 
 ```bash
-uv run python -m tools.vaultli root .
+vaultli --json root .
 ```
 
 2. Create the vault only if `.kbroot` is missing.
 
 ```bash
-uv run python -m tools.vaultli init ./kb
+vaultli --json init ./kb
 ```
 
 3. Choose the right write path.
@@ -110,15 +127,15 @@ The inferred metadata is a draft. A new agent should treat the generated values 
 5. Rebuild and validate.
 
 ```bash
-uv run python -m tools.vaultli index --root ./kb --json
-uv run python -m tools.vaultli validate --root ./kb --json
+vaultli --json index --root ./kb
+vaultli --json validate --root ./kb
 ```
 
 6. Retrieve in two stages.
 
 ```bash
-uv run python -m tools.vaultli search retention --root ./kb --json
-uv run python -m tools.vaultli show queries/retention --root ./kb --json
+vaultli --json search retention --root ./kb
+vaultli --json show queries/retention --root ./kb
 ```
 
 Then open the actual file referenced by `file`.
@@ -153,13 +170,13 @@ source: ./report.sql
 ## A Safe Default Loop
 
 ```bash
-uv run python -m tools.vaultli root .
-uv run python -m tools.vaultli add ./kb/docs/guide.md --root ./kb
-uv run python -m tools.vaultli scaffold ./kb/queries/report.sql --root ./kb
+vaultli --json root .
+vaultli --json add ./kb/docs/guide.md --root ./kb
+vaultli --json scaffold ./kb/queries/report.sql --root ./kb
 # edit the generated markdown files
-uv run python -m tools.vaultli index --root ./kb --json
-uv run python -m tools.vaultli validate --root ./kb --json
-uv run python -m tools.vaultli search report --root ./kb --json
+vaultli --json index --root ./kb
+vaultli --json validate --root ./kb
+vaultli --json search report --root ./kb
 ```
 
 ## When A New Agent Usually Gets Confused
@@ -174,5 +191,5 @@ uv run python -m tools.vaultli search report --root ./kb --json
 
 - `README.md` explains what vaultli is and how the core model works.
 - `vaultli-spec-v1.0.md` defines the storage layout and metadata schema.
-- `py/core.py` is the Python reference implementation.
-- `rs/` contains the Rust port.
+- `rs/` is the primary implementation (Rust); build with `cargo build --release` and invoke `rs/target/release/vaultli`.
+- `py/core.py` is the Python reference implementation, still kept in sync and used as the parity oracle by `rs/tests/parity.rs`.

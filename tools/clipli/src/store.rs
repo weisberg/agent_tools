@@ -27,10 +27,10 @@ impl StoreError {
     /// Error code string suitable for structured JSON output.
     pub fn code(&self) -> &'static str {
         match self {
-            Self::NotFound(_)     => "STORE_NOT_FOUND",
+            Self::NotFound(_) => "STORE_NOT_FOUND",
             Self::AlreadyExists(_) => "STORE_ALREADY_EXISTS",
-            Self::Io(_)           => "STORE_IO_ERROR",
-            Self::Json(_)         => "STORE_IO_ERROR",
+            Self::Io(_) => "STORE_IO_ERROR",
+            Self::Json(_) => "STORE_IO_ERROR",
         }
     }
 }
@@ -116,12 +116,11 @@ impl Store {
     /// Create a `Store` pointing at the default `~/.config/clipli/templates/`
     /// directory, creating it (and any parents) if it does not exist.
     pub fn new() -> Result<Self, StoreError> {
-        let config_dir = dirs::config_dir()
-            .unwrap_or_else(|| {
-                dirs::home_dir()
-                    .expect("cannot determine home directory")
-                    .join(".config")
-            });
+        let config_dir = dirs::config_dir().unwrap_or_else(|| {
+            dirs::home_dir()
+                .expect("cannot determine home directory")
+                .join(".config")
+        });
         let root = config_dir.join("clipli").join("templates");
         Self::with_root(root)
     }
@@ -165,17 +164,27 @@ impl Store {
         std::fs::create_dir_all(&tmp_dir)?;
 
         // Write template HTML
-        let template_filename = if content.is_templatized { "template.html.j2" } else { "template.html" };
+        let template_filename = if content.is_templatized {
+            "template.html.j2"
+        } else {
+            "template.html"
+        };
         std::fs::write(tmp_dir.join(template_filename), &content.template_html)?;
 
         // Write meta.json
         let mut meta = content.meta;
         meta.updated_at = Utc::now();
-        std::fs::write(tmp_dir.join("meta.json"), serde_json::to_string_pretty(&meta)?)?;
+        std::fs::write(
+            tmp_dir.join("meta.json"),
+            serde_json::to_string_pretty(&meta)?,
+        )?;
 
         // Write schema.json (optional)
         if let Some(schema) = content.schema {
-            std::fs::write(tmp_dir.join("schema.json"), serde_json::to_string_pretty(&schema)?)?;
+            std::fs::write(
+                tmp_dir.join("schema.json"),
+                serde_json::to_string_pretty(&schema)?,
+            )?;
         }
 
         // Write original.html (optional)
@@ -192,7 +201,9 @@ impl Store {
         if dir.exists() {
             let versions_dir = dir.join("versions");
             let has_versions = versions_dir.exists();
-            let versions_tmp = self.root.join(format!(".{}.versions.{}", name, std::process::id()));
+            let versions_tmp = self
+                .root
+                .join(format!(".{}.versions.{}", name, std::process::id()));
             if has_versions {
                 std::fs::rename(&versions_dir, &versions_tmp)?;
             }
@@ -378,7 +389,10 @@ impl Store {
             "change_type": change_type,
             "timestamp": chrono::Utc::now().to_rfc3339(),
         });
-        std::fs::write(dest.join("_version_meta.json"), serde_json::to_string_pretty(&meta)?)?;
+        std::fs::write(
+            dest.join("_version_meta.json"),
+            serde_json::to_string_pretty(&meta)?,
+        )?;
         self.prune_versions(name, 20)?;
         Ok(id)
     }
@@ -397,9 +411,13 @@ impl Store {
         for entry in std::fs::read_dir(&versions_dir)? {
             let entry = entry?;
             let path = entry.path();
-            if !path.is_dir() { continue; }
+            if !path.is_dir() {
+                continue;
+            }
             let meta_path = path.join("_version_meta.json");
-            if !meta_path.exists() { continue; }
+            if !meta_path.exists() {
+                continue;
+            }
             let meta_str = match std::fs::read_to_string(&meta_path) {
                 Ok(s) => s,
                 Err(_) => continue,
@@ -409,12 +427,20 @@ impl Store {
                 Err(_) => continue,
             };
             let id = entry.file_name().to_string_lossy().to_string();
-            let change_type = meta.get("change_type").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+            let change_type = meta
+                .get("change_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
             let timestamp_str = meta.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
             let timestamp = chrono::DateTime::parse_from_rfc3339(timestamp_str)
                 .map(|dt| dt.with_timezone(&chrono::Utc))
                 .unwrap_or_else(|_| chrono::Utc::now());
-            entries.push(VersionEntry { id, change_type, timestamp });
+            entries.push(VersionEntry {
+                id,
+                change_type,
+                timestamp,
+            });
         }
         entries.sort_by(|a, b| b.id.cmp(&a.id)); // newest first
         Ok(entries)
@@ -424,7 +450,10 @@ impl Store {
     pub fn load_version(&self, name: &str, version_id: &str) -> Result<LoadedTemplate, StoreError> {
         let dir = self.template_dir(name).join("versions").join(version_id);
         if !dir.exists() {
-            return Err(StoreError::NotFound(format!("{} version {}", name, version_id)));
+            return Err(StoreError::NotFound(format!(
+                "{} version {}",
+                name, version_id
+            )));
         }
         // Same loading logic as load() but from the version directory
         let (template_html, is_templatized) = {
@@ -435,12 +464,18 @@ impl Store {
             } else if plain.exists() {
                 (std::fs::read_to_string(&plain)?, false)
             } else {
-                return Err(StoreError::NotFound(format!("{} version {}", name, version_id)));
+                return Err(StoreError::NotFound(format!(
+                    "{} version {}",
+                    name, version_id
+                )));
             }
         };
         let meta_path = dir.join("meta.json");
         if !meta_path.exists() {
-            return Err(StoreError::NotFound(format!("{} version {}", name, version_id)));
+            return Err(StoreError::NotFound(format!(
+                "{} version {}",
+                name, version_id
+            )));
         }
         let meta: TemplateMeta = serde_json::from_str(&std::fs::read_to_string(&meta_path)?)?;
         let schema_path = dir.join("schema.json");
@@ -449,7 +484,12 @@ impl Store {
         } else {
             vec![]
         };
-        Ok(LoadedTemplate { template_html, meta, schema, is_templatized })
+        Ok(LoadedTemplate {
+            template_html,
+            meta,
+            schema,
+            is_templatized,
+        })
     }
 
     /// Restore a version snapshot: snapshots current state, then copies version files back.
@@ -459,7 +499,10 @@ impl Store {
         // Copy all files from the version directory to the template root
         let version_dir = self.template_dir(name).join("versions").join(version_id);
         if !version_dir.exists() {
-            return Err(StoreError::NotFound(format!("{} version {}", name, version_id)));
+            return Err(StoreError::NotFound(format!(
+                "{} version {}",
+                name, version_id
+            )));
         }
         let template_dir = self.template_dir(name);
         // Delete live files (not versions/)
@@ -477,7 +520,9 @@ impl Store {
             if path.is_file() {
                 let fname = entry.file_name();
                 // Skip _version_meta.json — it's version-internal
-                if fname.to_string_lossy() == "_version_meta.json" { continue; }
+                if fname.to_string_lossy() == "_version_meta.json" {
+                    continue;
+                }
                 std::fs::copy(&path, template_dir.join(fname))?;
             }
         }
@@ -487,7 +532,9 @@ impl Store {
     /// Keep at most `max` version directories, pruning oldest first.
     fn prune_versions(&self, name: &str, max: usize) -> Result<(), StoreError> {
         let versions_dir = self.template_dir(name).join("versions");
-        if !versions_dir.exists() { return Ok(()); }
+        if !versions_dir.exists() {
+            return Ok(());
+        }
         let mut dirs: Vec<String> = Vec::new();
         for entry in std::fs::read_dir(&versions_dir)? {
             let entry = entry?;
@@ -530,7 +577,11 @@ impl Store {
     // ------------------------------------------------------------------
 
     /// Full-text search across all templates.
-    pub fn search(&self, query: &str, tag_filter: Option<&str>) -> Result<Vec<SearchResult>, StoreError> {
+    pub fn search(
+        &self,
+        query: &str,
+        tag_filter: Option<&str>,
+    ) -> Result<Vec<SearchResult>, StoreError> {
         let query_lower = query.to_lowercase();
         let mut results = Vec::new();
 
@@ -538,9 +589,13 @@ impl Store {
         for entry in read_dir {
             let entry = entry?;
             let path = entry.path();
-            if !path.is_dir() { continue; }
+            if !path.is_dir() {
+                continue;
+            }
             let meta_path = path.join("meta.json");
-            if !meta_path.exists() { continue; }
+            if !meta_path.exists() {
+                continue;
+            }
             let meta_str = match std::fs::read_to_string(&meta_path) {
                 Ok(s) => s,
                 Err(_) => continue,
@@ -552,7 +607,9 @@ impl Store {
 
             // Apply tag filter
             if let Some(tag) = tag_filter {
-                if !meta.tags.contains(&tag.to_string()) { continue; }
+                if !meta.tags.contains(&tag.to_string()) {
+                    continue;
+                }
             }
 
             let description = meta.description.clone();
@@ -596,13 +653,21 @@ impl Store {
                     break;
                 }
             }
-            if tag_matched { continue; }
+            if tag_matched {
+                continue;
+            }
 
             // Check template HTML content
             let template_path = {
                 let j2 = path.join("template.html.j2");
                 let html = path.join("template.html");
-                if j2.exists() { Some(j2) } else if html.exists() { Some(html) } else { None }
+                if j2.exists() {
+                    Some(j2)
+                } else if html.exists() {
+                    Some(html)
+                } else {
+                    None
+                }
             };
             if let Some(tp) = template_path {
                 if let Ok(content) = std::fs::read_to_string(&tp) {
@@ -634,8 +699,7 @@ impl Store {
             return Err(StoreError::NotFound(name.to_string()));
         }
 
-        let file = std::fs::File::create(output_path)
-            .map_err(|e| StoreError::Io(e))?;
+        let file = std::fs::File::create(output_path).map_err(StoreError::Io)?;
         let mut zip = zip::ZipWriter::new(file);
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(zip::CompressionMethod::Deflated);
@@ -651,19 +715,20 @@ impl Store {
             .map_err(|e| StoreError::Io(std::io::Error::other(e.to_string())))?;
         use std::io::Write;
         zip.write_all(serde_json::to_string_pretty(&manifest)?.as_bytes())
-            .map_err(|e| StoreError::Io(e))?;
+            .map_err(StoreError::Io)?;
 
         // Add all files from template directory (skip versions/)
         for entry in std::fs::read_dir(&dir)? {
             let entry = entry?;
             let path = entry.path();
-            if path.is_dir() { continue; } // Skip versions/ and any other subdirs
+            if path.is_dir() {
+                continue;
+            } // Skip versions/ and any other subdirs
             let fname = entry.file_name().to_string_lossy().to_string();
             zip.start_file(&fname, options)
                 .map_err(|e| StoreError::Io(std::io::Error::other(e.to_string())))?;
             let data = std::fs::read(&path)?;
-            zip.write_all(&data)
-                .map_err(|e| StoreError::Io(e))?;
+            zip.write_all(&data).map_err(StoreError::Io)?;
         }
 
         zip.finish()
@@ -672,30 +737,49 @@ impl Store {
     }
 
     /// Import a template from a ZIP bundle.
-    pub fn import(&self, zip_path: &std::path::Path, force: bool, name_override: Option<&str>) -> Result<String, StoreError> {
-        let file = std::fs::File::open(zip_path)
-            .map_err(|e| StoreError::Io(e))?;
+    pub fn import(
+        &self,
+        zip_path: &std::path::Path,
+        force: bool,
+        name_override: Option<&str>,
+    ) -> Result<String, StoreError> {
+        let file = std::fs::File::open(zip_path).map_err(StoreError::Io)?;
         let mut archive = zip::ZipArchive::new(file)
             .map_err(|e| StoreError::Io(std::io::Error::other(e.to_string())))?;
 
         // Read manifest to get template name
         let manifest_str = {
-            let mut manifest_file = archive.by_name("manifest.json")
-                .map_err(|e| StoreError::Io(std::io::Error::other(format!("missing manifest.json: {}", e))))?;
+            let mut manifest_file = archive.by_name("manifest.json").map_err(|e| {
+                StoreError::Io(std::io::Error::other(format!(
+                    "missing manifest.json: {}",
+                    e
+                )))
+            })?;
             let mut buf = String::new();
             use std::io::Read;
-            manifest_file.read_to_string(&mut buf)
-                .map_err(|e| StoreError::Io(e))?;
+            manifest_file
+                .read_to_string(&mut buf)
+                .map_err(StoreError::Io)?;
             buf
         };
         let manifest: serde_json::Value = serde_json::from_str(&manifest_str)?;
         let name = name_override
             .map(|s| s.to_string())
-            .or_else(|| manifest.get("name").and_then(|v| v.as_str()).map(|s| s.to_string()))
-            .ok_or_else(|| StoreError::Io(std::io::Error::other("manifest.json missing 'name' field")))?;
+            .or_else(|| {
+                manifest
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            })
+            .ok_or_else(|| {
+                StoreError::Io(std::io::Error::other("manifest.json missing 'name' field"))
+            })?;
 
         if !validate_name(&name) {
-            return Err(StoreError::Io(std::io::Error::other(format!("invalid template name: {}", name))));
+            return Err(StoreError::Io(std::io::Error::other(format!(
+                "invalid template name: {}",
+                name
+            ))));
         }
 
         let dir = self.template_dir(&name);
@@ -711,18 +795,22 @@ impl Store {
 
         // Extract all files except manifest.json
         for i in 0..archive.len() {
-            let mut entry = archive.by_index(i)
+            let mut entry = archive
+                .by_index(i)
                 .map_err(|e| StoreError::Io(std::io::Error::other(e.to_string())))?;
             let fname = entry.name().to_string();
-            if fname == "manifest.json" { continue; }
+            if fname == "manifest.json" {
+                continue;
+            }
             // Security: reject path traversal
-            if fname.contains("..") || fname.starts_with('/') { continue; }
+            if fname.contains("..") || fname.starts_with('/') {
+                continue;
+            }
             let dest = dir.join(&fname);
             let mut outfile = std::fs::File::create(&dest)?;
             use std::io::Read;
             let mut buf = Vec::new();
-            entry.read_to_end(&mut buf)
-                .map_err(|e| StoreError::Io(e))?;
+            entry.read_to_end(&mut buf).map_err(StoreError::Io)?;
             use std::io::Write;
             outfile.write_all(&buf)?;
         }
@@ -754,7 +842,11 @@ fn extract_match_context(text: &str, query_lower: &str, window: usize) -> String
         let end = (pos + query_lower.len() + window / 2).min(text.len());
         let snippet = &text[start..end];
         let snippet = snippet.trim().replace('\n', " ").replace('\r', "");
-        if start > 0 { format!("...{}", snippet) } else { snippet }
+        if start > 0 {
+            format!("...{}", snippet)
+        } else {
+            snippet
+        }
     } else {
         text.chars().take(window).collect()
     }
@@ -767,8 +859,8 @@ fn extract_match_context(text: &str, query_lower: &str, window: usize) -> String
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
     use crate::model::{TemplateMeta, TemplateVariable, VarType};
+    use chrono::Utc;
     use tempfile::TempDir;
 
     // ------------------------------------------------------------------
@@ -842,7 +934,9 @@ mod tests {
 
         store.save("dup", make_save_content("dup"), false).unwrap();
 
-        let err = store.save("dup", make_save_content("dup"), false).unwrap_err();
+        let err = store
+            .save("dup", make_save_content("dup"), false)
+            .unwrap_err();
         assert!(matches!(err, StoreError::AlreadyExists(ref n) if n == "dup"));
         assert_eq!(err.code(), "STORE_ALREADY_EXISTS");
     }
@@ -856,7 +950,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let store = make_store(&dir);
 
-        store.save("over", make_save_content("over"), false).unwrap();
+        store
+            .save("over", make_save_content("over"), false)
+            .unwrap();
 
         let new_html = "<p>Overwritten</p>".to_string();
         let content = SaveContent {
@@ -878,7 +974,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let store = make_store(&dir);
 
-        store.save("del_me", make_save_content("del_me"), false).unwrap();
+        store
+            .save("del_me", make_save_content("del_me"), false)
+            .unwrap();
         store.delete("del_me").unwrap();
 
         let err = store.load("del_me").unwrap_err();
@@ -896,7 +994,9 @@ mod tests {
         let store = make_store(&dir);
 
         assert!(!store.exists("exist_test"));
-        store.save("exist_test", make_save_content("exist_test"), false).unwrap();
+        store
+            .save("exist_test", make_save_content("exist_test"), false)
+            .unwrap();
         assert!(store.exists("exist_test"));
         store.delete("exist_test").unwrap();
         assert!(!store.exists("exist_test"));
@@ -914,9 +1014,20 @@ mod tests {
         // Save two templates: one with tag "finance", one without
         let mut meta_a = make_meta("alpha");
         meta_a.tags = vec!["finance".to_string()];
-        store.save("alpha", SaveContent { meta: meta_a, ..make_save_content("alpha") }, false).unwrap();
+        store
+            .save(
+                "alpha",
+                SaveContent {
+                    meta: meta_a,
+                    ..make_save_content("alpha")
+                },
+                false,
+            )
+            .unwrap();
 
-        store.save("beta", make_save_content("beta"), false).unwrap();
+        store
+            .save("beta", make_save_content("beta"), false)
+            .unwrap();
 
         // All templates
         let all = store.list(None).unwrap();
@@ -925,10 +1036,12 @@ mod tests {
         assert_eq!(all[1].name, "beta");
 
         // Filtered by tag
-        let filtered = store.list(Some(&ListFilter {
-            tag: Some("finance".to_string()),
-            templatized_only: false,
-        })).unwrap();
+        let filtered = store
+            .list(Some(&ListFilter {
+                tag: Some("finance".to_string()),
+                templatized_only: false,
+            }))
+            .unwrap();
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "alpha");
     }
@@ -944,18 +1057,28 @@ mod tests {
 
         let mut meta_t = make_meta("templ");
         meta_t.templatized = true;
-        store.save("templ", SaveContent {
-            is_templatized: true,
-            meta: meta_t,
-            ..make_save_content("templ")
-        }, false).unwrap();
+        store
+            .save(
+                "templ",
+                SaveContent {
+                    is_templatized: true,
+                    meta: meta_t,
+                    ..make_save_content("templ")
+                },
+                false,
+            )
+            .unwrap();
 
-        store.save("raw_tmpl", make_save_content("raw_tmpl"), false).unwrap();
+        store
+            .save("raw_tmpl", make_save_content("raw_tmpl"), false)
+            .unwrap();
 
-        let results = store.list(Some(&ListFilter {
-            tag: None,
-            templatized_only: true,
-        })).unwrap();
+        let results = store
+            .list(Some(&ListFilter {
+                tag: None,
+                templatized_only: true,
+            }))
+            .unwrap();
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "templ");
@@ -970,14 +1093,12 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let store = make_store(&dir);
 
-        let vars = vec![
-            TemplateVariable {
-                name: "revenue".to_string(),
-                var_type: VarType::Currency,
-                default_value: None,
-                description: Some("Total revenue".to_string()),
-            },
-        ];
+        let vars = vec![TemplateVariable {
+            name: "revenue".to_string(),
+            var_type: VarType::Currency,
+            default_value: None,
+            description: Some("Total revenue".to_string()),
+        }];
 
         let content = SaveContent {
             schema: Some(vars.clone()),
@@ -1006,12 +1127,12 @@ mod tests {
 
     #[test]
     fn validate_name_invalid() {
-        assert!(!validate_name("my template"));  // space
-        assert!(!validate_name("../evil"));       // path traversal
-        assert!(!validate_name(""));              // empty
-        assert!(!validate_name("hello/world"));   // slash
-        assert!(!validate_name("foo.bar"));       // dot
-        assert!(!validate_name("abc!"));          // exclamation
+        assert!(!validate_name("my template")); // space
+        assert!(!validate_name("../evil")); // path traversal
+        assert!(!validate_name("")); // empty
+        assert!(!validate_name("hello/world")); // slash
+        assert!(!validate_name("foo.bar")); // dot
+        assert!(!validate_name("abc!")); // exclamation
     }
 
     // ------------------------------------------------------------------
@@ -1024,7 +1145,9 @@ mod tests {
         let store = make_store(&dir);
 
         // Save without schema
-        store.save("no_schema", make_save_content("no_schema"), false).unwrap();
+        store
+            .save("no_schema", make_save_content("no_schema"), false)
+            .unwrap();
 
         // Confirm schema.json was not written
         let schema_path = store.template_dir("no_schema").join("schema.json");
@@ -1047,18 +1170,26 @@ mod tests {
         assert!(store.template_file_path("ghost").is_none());
 
         // Plain .html
-        store.save("plain", make_save_content("plain"), false).unwrap();
+        store
+            .save("plain", make_save_content("plain"), false)
+            .unwrap();
         let p = store.template_file_path("plain").unwrap();
         assert!(p.to_str().unwrap().ends_with("template.html"));
 
         // Templatized .html.j2
         let mut meta_j2 = make_meta("jinja");
         meta_j2.templatized = true;
-        store.save("jinja", SaveContent {
-            is_templatized: true,
-            meta: meta_j2,
-            ..make_save_content("jinja")
-        }, false).unwrap();
+        store
+            .save(
+                "jinja",
+                SaveContent {
+                    is_templatized: true,
+                    meta: meta_j2,
+                    ..make_save_content("jinja")
+                },
+                false,
+            )
+            .unwrap();
         let p2 = store.template_file_path("jinja").unwrap();
         assert!(p2.to_str().unwrap().ends_with("template.html.j2"));
     }
@@ -1083,7 +1214,9 @@ mod tests {
     fn snapshot_creates_version_dir() {
         let dir = TempDir::new().unwrap();
         let store = make_store(&dir);
-        store.save("snap_test", make_save_content("snap_test"), false).unwrap();
+        store
+            .save("snap_test", make_save_content("snap_test"), false)
+            .unwrap();
         let id = store.snapshot("snap_test", "test").unwrap();
         let version_dir = store.template_dir("snap_test").join("versions").join(&id);
         assert!(version_dir.exists());
@@ -1095,7 +1228,9 @@ mod tests {
     fn list_versions_returns_entries() {
         let dir = TempDir::new().unwrap();
         let store = make_store(&dir);
-        store.save("ver_test", make_save_content("ver_test"), false).unwrap();
+        store
+            .save("ver_test", make_save_content("ver_test"), false)
+            .unwrap();
         store.snapshot("ver_test", "edit").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(1100));
         store.snapshot("ver_test", "overwrite").unwrap();
@@ -1108,7 +1243,9 @@ mod tests {
     fn load_version_returns_snapshot_content() {
         let dir = TempDir::new().unwrap();
         let store = make_store(&dir);
-        store.save("lv_test", make_save_content("lv_test"), false).unwrap();
+        store
+            .save("lv_test", make_save_content("lv_test"), false)
+            .unwrap();
         let id = store.snapshot("lv_test", "edit").unwrap();
         // Wait so the auto-snapshot in force-save gets a distinct version ID
         std::thread::sleep(std::time::Duration::from_millis(1100));
@@ -1127,7 +1264,9 @@ mod tests {
     fn restore_version_reverts_content() {
         let dir = TempDir::new().unwrap();
         let store = make_store(&dir);
-        store.save("rv_test", make_save_content("rv_test"), false).unwrap();
+        store
+            .save("rv_test", make_save_content("rv_test"), false)
+            .unwrap();
         let id = store.snapshot("rv_test", "edit").unwrap();
         // Wait so subsequent snapshots get distinct version IDs (second-resolution)
         std::thread::sleep(std::time::Duration::from_millis(1100));
@@ -1149,7 +1288,9 @@ mod tests {
     fn force_save_auto_snapshots() {
         let dir = TempDir::new().unwrap();
         let store = make_store(&dir);
-        store.save("fs_test", make_save_content("fs_test"), false).unwrap();
+        store
+            .save("fs_test", make_save_content("fs_test"), false)
+            .unwrap();
         // Force save should auto-snapshot
         let new_content = SaveContent {
             template_html: "<p>New</p>".to_string(),
@@ -1165,7 +1306,9 @@ mod tests {
     fn delete_preserving_versions_keeps_history() {
         let dir = TempDir::new().unwrap();
         let store = make_store(&dir);
-        store.save("dpv_test", make_save_content("dpv_test"), false).unwrap();
+        store
+            .save("dpv_test", make_save_content("dpv_test"), false)
+            .unwrap();
         store.snapshot("dpv_test", "test").unwrap();
         store.delete_preserving_versions("dpv_test").unwrap();
         // Live template files should be gone
@@ -1178,8 +1321,20 @@ mod tests {
     fn search_finds_by_name() {
         let dir = TempDir::new().unwrap();
         let store = make_store(&dir);
-        store.save("quarterly_report", make_save_content("quarterly_report"), false).unwrap();
-        store.save("monthly_summary", make_save_content("monthly_summary"), false).unwrap();
+        store
+            .save(
+                "quarterly_report",
+                make_save_content("quarterly_report"),
+                false,
+            )
+            .unwrap();
+        store
+            .save(
+                "monthly_summary",
+                make_save_content("monthly_summary"),
+                false,
+            )
+            .unwrap();
         let results = store.search("quarterly", None).unwrap();
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].name, "quarterly_report");
@@ -1189,13 +1344,17 @@ mod tests {
     fn export_import_round_trip() {
         let dir = TempDir::new().unwrap();
         let store = make_store(&dir);
-        store.save("export_test", make_save_content("export_test"), false).unwrap();
+        store
+            .save("export_test", make_save_content("export_test"), false)
+            .unwrap();
 
         let zip_path = dir.path().join("export_test.clipli");
         store.export("export_test", &zip_path).unwrap();
         assert!(zip_path.exists());
 
-        let imported_name = store.import(&zip_path, false, Some("imported_test")).unwrap();
+        let imported_name = store
+            .import(&zip_path, false, Some("imported_test"))
+            .unwrap();
         assert_eq!(imported_name, "imported_test");
 
         let loaded = store.load("imported_test").unwrap();

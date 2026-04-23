@@ -138,8 +138,7 @@ fn find_all_cells(html: &str) -> Vec<CellInfo> {
         };
         let tr_content = &html[tr_start..tr_end_tag];
 
-        let mut col_idx = 0usize;
-        for td_match in td_re.captures_iter(tr_content) {
+        for (col_idx, td_match) in td_re.captures_iter(tr_content).enumerate() {
             let full = td_match.get(0).unwrap();
             let attrs = td_match.get(1).unwrap().as_str();
 
@@ -159,7 +158,6 @@ fn find_all_cells(html: &str) -> Vec<CellInfo> {
                 fmla_value: fmla.unwrap_or_default(),
                 new_value: None,
             });
-            col_idx += 1;
         }
         row_idx += 1;
     }
@@ -222,7 +220,7 @@ fn apply_edit_to_cell(cell: &mut CellInfo, kind: &EditKind) {
             let css = crate::excel::number_format_css_owned(fmt);
             if let Some(val) = css
                 .strip_prefix("mso-number-format:")
-                .and_then(|v| Some(v.trim_end_matches(';')))
+                .map(|v| v.trim_end_matches(';'))
             {
                 set_style_prop(&mut cell.style, "mso-number-format", val);
             }
@@ -289,10 +287,7 @@ fn rebuild_td(original_td: &str, cell: &CellInfo) -> String {
 
     // Handle formula
     if cell.has_fmla {
-        let escaped = cell
-            .fmla_value
-            .replace('&', "&amp;")
-            .replace('"', "&quot;");
+        let escaped = cell.fmla_value.replace('&', "&amp;").replace('"', "&quot;");
         new_attrs = add_or_update_attr(&new_attrs, "x:fmla", &escaped);
         if !new_attrs.contains("x:num") {
             new_attrs = format!("{new_attrs} x:num");
@@ -309,10 +304,7 @@ fn rebuild_td(original_td: &str, cell: &CellInfo) -> String {
     }
 
     // Content: use new value if set, otherwise keep original
-    let content = cell
-        .new_value
-        .as_deref()
-        .unwrap_or(original_content);
+    let content = cell.new_value.as_deref().unwrap_or(original_content);
 
     format!("<td{new_attrs}>{content}</td>")
 }
@@ -343,7 +335,8 @@ fn update_attr(attrs: &str, name: &str, value: &str) -> String {
 fn add_or_update_attr(attrs: &str, name: &str, value: &str) -> String {
     let re = Regex::new(&format!(r#"{}="[^"]*""#, regex::escape(name))).unwrap();
     if re.is_match(attrs) {
-        re.replace(attrs, &format!("{name}=\"{value}\"")).to_string()
+        re.replace(attrs, &format!("{name}=\"{value}\""))
+            .to_string()
     } else {
         format!("{attrs} {name}=\"{value}\"")
     }
@@ -423,8 +416,8 @@ pub fn parse_set_wrap(cell_str: &str) -> Result<EditOp, String> {
 }
 
 fn split_cell_spec(spec: &str) -> Result<(&str, String), String> {
-    let pos = spec.find(':').ok_or_else(|| {
-        format!("invalid spec '{spec}': expected CELL:VALUE")
-    })?;
+    let pos = spec
+        .find(':')
+        .ok_or_else(|| format!("invalid spec '{spec}': expected CELL:VALUE"))?;
     Ok((&spec[..pos], spec[pos + 1..].to_string()))
 }
