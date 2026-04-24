@@ -21,9 +21,12 @@ by humans.
 - `barli`: macOS menubar automation experiments.
 - `xli`: Rust Excel workbook CLI with inspect/read/write/format/sheet/batch,
   create/import, template/apply, quality checks, and schema discovery.
-- `deckli`, `docli`, `vizli`, `framerli`, `notionli`, `bashli`, and `jirali`:
-  tool workspaces, specs, or prototypes for document, presentation,
-  visualization, design, shell, and integration workflows.
+- `jirali`: Rust Jira CLI with agent-safe JSON contracts, local deterministic
+  state, live REST/GraphQL escape hatches, ADF/JQL helpers, audit logging, and
+  roadmap surfaces through v1.0.
+- `deckli`, `docli`, `vizli`, `framerli`, `notionli`, and `bashli`: tool
+  workspaces, specs, or prototypes for document, presentation, visualization,
+  design, shell, and integration workflows.
 - Legacy Python test fixtures still reference `tools/md_search.py`,
   `tools/img_manipulate.py`, and `tools/md_clean.py`, but those scripts are not
   present in the current tree.
@@ -54,6 +57,9 @@ uses `Pillow`, `pyyaml`, `rumps`, and `watchdog`.
   Excel clipboard format notes.
 - [`tools/xli/README.md`](tools/xli/README.md): current `xli` build, usage,
   test, and spec-parity guide.
+- [`tools/jirali/README.md`](tools/jirali/README.md): current `jirali` build,
+  agent contracts, and roadmap coverage.
+- [`docs/jirali.md`](docs/jirali.md): Jirali architecture and test notes.
 
 ## Agent Notes
 
