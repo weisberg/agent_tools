@@ -114,46 +114,45 @@ xli <command> [file] [arguments] [flags]
 
 INSPECTION & ANALYSIS
   inspect     Workbook structure, metadata, fingerprint, and sheet inventory
-  read        Read cell values, ranges, tables, or named ranges
-  profile     Statistical profile of sheet data (types, distributions, nulls)
-  diff        Compare two workbooks structurally and by value
+  read        Read cell values, ranges, or tables
+  profile     Deferred: statistical profile of sheet data
+  diff        Deferred: compare two workbooks structurally and by value
 
 MUTATION
   write       Write values or formulas to cells/ranges
   format      Apply formatting to cells/ranges
   sheet       Manage sheets (add, remove, rename, copy, reorder)
-  chart       Create or modify charts
+  chart       Deferred: create or modify charts
 
 BATCH & SPECS
-  apply       Apply a YAML plan to a workbook (atomic commit)
+  apply       Apply a built-in template to a workbook (atomic commit)
   batch       Stream ndjson micro-ops into one atomic commit
 
 CREATION & IMPORT
-  create      Create a new workbook from scratch or from a spec
-  table       Import CSV/TSV into a workbook as a named table
+  create      Create a new workbook from scratch, CSV, Markdown table, or JSON
+  table       Partial/deferred: read --table exists; first-class table command planned
 
 QUALITY
   lint        Check formula correctness, style violations, structural issues
   validate    Post-recalc error scan (formula errors, rule violations)
   recalc      Recalculate all formulas via LibreOffice
   doctor      Run lint + recalc + validate in one pass
-  repair      Auto-fix common issues (formula prefixes, number formats, etc.)
+  repair      Deferred: auto-fix common issues
 
 OOXML
-  ooxml unpack   Extract workbook to directory for inspection
-  ooxml pack     Repackage directory into workbook
-  ooxml diff     Structural diff of two workbooks at the XML level
-  ooxml grep     Search workbook XML contents by pattern
+  ooxml unpack   Deferred: extract workbook to directory for inspection
+  ooxml pack     Deferred: repackage directory into workbook
+  ooxml diff     Deferred: structural diff of two workbooks at the XML level
+  ooxml grep     Deferred: search workbook XML contents by pattern
 
 META
   schema      Emit JSON schema for all commands, plans, and result envelopes
-  template    List, preview, or validate knowledge base templates
+  template    List, preview, or validate built-in knowledge base templates
 
 GLOBAL FLAGS (all commands)
   --human                    Human-readable output instead of JSON
-  --expect-fingerprint SHA   Refuse if workbook fingerprint doesn't match (mutating commands)
-  --dry-run                  Report what would change without writing (mutating commands)
-  --atomic=true|false        Atomic commit mode (default: true, mutating commands)
+  --expect-fingerprint SHA   Refuse if workbook fingerprint doesn't match (supported mutating commands)
+  --dry-run                  Report what would change without writing (supported mutating commands)
 ```
 
 ### 4.2 Command Reference

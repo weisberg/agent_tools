@@ -1,15 +1,15 @@
 # vaultli — Storage & Metadata Specification v1.0
 
-**Version:** 1.0  
-**Author:** Brian  
-**Date:** March 2026  
-**Status:** Draft
+- **Version:** 1.0
+- **Author:** Brian
+- **Date:** April 2026
+- **Status:** Implementation-backed draft
 
 ---
 
 ## 1. Executive Summary
 
-vaultli is a command-line interface for managing a file-based knowledge vault. It provides a standardized system for attaching structured metadata to documents, building a searchable flat-file index, and querying that index with standard Unix tools.
+vaultli is a command-line interface for managing a file-based knowledge vault. It provides a standardized system for attaching structured metadata to documents, building a searchable flat-file index, and querying that index through an agent-friendly CLI or standard Unix tools.
 
 The system is designed around three core principles: markdown files are the universal unit of knowledge, YAML frontmatter is the universal metadata format, and JSONL is the universal index format. Every document in the vault — whether a native markdown file, a SQL query, a Jinja2 template, or any other asset — gets a standardized metadata envelope that makes it discoverable, classifiable, and composable.
 
@@ -31,9 +31,11 @@ The system relies on predictable conventions rather than extensive configuration
 
 Every design decision optimizes for consumption by AI agents operating under token-budget constraints. The INDEX.jsonl file exists so that an agent can grep a single file to find relevant documents without traversing the filesystem. The `tokens` field in the metadata exists so that a context-assembly algorithm can solve the knapsack problem of fitting the most relevant content into a fixed context window. The `description` field is written to be the single most important signal for retrieval relevance.
 
-### 2.4 Unix Tool Compatibility
+### 2.4 Agent CLI and Unix Tool Compatibility
 
-The index format is JSONL specifically because grep returns one complete record per matching line. No custom query language is needed for basic search. For structured queries, jq provides full JSON filtering. The combination of grep for keyword search and jq for structured queries covers the vast majority of retrieval needs without any custom tooling.
+The index format is JSONL specifically because grep returns one complete record per matching line. No custom query language is needed for basic ad hoc search. For structured queries, jq provides full JSON filtering.
+
+The `vaultli search` command is the preferred agent entrypoint because it wraps common retrieval patterns in a stable JSON envelope. It supports keyword search, first-class metadata filters (`--category`, `--status`, `--domain`, `--scope`, repeated `--tag`, and `--limit`), and `--jq` for advanced filters when the `jq` binary is available.
 
 ---
 
@@ -296,7 +298,21 @@ These fields are not part of the frontmatter schema — they are computed and st
 
 ### 7.3 Search Patterns
 
-The INDEX.jsonl file supports a spectrum of query complexity using standard Unix tools:
+The preferred agent path is the CLI:
+
+```bash
+# Keyword search over indexed metadata
+vaultli --json search retention --root ./kb
+
+# Common structured filters without jq
+vaultli --json search --root ./kb --category query --status active --domain experimentation
+vaultli --json search --root ./kb --tag retention --tag athena --limit 5
+
+# Advanced structured filters when jq is installed
+vaultli --json search --root ./kb --jq 'select(.tokens < 500 and .priority <= 2)'
+```
+
+Because INDEX.jsonl is plain JSONL, it also supports a spectrum of query complexity using standard Unix tools:
 
 ```bash
 # Simple keyword search
@@ -403,7 +419,7 @@ def atomic_write(path: Path, lines: list[str]):
 
 ## 9. vaultli CLI Overview
 
-This section outlines the initial command surface for vaultli version 1.0. Detailed command specifications, flag definitions, and output formats will be defined in a separate CLI reference document.
+This section outlines the command surface for vaultli version 1.0. All commands should be usable from agents with `--json`; commands that operate on a vault accept `--root` unless the target path itself determines the vault.
 
 ### 9.1 Core Commands
 
@@ -411,7 +427,7 @@ This section outlines the initial command surface for vaultli version 1.0. Detai
 
 **`vaultli index`** — Rebuild the INDEX.jsonl. Performs an incremental rebuild by default. Accepts a `--full` flag to force a complete rebuild. Reports the number of files indexed, updated, pruned, and skipped.
 
-**`vaultli search <query>`** — Search the index for documents matching the query. Runs grep under the hood for keyword matching. Accepts a `--jq` flag for structured queries. Returns formatted results showing `id`, `title`, and `description`.
+**`vaultli search <query>`** — Search the index for documents matching the query. Keyword search operates on indexed metadata, not raw document bodies. Accepts `--category`, `--status`, `--domain`, `--scope`, repeated `--tag`, `--limit`, and `--jq` for structured queries. Returns formatted results or a JSON envelope containing `total` and `results`.
 
 **`vaultli add <file>`** — Add metadata to a file. For `.md` files, injects a frontmatter template at the top. For non-`.md` files, creates a sidecar `.md` file with pre-populated frontmatter including the `source` field. Computes and suggests the `id`. Runs the indexer on the new/modified file.
 
@@ -420,6 +436,30 @@ This section outlines the initial command surface for vaultli version 1.0. Detai
 **`vaultli validate`** — Audit the vault for integrity issues. Checks for: missing required fields, broken `source` references in sidecars, orphaned sidecar files, dangling `depends_on` and `related` references, duplicate `id`s, and index staleness (files modified since last index).
 
 **`vaultli scaffold <file>`** — Auto-generate a sidecar or frontmatter stub for a file. Uses the filename, file extension, and optionally the file's content to infer sensible defaults for `category`, `tags`, `domain`, and `description`. Designed to be run by an agent that can fill in richer metadata after reading the file.
+
+**`vaultli ingest <path>`** — Bulk scaffold missing metadata for one file or a directory. Accepts `--dry-run` to preview planned writes and `--index` to rebuild INDEX.jsonl after scaffolding. This is the safest first pass for a new agent preparing an existing tree.
+
+**`vaultli root [path]`** — Locate the nearest vault root by walking upward until `.kbroot` is found.
+
+**`vaultli make-id <file>`** — Derive the canonical vault id for a file path without writing anything.
+
+**`vaultli infer <file>`** — Preview inferred metadata for a file without writing frontmatter or sidecars.
+
+**`vaultli dump-index`** — Dump all current index records as JSON.
+
+### 9.2 Implementations
+
+vaultli ships with two implementations that share the same user-facing contract:
+
+| Area | Rust implementation | Python implementation |
+|---|---|---|
+| Role | Primary implementation for agents and normal CLI use | Reference implementation and parity oracle |
+| Invocation | Build from `rs/` with Cargo, then run `target/release/vaultli` | Run with `PYTHONPATH=<parent-of-vaultli> python -m vaultli` |
+| Strength | Fast startup, typed modules, standalone compiled binary | Easy to inspect, debug, and compare behavior |
+| Command surface | Same subcommands and flags as Python | Same subcommands and flags as Rust |
+| Verification | Unit, integration, and parity tests | Pytest coverage for core and CLI workflows |
+
+Agents should prefer the Rust binary when available. The Python implementation remains current so it can be used as a readable fallback and cross-language parity target.
 
 ---
 

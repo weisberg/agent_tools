@@ -60,13 +60,15 @@ These crates form the common substrate. Every tool in agent_tools should depend 
 | Crate | Purpose | Notes |
 |---|---|---|
 | `calamine` | Fast xlsx/xls/ods reading | Pure Rust, 2.5x faster than alternatives for bulk reads. Read-only — no write support. Serde integration for deserializing rows directly into structs |
-| `rust_xlsxwriter` | Fast xlsx creation | Pure Rust, by the author of Python's XlsxWriter. Charts, conditional formatting, data validation, sparklines, images. Write-only — cannot modify existing files |
-| `umya-spreadsheet` | Read + write + modify xlsx | The only pure-Rust option for opening an existing xlsx, editing cells/styles/charts, and saving back. Slower than calamine for reads and rust_xlsxwriter for writes, but it's the only one that does modify-in-place |
-| `csv` | CSV read/write with serde | Import/export CSV. Handles quoting, escaping, flexible delimiters |
+| `rust_xlsxwriter` | Fast xlsx creation | Used by `xli create`, including CSV/Markdown/JSON imports and report-table creation options. Strong for new workbooks, charts, conditional formatting, data validation, sparklines, and images. Write-only — cannot modify existing files |
+| `umya-spreadsheet` | Read + write + modify xlsx | Current mutation fallback for `write`, `format`, `sheet`, `batch`, and `apply`. Practical for MVP editing, but `xli` intentionally warns because unrelated workbook artifacts may be rewritten |
+| `csv` | CSV read/write with serde | Import/export CSV. Handles quoting, escaping, flexible delimiters. Used by `xli create --from-csv` and column-name report options |
+| `schemars` | JSON Schema generation | Used for structured command/result schema output. Some command schemas are still maintained manually until CLI-type-derived schemas are complete |
+| `quick-xml` + `zip` | OOXML package inspection/patching | Existing helper crates for artifact-preserving OOXML work. Full mutation coverage is still active work |
 
 ### Strategy Note
 
-xli likely needs all three xlsx crates, each for its strength: `calamine` for fast reads/inspection, `rust_xlsxwriter` for creating new files from scratch, and `umya-spreadsheet` for editing existing files. The `rust-excel-core` meta-crate wraps all three behind a unified API — worth evaluating whether to use it or compose them yourself.
+xli currently composes the spreadsheet crates directly: `calamine` for reads and inspection, `rust_xlsxwriter` for new workbook creation, and `umya-spreadsheet` as the mutation fallback. The long-term direction is to move common mutations onto artifact-preserving OOXML patch paths using `zip` and `quick-xml`, keeping fallback usage explicit in response warnings.
 
 ### Data Processing
 

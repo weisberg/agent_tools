@@ -60,10 +60,16 @@ toolchain, or debugging a suspected Rust-specific bug):
 uv run python -m tools.vaultli ...
 ```
 
-Both implementations accept the same subcommands, the same flags (including
-`--json` and `--root`), and produce byte-identical index records. Prefer
-`--json` in agent flows so results are machine-readable. Use `--root` to target
-the vault explicitly instead of depending on the current working directory.
+Both implementations accept the same subcommands and flags. Prefer `--json` in
+agent flows so results are machine-readable. Use `--root` to target the vault
+explicitly instead of depending on the current working directory.
+
+| Area | Rust | Python |
+|---|---|---|
+| Default agent choice | Use this first | Use as fallback |
+| Best for | Fast repeated CLI calls | Debugging and reference reads |
+| Parity role | Checked against Python | Oracle for Rust parity tests |
+| Expected behavior | Same user-visible commands and JSON envelopes | Same user-visible commands and JSON envelopes |
 
 ## Core model
 
@@ -191,6 +197,7 @@ vaultli --json search report --root ./kb
 - Leaving the generic inferred `description` untouched.
 - Forgetting to re-run `index` after metadata edits.
 - Treating `validate` output as if it were self-healing.
+- Reaching for Python by habit even when the Rust binary is already built.
 
 ## Related docs
 

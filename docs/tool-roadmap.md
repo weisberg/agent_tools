@@ -66,10 +66,25 @@ Document tooling. Current docs:
 
 ### `xli`
 
-Spreadsheet/workbook tooling. Current docs:
+Spreadsheet/workbook tooling. `xli` is now a working Rust workspace for
+JSON-first Excel operations: inspect, read, write, format, sheet management,
+batch edits, workbook creation/import, quality checks, schema discovery, and
+minimal built-in template/apply support. The Python companion handles heavier
+validation, reconciliation, artifact auditing, and report generation.
 
+Current docs:
+
+- `tools/xli/README.md`
 - `tools/xli/xli-spec.md`
 - `tools/xli/PYTHON_COMPANION_TO_XLI.md`
+- `tools/xli/xli-companion/README.md`
+
+Current caveats:
+
+- Mutating commands still use the `umya-spreadsheet` fallback path and emit a
+  warning; artifact-preserving OOXML patch coverage remains active work.
+- The spec is broader than the MVP. Use `tools/xli/README.md` for the current
+  parity matrix.
 
 ### `vizli`
 

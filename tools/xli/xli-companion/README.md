@@ -255,12 +255,18 @@ Custom adapters can be built by subclassing `xli_companion.engines.base.Spreadsh
 ## Development
 
 ```bash
-# Clone and install
+# From the companion directory
+cd tools/xli/xli-companion
+
+# Run tests with the documented uv environment
+uv run --extra dev pytest
+
+# Optional editable install workflow
 git clone <repo-url>
 cd xli-companion
 pip install -e ".[dev]"
 
-# Run tests
+# Run tests after pip install
 pytest
 
 # Lint
@@ -274,6 +280,9 @@ Configuration lives in `pyproject.toml`:
 
 - **ruff**: line-length 100, target Python 3.11
 - **mypy**: strict mode enabled
+- **pytest**: local `testpaths = ["tests"]` and `pythonpath = ["src"]`, so
+  `uv run --extra dev pytest` uses this package instead of the repository-root
+  pytest configuration
 
 ## Design Rationale
 

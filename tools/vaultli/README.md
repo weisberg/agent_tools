@@ -80,7 +80,9 @@ If you want the actual content behind a match, use the indexed `file` path and, 
 | `infer <file>` | Preview inferred metadata without writing |
 | `dump-index` | Dump all index records as JSON |
 
-All commands support `--root`, and agent workflows should usually use `--json`.
+Commands that operate on an existing vault accept `--root`; path-oriented
+commands such as `init` and `root` use their positional path instead. Agent
+workflows should usually use `--json`.
 
 ## Quickstart
 
@@ -88,7 +90,7 @@ The Rust binary is the default implementation. Build once:
 
 ```bash
 cd rs && cargo build --release
-# binary is now at ./rs/target/release/vaultli
+# binary is now at ./target/release/vaultli
 ```
 
 Then (either put it on your PATH or invoke by full path):
@@ -148,15 +150,22 @@ metadata and are available in both implementations.
 
 vaultli currently ships in two implementations:
 
-| Implementation | Role | Run |
+| Area | Rust | Python |
 |---|---|---|
-| Rust | Primary implementation | `cd rs && cargo build --release && ./rs/target/release/vaultli ...` |
-| Python | Reference / parity oracle | `PYTHONPATH=<parent-of-vaultli> python -m vaultli ...` |
+| Role | Primary implementation for agents and day-to-day use | Reference implementation and parity oracle |
+| Run | `cd rs && cargo build --release && ./target/release/vaultli ...` | `PYTHONPATH=<parent-of-vaultli> python -m vaultli ...` |
+| Strength | Fast startup, compiled binary, modular crate layout | Easy to inspect, debug, and compare behavior |
+| Command surface | Same subcommands and flags as Python | Same subcommands and flags as Rust |
+| Tests | Unit, integration, and parity tests | Pytest coverage for core and CLI workflows |
 
-Both implementations are behaviorally identical — the Rust crate's parity test
-suite compares their outputs byte-for-byte. The package can be relocated freely;
-set `VAULTLI_PY_PATH` if you want to run the parity tests from outside the
-default in-repo layout.
+Both implementations are intended to be behaviorally identical for normal CLI
+workflows. The Rust crate's parity suite compares key outputs against the Python
+reference. The package can be relocated freely; set `VAULTLI_PY_PATH` if you
+want to run the parity tests from outside the default in-repo layout.
+
+New agents should use the Rust binary unless it is unavailable or they are
+debugging a suspected Rust-specific issue. The Python implementation is still
+kept current so it can serve as a readable reference and cross-check.
 
 ## Related Docs
 
