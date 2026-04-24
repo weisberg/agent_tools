@@ -1,4 +1,5 @@
 use serde_json::Value;
+use std::io::Read;
 use std::process::Command;
 use std::process::Output;
 use tempfile::tempdir;
@@ -169,6 +170,40 @@ fn format_command_keeps_workbook_openable() {
 }
 
 #[test]
+fn format_command_resolves_number_format_aliases() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("test.xlsx");
+    run_status([
+        "create",
+        path.to_str().expect("path"),
+        "--sheets",
+        "Summary",
+    ]);
+    run_status([
+        "write",
+        path.to_str().expect("path"),
+        "Summary!A1",
+        "--value",
+        "1234",
+    ]);
+
+    let format = run_json([
+        "format",
+        path.to_str().expect("path"),
+        "Summary!A1:A1",
+        "--number-format",
+        "currency",
+    ]);
+    assert_eq!(format["status"], "ok");
+
+    let styles = read_styles_xml(&path);
+    assert!(
+        styles.contains("$#,##0;[Red]($#,##0)"),
+        "styles.xml should contain resolved currency format, got: {styles}"
+    );
+}
+
+#[test]
 fn sheet_add_dry_run_does_not_modify_workbook() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("test.xlsx");
@@ -237,6 +272,15 @@ fn run_json<const N: usize>(args: [&str; N]) -> Value {
     let output = run_output(args);
     assert!(output.status.success());
     serde_json::from_slice(&output.stdout).expect("json")
+}
+
+fn read_styles_xml(path: &std::path::Path) -> String {
+    let file = std::fs::File::open(path).expect("open workbook");
+    let mut archive = zip::ZipArchive::new(file).expect("open xlsx archive");
+    let mut styles = archive.by_name("xl/styles.xml").expect("styles.xml");
+    let mut xml = String::new();
+    styles.read_to_string(&mut xml).expect("read styles.xml");
+    xml
 }
 
 fn run_output<const N: usize>(args: [&str; N]) -> Output {

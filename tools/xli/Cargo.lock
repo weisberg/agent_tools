@@ -1990,6 +1990,7 @@ dependencies = [
  "xli-ooxml",
  "xli-read",
  "xli-schema",
+ "zip",
 ]
 
 [[package]]

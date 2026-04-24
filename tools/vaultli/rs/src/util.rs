@@ -108,10 +108,8 @@ pub(crate) fn map_from_pairs(pairs: Vec<(&str, Value)>) -> Map<String, Value> {
 /// `json.dumps(..., sort_keys=True)` semantics used by search.
 pub(crate) fn to_sorted_json_string(value: &Value) -> String {
     let mut buf = Vec::new();
-    let mut ser = serde_json::Serializer::with_formatter(
-        &mut buf,
-        serde_json::ser::CompactFormatter,
-    );
+    let mut ser =
+        serde_json::Serializer::with_formatter(&mut buf, serde_json::ser::CompactFormatter);
     let sorted = sort_keys(value);
     serde::Serialize::serialize(&sorted, &mut ser).unwrap();
     String::from_utf8(buf).unwrap()
@@ -176,6 +174,9 @@ mod tests {
     #[test]
     fn sort_keys_emits_stable_order() {
         let value = json!({"b": 1, "a": {"d": 1, "c": 2}});
-        assert_eq!(to_sorted_json_string(&value), r#"{"a":{"c":2,"d":1},"b":1}"#);
+        assert_eq!(
+            to_sorted_json_string(&value),
+            r#"{"a":{"c":2,"d":1},"b":1}"#
+        );
     }
 }

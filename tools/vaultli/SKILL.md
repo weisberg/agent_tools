@@ -109,6 +109,8 @@ vaultli --json init ./kb
 |---|---|
 | Add frontmatter to an existing markdown file and index it right away | `add <file>` |
 | Create a sidecar for a non-markdown asset without indexing yet | `scaffold <file>` |
+| Bulk scaffold missing metadata for a file or directory | `ingest <path>` |
+| Preview a bulk ingest without writing files | `ingest <path> --dry-run` |
 | Preview the generated metadata before writing anything | `infer <file>` |
 | Rebuild cache state after edits | `index` |
 | Audit the vault for broken links, duplicate IDs, and stale index state | `validate` |
@@ -173,6 +175,7 @@ source: ./report.sql
 vaultli --json root .
 vaultli --json add ./kb/docs/guide.md --root ./kb
 vaultli --json scaffold ./kb/queries/report.sql --root ./kb
+vaultli --json ingest ./kb --root ./kb --dry-run
 # edit the generated markdown files
 vaultli --json index --root ./kb
 vaultli --json validate --root ./kb

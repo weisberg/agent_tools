@@ -73,6 +73,7 @@ If you want the actual content behind a match, use the indexed `file` path and, 
 | `show <id>` | Show one indexed record by `id` |
 | `add <file>` | Scaffold metadata for a file and re-index |
 | `scaffold <file>` | Create frontmatter or sidecar metadata without re-indexing |
+| `ingest <path>` | Bulk scaffold missing metadata for one file or a directory |
 | `validate` | Report broken sources, duplicate ids, dangling refs, and stale index state |
 | `root [path]` | Find the nearest vault root |
 | `make-id <file>` | Derive the canonical vault id for a file |
@@ -97,6 +98,7 @@ vaultli --help
 vaultli --json init ./kb
 vaultli --json add ./kb/docs/guide.md --root ./kb
 vaultli --json scaffold ./kb/queries/retention.sql --root ./kb
+vaultli --json ingest ./kb --root ./kb --dry-run
 vaultli --json index --root ./kb
 vaultli --json validate --root ./kb
 vaultli --json search retention --root ./kb
@@ -130,11 +132,12 @@ source: ./report.sql
 For a new agent, the safest default loop is:
 
 1. Find the vault root with `root`.
-2. Use `add` for markdown and `scaffold` for non-markdown files.
-3. Improve the inferred metadata, especially `description`, `tags`, and `category`.
-4. Run `index`.
-5. Run `validate`.
-6. Use `search` to shortlist records, then open the real files.
+2. Use `ingest --dry-run` to preview bulk metadata scaffolding for a directory.
+3. Use `add` for individual markdown files, `scaffold` for individual non-markdown files, or `ingest --index` for bulk scaffolding.
+4. Improve the inferred metadata, especially `description`, `tags`, and `category`.
+5. Run `index`.
+6. Run `validate`.
+7. Use `search` to shortlist records, then open the real files.
 
 ## Implementations
 

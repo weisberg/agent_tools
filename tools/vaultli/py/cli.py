@@ -13,6 +13,7 @@ from .core import (
     build_index,
     find_root,
     infer_frontmatter,
+    ingest_path,
     init_vault,
     load_index_records,
     make_id,
@@ -56,6 +57,12 @@ def _build_parser() -> argparse.ArgumentParser:
     scaffold_parser = subparsers.add_parser("scaffold", help="Create a frontmatter or sidecar stub")
     scaffold_parser.add_argument("file")
     scaffold_parser.add_argument("--root", default=".")
+
+    ingest_parser = subparsers.add_parser("ingest", help="Bulk scaffold missing metadata under a file or directory")
+    ingest_parser.add_argument("path")
+    ingest_parser.add_argument("--root", default=".")
+    ingest_parser.add_argument("--index", action="store_true", help="Rebuild INDEX.jsonl after scaffolding")
+    ingest_parser.add_argument("--dry-run", action="store_true", help="Preview writes without changing files")
 
     root_parser = subparsers.add_parser("root", help="Locate the nearest vault root")
     root_parser.add_argument("path", nargs="?", default=".")
@@ -187,6 +194,10 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.command == "scaffold":
             _print_generic(scaffold_file(args.file, root=args.root), as_json)
+            return 0
+
+        if args.command == "ingest":
+            _print_generic(ingest_path(args.path, root=args.root, index=args.index, dry_run=args.dry_run), as_json)
             return 0
 
         if args.command == "root":

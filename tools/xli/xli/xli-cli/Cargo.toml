@@ -27,3 +27,4 @@ xli-schema = { path = "../xli-schema" }
 [dev-dependencies]
 rust_xlsxwriter.workspace = true
 tempfile.workspace = true
+zip.workspace = true

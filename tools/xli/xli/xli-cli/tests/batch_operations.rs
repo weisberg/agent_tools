@@ -1,5 +1,5 @@
 use serde_json::Value;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::process::{Command, Output, Stdio};
 use tempfile::tempdir;
 
@@ -60,6 +60,25 @@ fn batch_mixed_write_and_format() {
     let json = batch_stdin(&path, input);
     assert_eq!(json["status"], "ok");
     assert_eq!(json["output"]["ops_executed"], 3);
+}
+
+#[test]
+fn batch_resolves_number_format_aliases() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("test.xlsx");
+    create_workbook(&path);
+
+    let input = r#"{"op":"write","address":"Sheet1!A1","value":0.125}
+{"op":"format","range":"Sheet1!A1:A1","number_format":"percent_1dp"}"#;
+
+    let json = batch_stdin(&path, input);
+    assert_eq!(json["status"], "ok");
+
+    let styles = read_styles_xml(&path);
+    assert!(
+        styles.contains("0.0%"),
+        "styles.xml should contain resolved percentage format, got: {styles}"
+    );
 }
 
 #[test]
@@ -172,4 +191,13 @@ fn batch_empty_stdin_succeeds() {
     let json = batch_stdin(&path, "");
     assert_eq!(json["status"], "ok");
     assert_eq!(json["output"]["ops_executed"], 0);
+}
+
+fn read_styles_xml(path: &std::path::Path) -> String {
+    let file = std::fs::File::open(path).expect("open workbook");
+    let mut archive = zip::ZipArchive::new(file).expect("open xlsx archive");
+    let mut styles = archive.by_name("xl/styles.xml").expect("styles.xml");
+    let mut xml = String::new();
+    styles.read_to_string(&mut xml).expect("read styles.xml");
+    xml
 }

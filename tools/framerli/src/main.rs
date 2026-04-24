@@ -4,7 +4,7 @@ use std::env;
 use std::fs;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::process;
+use std::process::{self, Command, Stdio};
 use std::time::Instant;
 
 use chrono::{SecondsFormat, Utc};
@@ -67,9 +67,13 @@ struct Cli {
     #[arg(long, global = true, env = "FRAMERLI_PROJECT")]
     project: Option<String>,
 
-    /// Use a config/state root instead of ~/.config/framerli.
-    #[arg(long, global = true)]
+    /// Use a state root instead of the platform data directory.
+    #[arg(long, global = true, env = "FRAMERLI_HOME")]
     home: Option<PathBuf>,
+
+    /// Config file path. Defaults to ~/.config/framerli.yaml.
+    #[arg(long, global = true, env = "FRAMERLI_CONFIG")]
+    config: Option<PathBuf>,
 
     /// Explicit dry-run/plan mode for mutating commands.
     #[arg(long, global = true)]
@@ -86,6 +90,10 @@ struct Cli {
     /// Disable append-only audit logging for mutating commands.
     #[arg(long, global = true)]
     no_audit: bool,
+
+    /// Override the Node framer-api bridge script.
+    #[arg(long, global = true, env = "FRAMERLI_BRIDGE")]
+    bridge: Option<PathBuf>,
 
     /// Increase verbosity.
     #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count, global = true)]
@@ -746,11 +754,14 @@ struct Context {
     project: Option<String>,
     started: Instant,
     home: PathBuf,
+    config_path: PathBuf,
     output: OutputFormat,
     dry_run: bool,
     yes: bool,
     time: bool,
     no_audit: bool,
+    bridge: Option<PathBuf>,
+    key_source: Option<String>,
 }
 
 impl Context {
@@ -758,20 +769,26 @@ impl Context {
         let home = cli
             .home
             .clone()
-            .or_else(|| dirs::config_dir().map(|p| p.join("framerli")))
+            .or_else(|| env::var_os("FRAMERLI_HOME").map(PathBuf::from))
+            .or_else(|| dirs::data_local_dir().map(|p| p.join("framerli")))
             .unwrap_or_else(|| PathBuf::from(".framerli"));
-        let config = Config::load(&home);
+        let config_path = discover_config_path(cli.config.as_deref(), &home);
+        let config = Config::load(&config_path, &home);
         let profile = cli
             .profile
             .clone()
-            .or(config.default_profile)
+            .or_else(|| env::var("FRAMERLI_DEFAULT_PROFILE").ok())
+            .or(config.default_profile.clone())
             .unwrap_or_else(|| "default".to_string());
-        let project = cli.project.clone().or_else(|| {
-            config
-                .profiles
-                .get(&profile)
-                .and_then(|p| p.project.clone())
-        });
+        let profile_config = config.profiles.get(&profile);
+        let project = cli
+            .project
+            .clone()
+            .or_else(|| env::var("FRAMERLI_PROJECT").ok())
+            .or_else(|| profile_config.and_then(|p| p.project.clone()));
+        let key_source = env::var("FRAMERLI_KEY_SOURCE")
+            .ok()
+            .or_else(|| profile_config.and_then(|p| p.key_source.clone()));
         let output = if cli.jsonl {
             OutputFormat::Jsonl
         } else if cli.json {
@@ -785,11 +802,14 @@ impl Context {
             project,
             started,
             home,
+            config_path,
             output,
             dry_run: cli.dry_run,
             yes: cli.yes,
             time: cli.time,
             no_audit: cli.no_audit,
+            bridge: cli.bridge.clone().or_else(default_bridge_path),
+            key_source,
         }
     }
 
@@ -810,38 +830,79 @@ impl Context {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 struct Config {
     default_profile: Option<String>,
     #[serde(default, rename = "profile")]
     profiles: std::collections::BTreeMap<String, ProfileConfig>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 struct ProfileConfig {
     project: Option<String>,
+    key_source: Option<String>,
 }
 
 impl Config {
-    fn load(home: &Path) -> Self {
-        let path = discover_config(home);
-        path.and_then(|p| fs::read_to_string(p).ok())
-            .and_then(|s| toml::from_str(&s).ok())
+    fn load(path: &Path, legacy_home: &Path) -> Self {
+        read_config(path)
+            .or_else(|| legacy_config_path(legacy_home).and_then(|path| read_config(&path)))
             .unwrap_or_default()
     }
 }
 
-fn discover_config(home: &Path) -> Option<PathBuf> {
+fn read_config(path: &Path) -> Option<Config> {
+    let contents = fs::read_to_string(path).ok()?;
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("yaml" | "yml") => serde_yaml::from_str(&contents).ok(),
+        Some("toml") => toml::from_str(&contents).ok(),
+        _ => serde_yaml::from_str(&contents)
+            .ok()
+            .or_else(|| toml::from_str(&contents).ok()),
+    }
+}
+
+fn discover_config_path(explicit: Option<&Path>, _legacy_home: &Path) -> PathBuf {
+    if let Some(path) = explicit {
+        return path.to_path_buf();
+    }
+    if let Some(path) = env::var_os("FRAMERLI_CONFIG").map(PathBuf::from) {
+        return path;
+    }
     let mut dir = env::current_dir().ok();
     while let Some(current) = dir {
-        let candidate = current.join("framerli.toml");
-        if candidate.exists() {
-            return Some(candidate);
+        for filename in ["framerli.yaml", "framerli.yml", "framerli.toml"] {
+            let candidate = current.join(filename);
+            if candidate.exists() {
+                return candidate;
+            }
         }
         dir = current.parent().map(Path::to_path_buf);
     }
-    let global = home.join("config.toml");
-    global.exists().then_some(global)
+    global_config_path()
+}
+
+fn global_config_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from(".config"))
+        .join("framerli.yaml")
+}
+
+fn legacy_config_path(home: &Path) -> Option<PathBuf> {
+    let path = home.join("config.toml");
+    path.exists().then_some(path)
+}
+
+fn save_config(path: &Path, config: &Config) -> Result<(), CliError> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let contents = serde_yaml::to_string(config).map_err(|err| CliError::Usage {
+        message: err.to_string(),
+        hint: "Could not serialize framerli YAML config.".to_string(),
+    })?;
+    fs::write(path, contents)?;
+    Ok(())
 }
 
 fn dispatch(ctx: &Context, command: Commands) -> Result<Value, CliError> {
@@ -849,11 +910,7 @@ fn dispatch(ctx: &Context, command: Commands) -> Result<Value, CliError> {
         Commands::Tools => Ok(command_tree()),
         Commands::Explain(args) => Ok(explain_command(&args.command)),
         Commands::Auth(cmd) => handle_auth(ctx, cmd),
-        Commands::Project(ProjectCommand::Use { profile_or_url }) => Ok(json!({
-            "selected": profile_or_url,
-            "scope": "project",
-            "note": "Profile persistence is scaffolded; write support will land with credential storage."
-        })),
+        Commands::Project(ProjectCommand::Use { profile_or_url }) => handle_project_use(ctx, profile_or_url),
         Commands::Deployments(DeploymentsCommand::List) => Ok(json!({"items": [], "count": 0})),
         Commands::Daemon(DaemonCommand::Status) => Ok(json!({"running": false, "mode": "not_started", "socket": null})),
         Commands::Session(SessionCommand::Begin) => Ok(json!({"session": new_token("sess"), "status": "begun"})),
@@ -861,9 +918,10 @@ fn dispatch(ctx: &Context, command: Commands) -> Result<Value, CliError> {
         Commands::Doctor => Ok(json!({
             "cli": {"name": "framerli", "version": env!("CARGO_PKG_VERSION")},
             "config_home": ctx.home,
+            "config_path": ctx.config_path,
             "profile": ctx.profile,
             "project_configured": ctx.project.is_some(),
-            "bridge": bridge_status()
+            "bridge": bridge_status(ctx)
         })),
         Commands::Mcp => Err(CliError::BridgeUnavailable {
             command: "mcp".to_string(),
@@ -915,22 +973,63 @@ fn handle_auth(ctx: &Context, cmd: AuthCommand) -> Result<Value, CliError> {
                 });
             };
 
+            let profile = args.profile.unwrap_or_else(|| ctx.profile.clone());
+            let project = args.project.or_else(|| ctx.project.clone());
+            let mut saved = false;
+            if key_source.starts_with("env:") || project.is_some() {
+                let mut config = Config::load(&ctx.config_path, &ctx.home);
+                config.default_profile = Some(profile.clone());
+                let entry = config.profiles.entry(profile.clone()).or_default();
+                if let Some(project) = &project {
+                    entry.project = Some(project.clone());
+                }
+                if key_source.starts_with("env:") {
+                    entry.key_source = Some(key_source.clone());
+                }
+                save_config(&ctx.config_path, &config)?;
+                saved = true;
+            }
+
             Ok(json!({
-                "profile": args.profile.unwrap_or_else(|| ctx.profile.clone()),
-                "project": args.project.or_else(|| ctx.project.clone()),
+                "profile": profile,
+                "project": project,
                 "key_source": key_source,
-                "stored": false,
-                "note": "Credential capture is validated, but persistent keychain storage is reserved for the bridge phase."
+                "stored": saved,
+                "note": "Environment key sources are persisted as references only. Plain API key material is not written to disk."
             }))
         }
         AuthCommand::List => Ok(json!({"profiles": [], "count": 0, "redacted": true})),
         AuthCommand::Remove { profile } => Ok(
             json!({"profile": profile, "removed": false, "reason": "no local credential store yet"}),
         ),
-        AuthCommand::Test => Err(CliError::BridgeUnavailable {
-            command: "auth test".to_string(),
-            hint: "Credential testing requires the Node framer-api bridge.".to_string(),
-        }),
+        AuthCommand::Test => {
+            let request = BridgeRequest {
+                version: 1,
+                operation: "project.info".to_string(),
+                profile: ctx.profile.clone(),
+                project: ctx.project.clone(),
+                dry_run: false,
+                args: json!({}),
+            };
+            invoke_bridge(ctx, &request)
+        }
+    }
+}
+
+fn handle_project_use(ctx: &Context, profile_or_url: String) -> Result<Value, CliError> {
+    let mut config = Config::load(&ctx.config_path, &ctx.home);
+    let is_url = profile_or_url.starts_with("http://") || profile_or_url.starts_with("https://");
+    if is_url {
+        let profile = ctx.profile.clone();
+        config.default_profile = Some(profile.clone());
+        config.profiles.entry(profile.clone()).or_default().project = Some(profile_or_url.clone());
+        save_config(&ctx.config_path, &config)?;
+        Ok(json!({"profile": profile, "project": profile_or_url, "saved": true}))
+    } else {
+        config.default_profile = Some(profile_or_url.clone());
+        config.profiles.entry(profile_or_url.clone()).or_default();
+        save_config(&ctx.config_path, &config)?;
+        Ok(json!({"profile": profile_or_url, "saved": true}))
     }
 }
 
@@ -942,26 +1041,29 @@ fn handle_api_command(ctx: &Context, command: Commands) -> Result<Value, CliErro
         });
     }
 
-    let plan = json!({
-        "command": command_name(&command),
-        "sdk_methods": sdk_methods_for(&command),
-        "mutating": is_mutating(&command),
-        "dry_run": ctx.dry_run || is_mutating(&command),
-        "bridge": bridge_status(),
-        "status": "planned",
-        "note": "Rust command contract is implemented. Live Framer calls require the official Node framer-api bridge/daemon."
-    });
-
-    if is_live_read(&command) && !ctx.dry_run {
-        return Err(CliError::BridgeUnavailable {
-            command: command_name(&command),
-            hint: "Set up the future Node bridge to execute live Framer Server API reads."
-                .to_string(),
-        });
+    let plan = plan_for(ctx, &command);
+    if ctx.dry_run || (is_mutating(&command) && !ctx.yes) {
+        append_audit(ctx, &command, &plan, "planned")?;
+        return Ok(plan);
     }
 
-    append_audit(ctx, &command, &plan)?;
-    Ok(plan)
+    let request = bridge_request(ctx, &command)?;
+    let result = invoke_bridge(ctx, &request)?;
+    append_audit(ctx, &command, &result, "ok")?;
+    Ok(result)
+}
+
+fn plan_for(ctx: &Context, command: &Commands) -> Value {
+    json!({
+        "command": command_name(command),
+        "sdk_methods": sdk_methods_for(command),
+        "mutating": is_mutating(command),
+        "dry_run": true,
+        "bridge": bridge_status(ctx),
+        "status": "planned",
+        "request": bridge_request_preview(command),
+        "note": "Dry-run plan. Rerun without --dry-run for reads or with --yes for writes to call the Node framer-api bridge."
+    })
 }
 
 fn print_response(ctx: &Context, response: &Response) {
@@ -1055,6 +1157,17 @@ enum CliError {
     ApprovalRequired { command: String, hint: String },
     #[error("Bridge unavailable for {command}")]
     BridgeUnavailable { command: String, hint: String },
+    #[error("Bridge command {command} failed: {message}")]
+    BridgeFailed {
+        command: String,
+        code: String,
+        message: String,
+        hint: Option<String>,
+        retryable: bool,
+        details: Option<Value>,
+    },
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
 }
@@ -1066,6 +1179,17 @@ impl CliError {
             Self::AuthMissing { .. } => 3,
             Self::ApprovalRequired { .. } => 5,
             Self::BridgeUnavailable { .. } => 10,
+            Self::BridgeFailed { code, .. } => match code.as_str() {
+                "E_USAGE" => 2,
+                "E_AUTH_MISSING" | "E_AUTH_INVALID" | "E_PERM_DENIED" => 3,
+                "E_NOT_FOUND" => 4,
+                "E_APPROVAL_REQUIRED" | "E_CONFLICT" | "E_SLUG_COLLISION" => 5,
+                "E_RATE_LIMITED" => 6,
+                "E_COLD_START_TIMEOUT" => 7,
+                "E_NETWORK" => 8,
+                _ => 10,
+            },
+            Self::Json(_) => 1,
             Self::Io(_) => 1,
         }
     }
@@ -1106,7 +1230,36 @@ impl From<CliError> for ErrorBody {
                 hint: Some(hint),
                 retryable: false,
                 sdk_method: None,
-                details: Some(bridge_status()),
+                details: None,
+            },
+            CliError::BridgeFailed {
+                command,
+                code,
+                message,
+                hint,
+                retryable,
+                details,
+            } => {
+                let code: &'static str = Box::leak(code.into_boxed_str());
+                Self {
+                    code,
+                    message: format!("Bridge command '{command}' failed: {message}"),
+                    hint,
+                    retryable,
+                    sdk_method: None,
+                    details,
+                }
+            }
+            CliError::Json(err) => Self {
+                code: "E_JSON",
+                message: err.to_string(),
+                hint: Some(
+                    "The bridge returned invalid JSON or an input file could not be parsed."
+                        .to_string(),
+                ),
+                retryable: false,
+                sdk_method: None,
+                details: None,
             },
             CliError::Io(err) => Self {
                 code: "E_IO",
@@ -1163,42 +1316,277 @@ fn explain_command(parts: &[String]) -> Value {
     })
 }
 
-fn bridge_status() -> Value {
+fn bridge_status(ctx: &Context) -> Value {
     json!({
         "kind": "node-framer-api",
-        "available": false,
+        "available": ctx.bridge.as_ref().is_some_and(|path| path.exists()),
+        "script": ctx.bridge,
         "env": {
             "FRAMER_API_KEY": env::var("FRAMER_API_KEY").is_ok(),
+            "key_source": ctx.key_source,
             "FRAMERLI_BRIDGE": env::var("FRAMERLI_BRIDGE").ok()
         }
     })
 }
 
-fn append_audit(ctx: &Context, command: &Commands, payload: &Value) -> Result<(), CliError> {
+fn append_audit(
+    ctx: &Context,
+    command: &Commands,
+    payload: &Value,
+    result: &str,
+) -> Result<(), CliError> {
     if ctx.no_audit || !is_mutating(command) {
         return Ok(());
     }
-    fs::create_dir_all(ctx.state_dir())?;
+    if let Err(err) = fs::create_dir_all(ctx.state_dir()) {
+        eprintln!("framerli: audit log skipped: {err}");
+        return Ok(());
+    }
     let path = ctx.state_dir().join("audit.ndjson");
     let line = json!({
         "ts": Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
         "profile": ctx.profile,
         "cmd": command_name(command),
-        "result": "planned",
+        "result": result,
         "dry_run": ctx.dry_run,
         "payload": payload
     });
     use std::io::Write;
-    let mut file = fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?;
-    writeln!(
+    let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(&path) else {
+        eprintln!(
+            "framerli: audit log skipped: could not open {}",
+            path.display()
+        );
+        return Ok(());
+    };
+    if let Err(err) = writeln!(
         file,
         "{}",
         serde_json::to_string(&line).expect("audit line")
-    )?;
+    ) {
+        eprintln!("framerli: audit log skipped: {err}");
+    }
     Ok(())
+}
+
+#[derive(Debug, Serialize)]
+struct BridgeRequest {
+    version: u32,
+    operation: String,
+    profile: String,
+    project: Option<String>,
+    dry_run: bool,
+    args: Value,
+}
+
+#[derive(Debug, Deserialize)]
+struct BridgeResponse {
+    ok: bool,
+    #[serde(default)]
+    data: Option<Value>,
+    #[serde(default)]
+    error: Option<BridgeError>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BridgeError {
+    code: Option<String>,
+    message: String,
+    hint: Option<String>,
+    #[serde(default)]
+    retryable: bool,
+    details: Option<Value>,
+}
+
+fn default_bridge_path() -> Option<PathBuf> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let candidate = manifest_dir.join("bridge").join("framerli-bridge.mjs");
+    candidate.exists().then_some(candidate)
+}
+
+fn bridge_request(ctx: &Context, command: &Commands) -> Result<BridgeRequest, CliError> {
+    let (operation, args) = bridge_operation(command)?;
+    Ok(BridgeRequest {
+        version: 1,
+        operation,
+        profile: ctx.profile.clone(),
+        project: ctx.project.clone(),
+        dry_run: ctx.dry_run,
+        args,
+    })
+}
+
+fn bridge_request_preview(command: &Commands) -> Value {
+    match bridge_operation(command) {
+        Ok((operation, args)) => json!({"operation": operation, "args": args}),
+        Err(_) => json!({"operation": null, "args": {}}),
+    }
+}
+
+fn invoke_bridge(ctx: &Context, request: &BridgeRequest) -> Result<Value, CliError> {
+    let Some(script) = &ctx.bridge else {
+        return Err(CliError::BridgeUnavailable {
+            command: request.operation.clone(),
+            hint: "No bridge script was found. Set --bridge or FRAMERLI_BRIDGE to bridge/framerli-bridge.mjs.".to_string(),
+        });
+    };
+    if !script.exists() {
+        return Err(CliError::BridgeUnavailable {
+            command: request.operation.clone(),
+            hint: format!("Bridge script does not exist: {}", script.display()),
+        });
+    }
+
+    let node = env::var("FRAMERLI_NODE").unwrap_or_else(|_| "node".to_string());
+    let mut command = Command::new(node);
+    command
+        .arg(script)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if env::var("FRAMER_API_KEY").is_err() {
+        if let Some(name) = ctx
+            .key_source
+            .as_deref()
+            .and_then(|source| source.strip_prefix("env:"))
+        {
+            if let Ok(value) = env::var(name) {
+                command.env("FRAMER_API_KEY", value);
+            }
+        }
+    }
+    let mut child = command.spawn()?;
+
+    {
+        let stdin = child.stdin.as_mut().ok_or_else(|| {
+            CliError::Io(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "bridge stdin unavailable",
+            ))
+        })?;
+        serde_json::to_writer(stdin, request)?;
+    }
+
+    let output = child.wait_with_output()?;
+    let parsed: BridgeResponse = serde_json::from_slice(&output.stdout)?;
+    if parsed.ok {
+        Ok(parsed.data.unwrap_or_else(|| json!({})))
+    } else {
+        let err = parsed.error.unwrap_or(BridgeError {
+            code: Some("E_BRIDGE".to_string()),
+            message: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            hint: None,
+            retryable: false,
+            details: None,
+        });
+        Err(CliError::BridgeFailed {
+            command: request.operation.clone(),
+            code: err.code.unwrap_or_else(|| "E_BRIDGE".to_string()),
+            message: err.message,
+            hint: err.hint,
+            retryable: err.retryable,
+            details: err.details,
+        })
+    }
+}
+
+fn bridge_operation(command: &Commands) -> Result<(String, Value), CliError> {
+    let pair = match command {
+        Commands::Project(ProjectCommand::Info) => ("project.info", json!({})),
+        Commands::Project(ProjectCommand::Audit) => ("project.audit", json!({})),
+        Commands::Status => ("status", json!({})),
+        Commands::Contributors(args) => ("contributors", json!({"from": args.from, "to": args.to})),
+        Commands::Publish(args) => (
+            "publish",
+            json!({"promote": args.promote, "requireApproval": args.require_approval}),
+        ),
+        Commands::Deploy(DeployCommand::Promote { deployment_id }) => {
+            ("deploy", json!({"deploymentId": deployment_id}))
+        }
+        Commands::Deploy(DeployCommand::Rollback) => ("deploy.rollback", json!({})),
+        Commands::Cms(CmsCommand::Collections(CmsCollectionsCommand::List)) => {
+            ("cms.collections.list", json!({}))
+        }
+        Commands::Cms(CmsCommand::Collection(CmsCollectionCommand::Show { slug })) => {
+            ("cms.collection.show", json!({"collection": slug}))
+        }
+        Commands::Cms(CmsCommand::Fields(CmsFieldsCommand::List { collection })) => {
+            ("cms.fields.list", json!({"collection": collection}))
+        }
+        Commands::Cms(CmsCommand::Fields(CmsFieldsCommand::Add(args))) => (
+            "cms.fields.add",
+            json!({"collection": args.collection, "name": args.name, "type": format!("{:?}", args.r#type), "cases": args.cases}),
+        ),
+        Commands::Cms(CmsCommand::Fields(CmsFieldsCommand::Remove {
+            collection,
+            field_id,
+        })) => (
+            "cms.fields.remove",
+            json!({"collection": collection, "fieldId": field_id}),
+        ),
+        Commands::Cms(CmsCommand::Fields(CmsFieldsCommand::Reorder(args))) => (
+            "cms.fields.reorder",
+            json!({"collection": args.collection, "order": args.order}),
+        ),
+        Commands::Cms(CmsCommand::Items(CmsItemsCommand::List(args))) => (
+            "cms.items.list",
+            json!({"collection": args.collection, "where": args.r#where, "limit": args.limit, "cursor": args.cursor}),
+        ),
+        Commands::Cms(CmsCommand::Items(CmsItemsCommand::Get {
+            collection,
+            id_or_slug,
+        })) => (
+            "cms.items.get",
+            json!({"collection": collection, "idOrSlug": id_or_slug}),
+        ),
+        Commands::Cms(CmsCommand::Items(CmsItemsCommand::Add(args))) => (
+            "cms.items.add",
+            json!({"collection": args.collection, "file": args.file, "update": args.update, "ifNotExists": args.if_not_exists}),
+        ),
+        Commands::Cms(CmsCommand::Items(CmsItemsCommand::Remove(args))) => (
+            "cms.items.remove",
+            json!({"collection": args.collection, "ids": args.ids}),
+        ),
+        Commands::Cms(CmsCommand::Items(CmsItemsCommand::Reorder(args))) => (
+            "cms.items.reorder",
+            json!({"collection": args.collection, "order": args.order}),
+        ),
+        Commands::Cms(CmsCommand::Import(args)) => (
+            "cms.import",
+            json!({"collection": args.collection, "from": format!("{:?}", args.from), "map": args.map, "file": args.file}),
+        ),
+        Commands::Cms(CmsCommand::Export(args)) => (
+            "cms.export",
+            json!({"collection": args.collection, "format": format!("{:?}", args.format), "out": args.out}),
+        ),
+        Commands::Cms(CmsCommand::Schema(CmsSchemaCommand::Dump { collection })) => {
+            ("cms.schema.dump", json!({"collection": collection}))
+        }
+        Commands::Cms(CmsCommand::Schema(CmsSchemaCommand::Apply(args))) => {
+            ("cms.schema.apply", json!({"file": args.file}))
+        }
+        Commands::Cms(CmsCommand::Schema(CmsSchemaCommand::Diff(args))) => {
+            ("cms.schema.diff", json!({"file": args.file}))
+        }
+        Commands::Cms(CmsCommand::Sync(args)) => (
+            "cms.sync",
+            json!({"config": args.config, "watch": args.watch}),
+        ),
+        Commands::Whoami => ("whoami", json!({})),
+        Commands::Can { method } => ("can", json!({"method": method})),
+        Commands::Introspect(args) => ("introspect", json!({"depth": format!("{:?}", args.depth)})),
+        Commands::Exec(args) => ("exec", json!({"script": args.script, "args": args.args})),
+        Commands::Plan(args) => ("site.plan", json!({"file": args.file})),
+        Commands::Apply(args) => (
+            "site.apply",
+            json!({"file": args.file, "autoApprove": args.auto_approve}),
+        ),
+        Commands::Diff(args) => ("site.diff", json!({"file": args.file})),
+        other => {
+            return Ok((command_name(other).replace(' ', "."), json!({})));
+        }
+    };
+    Ok((pair.0.to_string(), pair.1))
 }
 
 fn command_name(command: &Commands) -> String {
@@ -1239,29 +1627,6 @@ fn command_name(command: &Commands) -> String {
         Commands::Can { .. } => "can".into(),
         Commands::Doctor => "doctor".into(),
     }
-}
-
-fn is_live_read(command: &Commands) -> bool {
-    matches!(
-        command,
-        Commands::Project(ProjectCommand::Info)
-            | Commands::Project(ProjectCommand::Audit)
-            | Commands::Cms(_)
-            | Commands::Status
-            | Commands::Contributors(_)
-            | Commands::Node(_)
-            | Commands::Text(_)
-            | Commands::Code(_)
-            | Commands::Assets(_)
-            | Commands::Styles(_)
-            | Commands::Fonts(_)
-            | Commands::I18n(_)
-            | Commands::Redirects(_)
-            | Commands::CustomCode(_)
-            | Commands::Introspect(_)
-            | Commands::Whoami
-            | Commands::Can { .. }
-    )
 }
 
 fn is_mutating(command: &Commands) -> bool {

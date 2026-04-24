@@ -1,0 +1,13 @@
+{
+  "name": "@framerli/bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Node framer-api bridge for the framerli Rust CLI",
+  "bin": {
+    "framerli-bridge": "./framerli-bridge.mjs"
+  },
+  "dependencies": {
+    "framer-api": "^0.1.1"
+  }
+}

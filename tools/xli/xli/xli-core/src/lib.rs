@@ -14,4 +14,4 @@ pub use addressing::{
 pub use envelope::{CommitMode, CommitStats, RepairSuggestion, ResponseEnvelope, Status};
 pub use error::XliError;
 pub use ops::{BatchOp, SheetAction};
-pub use style::{FillSpec, FontSpec, NumberFormat, StyleSpec};
+pub use style::{resolve_number_format, FillSpec, FontSpec, NumberFormat, StyleSpec};

@@ -50,10 +50,7 @@ fn run_python(code: &str) -> Option<Value> {
         .output()
         .ok()?;
     if !output.status.success() {
-        eprintln!(
-            "python stderr: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        eprintln!("python stderr: {}", String::from_utf8_lossy(&output.stderr));
         return None;
     }
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();

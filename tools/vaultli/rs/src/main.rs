@@ -7,7 +7,7 @@ use vaultli::id::make_id;
 use vaultli::index::{build_index, load_index_records};
 use vaultli::infer::infer_frontmatter;
 use vaultli::paths::find_root;
-use vaultli::scaffold::{add_file, init_vault, scaffold_file};
+use vaultli::scaffold::{add_file, ingest_path, init_vault, scaffold_file};
 use vaultli::search::{search_records, show_record};
 use vaultli::validate::validate_vault;
 
@@ -64,6 +64,15 @@ enum Commands {
         file: PathBuf,
         #[arg(long, default_value = ".")]
         root: PathBuf,
+    },
+    Ingest {
+        path: PathBuf,
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long)]
+        index: bool,
+        #[arg(long)]
+        dry_run: bool,
     },
     Add {
         file: PathBuf,
@@ -127,6 +136,16 @@ fn run(cli: Cli) -> Result<i32, (VaultliError, bool)> {
         }
         Commands::Scaffold { file, root } => {
             let result = scaffold_file(&root, &file).map_err(|error| (error, as_json))?;
+            emit_result(Value::Object(result), as_json);
+        }
+        Commands::Ingest {
+            path,
+            root,
+            index,
+            dry_run,
+        } => {
+            let result =
+                ingest_path(&root, &path, index, dry_run).map_err(|error| (error, as_json))?;
             emit_result(Value::Object(result), as_json);
         }
         Commands::Add { file, root } => {

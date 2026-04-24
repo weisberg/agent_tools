@@ -205,7 +205,7 @@ fn format_in_book(book: &mut Spreadsheet, range: &str, style: &StyleSpec) -> Res
     }
     if let Some(number_format) = style.number_format.as_ref() {
         let mut format = NumberingFormat::default();
-        format.set_format_code(number_format);
+        format.set_format_code(xli_core::resolve_number_format(number_format));
         umya_style.set_number_format(format);
         has_changes = true;
     }

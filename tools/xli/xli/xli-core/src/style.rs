@@ -52,3 +52,47 @@ pub struct StyleSpec {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub vertical_align: Option<String>,
 }
+
+/// Resolve an agent-friendly number format alias into an Excel format code.
+///
+/// Unknown formats are treated as literal Excel format strings so existing
+/// callers can continue to pass custom number formats directly.
+pub fn resolve_number_format(format: &str) -> String {
+    match normalize_format_alias(format).as_str() {
+        "currency" => "$#,##0;[Red]($#,##0)".to_string(),
+        "currency_2dp" => "$#,##0.00;[Red]($#,##0.00)".to_string(),
+        "accounting" => "_(* #,##0_);_(* (#,##0);_(* \"-\"??_);_(@_)".to_string(),
+        "accounting_2dp" => "_(* #,##0.00_);_(* (#,##0.00);_(* \"-\"??_);_(@_)".to_string(),
+        "percent" => "0.00%".to_string(),
+        "percent_int" => "0%".to_string(),
+        "percent_1dp" => "0.0%".to_string(),
+        "integer" => "#,##0".to_string(),
+        "standard" => "#,##0.00".to_string(),
+        "text" => "@".to_string(),
+        "date_iso" => "yyyy-mm-dd".to_string(),
+        "datetime_iso" => "yyyy-mm-dd hh:mm".to_string(),
+        _ => format.to_string(),
+    }
+}
+
+fn normalize_format_alias(format: &str) -> String {
+    format.trim().to_ascii_lowercase().replace('-', "_")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_number_format;
+
+    #[test]
+    fn resolves_known_number_format_aliases() {
+        assert_eq!(resolve_number_format("currency"), "$#,##0;[Red]($#,##0)");
+        assert_eq!(resolve_number_format("percent-int"), "0%");
+        assert_eq!(resolve_number_format("datetime_iso"), "yyyy-mm-dd hh:mm");
+    }
+
+    #[test]
+    fn leaves_custom_number_formats_unchanged() {
+        let custom = "$#,##0;($#,##0);\"-\"";
+        assert_eq!(resolve_number_format(custom), custom);
+    }
+}

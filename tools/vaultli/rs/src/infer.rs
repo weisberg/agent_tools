@@ -220,10 +220,7 @@ mod tests {
     fn category_rules_match_python() {
         assert_eq!(infer_category(&PathBuf::from("skills/foo.md")), "skill");
         assert_eq!(infer_category(&PathBuf::from("anywhere/skill.md")), "skill");
-        assert_eq!(
-            infer_category(&PathBuf::from("runbooks/rb.md")),
-            "runbook"
-        );
+        assert_eq!(infer_category(&PathBuf::from("runbooks/rb.md")), "runbook");
         assert_eq!(
             infer_category(&PathBuf::from("docs/db-runbook.md")),
             "runbook"
@@ -247,10 +244,7 @@ mod tests {
         );
         assert_eq!(infer_category(&PathBuf::from("docs/notes.md")), "note");
         assert_eq!(infer_category(&PathBuf::from("q/report.sql")), "query");
-        assert_eq!(
-            infer_category(&PathBuf::from("tpl/report.j2")),
-            "template"
-        );
+        assert_eq!(infer_category(&PathBuf::from("tpl/report.j2")), "template");
         assert_eq!(
             infer_category(&PathBuf::from("config/settings.yaml")),
             "reference"
@@ -301,10 +295,10 @@ mod tests {
 
     #[test]
     fn title_strips_sidecar_middle_extension() {
-        assert_eq!(infer_title(&PathBuf::from("queries/report.sql.md")), "Report");
         assert_eq!(
-            infer_title(&PathBuf::from("docs/my-notes.md")),
-            "My Notes"
+            infer_title(&PathBuf::from("queries/report.sql.md")),
+            "Report"
         );
+        assert_eq!(infer_title(&PathBuf::from("docs/my-notes.md")), "My Notes");
     }
 }

@@ -436,6 +436,59 @@ def scaffold_file(file: Path | str, *, root: Path | str | None = None) -> dict[s
     }
 
 
+def ingest_path(
+    path: Path | str,
+    *,
+    root: Path | str | None = None,
+    index: bool = False,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Scaffold missing metadata for one file or every eligible file under a directory."""
+
+    target_path = Path(path).expanduser().resolve()
+    if not target_path.exists():
+        raise VaultliError(f"File not found: {target_path}", code="FILE_NOT_FOUND")
+
+    root_path = _resolve_root_hint(root if root is not None else (target_path if target_path.is_dir() else target_path.parent))
+    candidates = _ingest_candidates(target_path, root_path)
+    scaffolded: list[dict[str, Any]] = []
+    skipped: list[dict[str, Any]] = []
+    errors: list[dict[str, Any]] = []
+
+    for candidate in candidates:
+        try:
+            planned = _plan_scaffold(candidate, root_path)
+            if dry_run:
+                scaffolded.append(planned)
+            else:
+                scaffolded.append(scaffold_file(candidate, root=root_path))
+        except VaultliError as exc:
+            entry = {
+                "file": _relative_path(candidate, root_path),
+                "code": exc.code,
+                "message": exc.message,
+            }
+            if exc.code in {"FRONTMATTER_EXISTS", "SIDECAR_EXISTS", "SIDECAR_MARKDOWN"}:
+                skipped.append(entry)
+            else:
+                errors.append(entry)
+
+    result: dict[str, Any] = {
+        "root": str(root_path),
+        "path": _relative_path(target_path, root_path),
+        "dry_run": dry_run,
+        "indexed": False,
+        "total": len(candidates),
+        "scaffolded": scaffolded,
+        "skipped": skipped,
+        "errors": errors,
+    }
+    if index and not dry_run:
+        result["index"] = build_index(root_path, full=False).to_dict()
+        result["indexed"] = True
+    return result
+
+
 def add_file(file: Path | str, *, root: Path | str | None = None) -> dict[str, Any]:
     """Add metadata to a file and rebuild the index."""
 
@@ -951,6 +1004,63 @@ def _resolve_root_hint(root: Path | str | None) -> Path:
 
 def _relative_path(path: Path, root: Path) -> str:
     return path.resolve().relative_to(root.resolve()).as_posix()
+
+
+def _ingest_candidates(target_path: Path, root_path: Path) -> list[Path]:
+    if target_path.is_file():
+        return [target_path]
+    if not target_path.is_dir():
+        raise VaultliError(f"Expected a file, got directory: {target_path}", code="NOT_A_FILE")
+
+    candidates: list[Path] = []
+    for path in sorted(candidate for candidate in target_path.rglob("*") if candidate.is_file()):
+        if _should_skip_ingest_file(path, root_path):
+            continue
+        candidates.append(path)
+    return candidates
+
+
+def _should_skip_ingest_file(path: Path, root_path: Path) -> bool:
+    relative = path.resolve().relative_to(root_path.resolve())
+    if path.name in {VAULT_MARKER, INDEX_FILENAME, f"{INDEX_FILENAME}.tmp"}:
+        return True
+    if any(part.startswith(".") for part in relative.parts):
+        return True
+    if is_sidecar_markdown(path):
+        return True
+    return False
+
+
+def _plan_scaffold(candidate: Path, root_path: Path) -> dict[str, Any]:
+    if is_sidecar_markdown(candidate):
+        raise VaultliError(
+            f"Sidecar markdown is not scaffolded directly: {candidate}",
+            code="SIDECAR_MARKDOWN",
+        )
+
+    metadata = infer_frontmatter(candidate, root_path)
+    if candidate.suffix.lower() == ".md":
+        document = parse_markdown_file(candidate, root_path)
+        if document.has_frontmatter:
+            raise VaultliError(
+                f"Markdown file already contains frontmatter: {candidate}",
+                code="FRONTMATTER_EXISTS",
+            )
+        mode = "frontmatter"
+        written_path = candidate
+    else:
+        written_path = candidate.with_name(f"{candidate.name}.md")
+        if written_path.exists():
+            raise VaultliError(f"Sidecar already exists: {written_path}", code="SIDECAR_EXISTS")
+        mode = "sidecar"
+
+    return {
+        "root": str(root_path),
+        "mode": mode,
+        "file": _relative_path(written_path, root_path),
+        "id": metadata["id"],
+        "metadata": ordered_metadata(metadata),
+    }
 
 
 def _normalize_value(value: Any) -> Any:

@@ -7,7 +7,10 @@ use crate::error::VaultliError;
 use crate::index::load_index_records;
 use crate::util::{to_sorted_json_string, which};
 
-pub fn show_record(root: &std::path::Path, doc_id: &str) -> Result<Map<String, Value>, VaultliError> {
+pub fn show_record(
+    root: &std::path::Path,
+    doc_id: &str,
+) -> Result<Map<String, Value>, VaultliError> {
     for record in load_index_records(root)? {
         if record.get("id").and_then(Value::as_str) == Some(doc_id) {
             return Ok(record);

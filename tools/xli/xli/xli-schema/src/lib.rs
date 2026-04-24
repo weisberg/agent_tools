@@ -94,7 +94,7 @@ fn command_schema(command: &str) -> Value {
             json!({"type":"object","required":["file","address"],"properties":{"file":{"type":"string"},"address":{"type":"string"},"value":{},"formula":{"type":"string"},"sheet":{"type":"string"},"expect_fingerprint":{"type":"string"},"dry_run":{"type":"boolean"}}})
         }
         "format" => {
-            json!({"type":"object","required":["file","range"],"properties":{"file":{"type":"string"},"range":{"type":"string"},"bold":{"type":"boolean"},"italic":{"type":"boolean"},"font_color":{"type":"string"},"fill":{"type":"string"},"number_format":{"type":"string"},"column_width":{"type":"number"},"dry_run":{"type":"boolean"}}})
+            json!({"type":"object","required":["file","range"],"properties":{"file":{"type":"string"},"range":{"type":"string"},"bold":{"type":"boolean"},"italic":{"type":"boolean"},"font_color":{"type":"string"},"fill":{"type":"string"},"number_format":{"type":"string","description":"Excel number format string or alias: currency, currency_2dp, accounting, accounting_2dp, percent, percent_int, percent_1dp, integer, standard, text, date_iso, datetime_iso"},"column_width":{"type":"number"},"dry_run":{"type":"boolean"}}})
         }
         "sheet" => {
             json!({"type":"object","required":["file","action"],"properties":{"file":{"type":"string"},"action":{"type":"string"}}})

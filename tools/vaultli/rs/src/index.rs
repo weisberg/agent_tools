@@ -106,10 +106,7 @@ pub fn build_index(root: &Path, full: bool) -> Result<IndexBuildResult, VaultliE
         if emitted_ids.contains(&doc_id) {
             result.warnings.push(WarningRecord {
                 code: "DUPLICATE_ID".into(),
-                message: format!(
-                    "Duplicate id {:?} encountered during indexing",
-                    doc_id
-                ),
+                message: format!("Duplicate id {:?} encountered during indexing", doc_id),
                 file: Some(document.relative_path.clone()),
             });
             continue;

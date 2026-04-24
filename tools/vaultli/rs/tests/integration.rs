@@ -9,7 +9,7 @@ use vaultli::id::make_id;
 use vaultli::index::{build_index, parse_markdown_file};
 use vaultli::infer::infer_frontmatter;
 use vaultli::paths::find_root;
-use vaultli::scaffold::{add_file, init_vault, scaffold_file};
+use vaultli::scaffold::{add_file, ingest_path, init_vault, scaffold_file};
 use vaultli::validate::validate_vault;
 
 const VAULT_MARKER: &str = ".kbroot";
@@ -108,6 +108,40 @@ fn scaffolds_sidecar_and_adds_markdown() {
     );
     let contents = fs::read_to_string(&md).unwrap();
     assert!(contents.starts_with("---\n"));
+}
+
+#[test]
+fn ingests_directory_with_dry_run_and_indexing() {
+    let root = temp_dir("ingest");
+    init_vault(&root).unwrap();
+
+    let notes = root.join("docs/notes.md");
+    fs::create_dir_all(notes.parent().unwrap()).unwrap();
+    fs::write(&notes, "# Notes\n").unwrap();
+
+    let sql = root.join("queries/report.sql");
+    fs::create_dir_all(sql.parent().unwrap()).unwrap();
+    fs::write(&sql, "select 1;").unwrap();
+
+    let dry_run = ingest_path(&root, &root, false, true).unwrap();
+    assert_eq!(dry_run.get("dry_run"), Some(&Value::Bool(true)));
+    assert_eq!(dry_run.get("indexed"), Some(&Value::Bool(false)));
+    assert!(!root.join("queries/report.sql.md").exists());
+
+    let scaffolded = dry_run.get("scaffolded").and_then(Value::as_array).unwrap();
+    let files = scaffolded
+        .iter()
+        .map(|entry| entry.get("file").and_then(Value::as_str).unwrap())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        files,
+        BTreeSet::from(["docs/notes.md", "queries/report.sql.md"])
+    );
+
+    let ingested = ingest_path(&root, &root, true, false).unwrap();
+    assert_eq!(ingested.get("indexed"), Some(&Value::Bool(true)));
+    assert!(root.join("queries/report.sql.md").exists());
+    assert!(fs::read_to_string(&notes).unwrap().starts_with("---\n"));
 }
 
 #[test]

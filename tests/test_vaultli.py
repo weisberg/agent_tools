@@ -17,6 +17,7 @@ from tools.vaultli import (
     build_index,
     find_root,
     infer_frontmatter,
+    ingest_path,
     init_vault,
     is_sidecar_markdown,
     load_index_records,
@@ -285,6 +286,46 @@ def test_add_markdown_injects_frontmatter_and_indexes(vault: Path) -> None:
     assert record["title"] == "Notes"
 
 
+def test_ingest_path_dry_run_reports_bulk_scaffold_plan(vault: Path) -> None:
+    _write(vault / "docs" / "notes.md", "# Notes\n")
+    _write(vault / "queries" / "report.sql", "select 1;\n")
+    _write(
+        vault / "docs" / "existing.md",
+        _md(
+            """
+            id: docs/existing
+            title: Existing
+            description: Already scaffolded
+            """,
+            "Body.\n",
+        ),
+    )
+
+    result = ingest_path(vault, root=vault, dry_run=True)
+
+    assert result["dry_run"] is True
+    assert result["indexed"] is False
+    assert {entry["file"] for entry in result["scaffolded"]} == {
+        "docs/notes.md",
+        "queries/report.sql.md",
+    }
+    assert result["skipped"][0]["code"] == "FRONTMATTER_EXISTS"
+    assert not (vault / "queries" / "report.sql.md").exists()
+
+
+def test_ingest_path_scaffolds_directory_and_indexes(vault: Path) -> None:
+    _write(vault / "docs" / "notes.md", "# Notes\n")
+    _write(vault / "queries" / "report.sql", "select 1;\n")
+
+    result = ingest_path(vault, root=vault, index=True)
+    records = load_index_records(vault)
+
+    assert result["indexed"] is True
+    assert (vault / "docs" / "notes.md").read_text(encoding="utf-8").startswith("---\n")
+    assert (vault / "queries" / "report.sql.md").exists()
+    assert {record["id"] for record in records} == {"docs/notes", "queries/report"}
+
+
 def test_search_and_show_read_index(vault: Path) -> None:
     _write(
         vault / "docs" / "guide.md",
@@ -447,6 +488,18 @@ def test_cli_validate_returns_nonzero_when_invalid(vault: Path, capsys: pytest.C
 
     assert exit_code == 1
     assert "Validation failed" in captured.out
+
+
+def test_cli_ingest_json_output(vault: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _write(vault / "docs" / "notes.md", "# Notes\n")
+
+    exit_code = main(["--json", "ingest", str(vault), "--root", str(vault), "--dry-run"])
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert payload["ok"] is True
+    assert payload["result"]["scaffolded"][0]["file"] == "docs/notes.md"
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="jq not installed")
