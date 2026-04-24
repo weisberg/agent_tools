@@ -1443,11 +1443,11 @@ fn jira_request(
             },
         )
         .header("Accept", "application/json");
-    if let Some(token) = profile.api_token.as_deref() {
+    if let Some(token) = load_secret(ctx, profile, "api-token") {
         let email = profile.email.as_deref().unwrap_or("");
         let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{email}:{token}"));
         request = request.header("Authorization", format!("Basic {encoded}"));
-    } else if let Some(pat) = profile.pat.as_deref() {
+    } else if let Some(pat) = load_secret(ctx, profile, "pat") {
         request = request.bearer_auth(pat);
     }
     if let Some(body) = body {
@@ -1582,18 +1582,42 @@ fn auth(ctx: &Context, cmd: AuthCommand) -> Result<Value> {
             profile.site_url = args.site_url.or(profile.site_url.clone());
             profile.email = args.email.or(profile.email.clone());
             profile.auth_method = Some(args.method.clone());
+            let mut secret_stored = profile.api_token.is_some() || profile.pat.is_some();
             match args.method {
                 AuthMethod::ApiToken => {
-                    profile.api_token = args
+                    let token = args
                         .token
                         .or_else(|| env::var("JIRALI_API_TOKEN").ok())
-                        .or(profile.api_token.clone())
+                        .or(profile.api_token.clone());
+                    if let Some(token) = token {
+                        if env::var("JIRALI_ALLOW_PLAINTEXT_SECRETS").is_ok() {
+                            profile.api_token = Some(token);
+                        } else {
+                            store_secret(ctx, "api-token", &token)?;
+                            profile.api_token = None;
+                        }
+                        secret_stored = true;
+                    }
                 }
                 AuthMethod::Pat => {
-                    profile.pat = args
+                    let token = args
                         .token
                         .or_else(|| env::var("JIRALI_PAT").ok())
-                        .or(profile.pat.clone())
+                        .or(profile.pat.clone());
+                    if let Some(token) = token {
+                        if env::var("JIRALI_ALLOW_PLAINTEXT_SECRETS").is_ok() {
+                            profile.pat = Some(token);
+                        } else {
+                            store_secret(ctx, "pat", &token)?;
+                            profile.pat = None;
+                        }
+                        secret_stored = true;
+                    }
+                }
+                AuthMethod::Oauth if ctx.no_input => {
+                    return Err(JiraliError::Usage(
+                        "OAuth PKCE login requires an interactive terminal unless tokens already exist.".into(),
+                    ));
                 }
                 AuthMethod::Oauth | AuthMethod::Mtls => {}
             }
@@ -1604,7 +1628,6 @@ fn auth(ctx: &Context, cmd: AuthCommand) -> Result<Value> {
             }
             let site_url = profile.site_url.clone();
             let email = profile.email.clone();
-            let secret_stored = profile.api_token.is_some() || profile.pat.is_some();
             save_config(ctx, &config)?;
             Ok(
                 json!({"profile": ctx.profile, "auth_method": args.method, "site_url": site_url, "email": email, "secret_stored": secret_stored}),
@@ -3063,11 +3086,11 @@ fn api(ctx: &Context, args: ApiArgs) -> Result<Value> {
                 format!("jirali-human/{}", env!("CARGO_PKG_VERSION"))
             },
         );
-    if let Some(token) = profile.api_token.as_deref() {
+    if let Some(token) = load_secret(ctx, profile, "api-token") {
         let email = profile.email.as_deref().unwrap_or("");
         let encoded = base64::engine::general_purpose::STANDARD.encode(format!("{email}:{token}"));
         request = request.header("Authorization", format!("Basic {encoded}"));
-    } else if let Some(pat) = profile.pat.as_deref() {
+    } else if let Some(pat) = load_secret(ctx, profile, "pat") {
         request = request.bearer_auth(pat);
     }
     for header in args.header {
