@@ -24,7 +24,10 @@ fn assert_envelope_structure(json: &Value) {
     assert!(json["status"].is_string(), "missing status field");
     assert!(json["command"].is_string(), "missing command field");
     assert!(json["commit_mode"].is_string(), "missing commit_mode field");
-    assert!(json["needs_recalc"].is_boolean(), "missing needs_recalc field");
+    assert!(
+        json["needs_recalc"].is_boolean(),
+        "missing needs_recalc field"
+    );
     // warnings and errors should be arrays
     assert!(json["warnings"].is_array(), "warnings should be array");
     assert!(json["errors"].is_array(), "errors should be array");
@@ -55,7 +58,13 @@ fn write_envelope_structure() {
     let path = dir.path().join("test.xlsx");
     create_workbook(&path);
 
-    let json = xli_json(&["write", path.to_str().unwrap(), "Sheet1!A1", "--value", "42"]);
+    let json = xli_json(&[
+        "write",
+        path.to_str().unwrap(),
+        "Sheet1!A1",
+        "--value",
+        "42",
+    ]);
     assert_envelope_structure(&json);
 }
 
@@ -65,14 +74,15 @@ fn format_envelope_structure() {
     let path = dir.path().join("test.xlsx");
     create_workbook(&path);
 
-    xli(&["write", path.to_str().unwrap(), "Sheet1!A1", "--value", "42"]);
-
-    let json = xli_json(&[
-        "format",
+    xli(&[
+        "write",
         path.to_str().unwrap(),
-        "Sheet1!A1:A1",
-        "--bold",
+        "Sheet1!A1",
+        "--value",
+        "42",
     ]);
+
+    let json = xli_json(&["format", path.to_str().unwrap(), "Sheet1!A1:A1", "--bold"]);
     assert_envelope_structure(&json);
 }
 
@@ -119,13 +129,23 @@ fn write_includes_umya_warning() {
     let path = dir.path().join("test.xlsx");
     create_workbook(&path);
 
-    let json = xli_json(&["write", path.to_str().unwrap(), "Sheet1!A1", "--value", "hello"]);
+    let json = xli_json(&[
+        "write",
+        path.to_str().unwrap(),
+        "Sheet1!A1",
+        "--value",
+        "hello",
+    ]);
     let warnings = json["warnings"].as_array().expect("warnings array");
     let has_umya_warning = warnings.iter().any(|w| {
         let msg = w.as_str().unwrap_or_default();
         msg.contains("umya")
     });
-    assert!(has_umya_warning, "expected umya fallback warning in warnings array, got: {:?}", warnings);
+    assert!(
+        has_umya_warning,
+        "expected umya fallback warning in warnings array, got: {:?}",
+        warnings
+    );
 }
 
 #[test]
@@ -134,7 +154,13 @@ fn write_response_has_fingerprints() {
     let path = dir.path().join("test.xlsx");
     create_workbook(&path);
 
-    let json = xli_json(&["write", path.to_str().unwrap(), "Sheet1!A1", "--value", "42"]);
+    let json = xli_json(&[
+        "write",
+        path.to_str().unwrap(),
+        "Sheet1!A1",
+        "--value",
+        "42",
+    ]);
 
     let fp_before = json["fingerprint_before"]
         .as_str()
@@ -174,7 +200,13 @@ fn write_has_commit_mode_atomic() {
     let path = dir.path().join("test.xlsx");
     create_workbook(&path);
 
-    let json = xli_json(&["write", path.to_str().unwrap(), "Sheet1!A1", "--value", "42"]);
+    let json = xli_json(&[
+        "write",
+        path.to_str().unwrap(),
+        "Sheet1!A1",
+        "--value",
+        "42",
+    ]);
     assert_eq!(
         json["commit_mode"], "atomic",
         "write should have commit_mode=atomic, got: {}",

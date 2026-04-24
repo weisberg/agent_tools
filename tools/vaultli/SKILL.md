@@ -114,7 +114,7 @@ vaultli --json init ./kb
 | Preview the generated metadata before writing anything | `infer <file>` |
 | Rebuild cache state after edits | `index` |
 | Audit the vault for broken links, duplicate IDs, and stale index state | `validate` |
-| Look up candidate records by metadata | `search`, then `show` |
+| Look up candidate records by metadata | `search`, then `show`; narrow with `--category`, `--status`, `--domain`, `--scope`, `--tag`, or `--limit` |
 
 4. Immediately refine generated metadata.
 
@@ -137,6 +137,7 @@ vaultli --json validate --root ./kb
 
 ```bash
 vaultli --json search retention --root ./kb
+vaultli --json search --root ./kb --category query --tag retention --limit 5
 vaultli --json show queries/retention --root ./kb
 ```
 
@@ -166,6 +167,7 @@ source: ./report.sql
 - Sidecars must have a valid relative `source`, typically `./filename.ext`.
 - Non-markdown assets are not searchable until a sidecar exists.
 - `validate` reports problems; it does not repair them.
+- Prefer `search` filters over `search --jq` for common metadata fields.
 - `search --jq` requires the `jq` binary to be installed.
 - Sidecar hash changes come from the source asset bytes, not from sidecar prose edits.
 

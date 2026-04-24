@@ -113,7 +113,11 @@ fn xli(args: &[&str]) -> Output {
 
 fn xli_json(args: &[&str]) -> Value {
     let out = xli(args);
-    assert!(out.status.success(), "xli failed: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "xli failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     serde_json::from_slice(&out.stdout).expect("valid json")
 }
 

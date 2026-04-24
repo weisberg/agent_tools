@@ -1,3 +1,4 @@
+pub mod apply;
 pub mod batch;
 pub mod create;
 pub mod doctor;
@@ -8,5 +9,6 @@ pub mod read;
 pub mod recalc;
 pub mod schema;
 pub mod sheet;
+pub mod template;
 pub mod validate;
 pub mod write;

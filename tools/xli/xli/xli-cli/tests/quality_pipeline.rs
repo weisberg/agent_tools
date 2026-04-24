@@ -46,6 +46,45 @@ fn schema_lists_commands() {
         json["commands"].is_object(),
         "expected commands object in schema output"
     );
+    assert!(json["commands"]["apply"].is_object());
+    assert!(json["commands"]["template"].is_object());
+}
+
+#[test]
+fn schema_command_create_includes_all_import_options() {
+    let json = xli_json(&["schema", "--command", "create"]);
+    let props = &json["properties"];
+    assert!(props["from_csv"].is_object());
+    assert!(props["from_markdown"].is_object());
+    assert!(props["from_json"].is_object());
+}
+
+#[test]
+fn schema_command_read_includes_current_flags() {
+    let json = xli_json(&["schema", "--command", "read"]);
+    let props = &json["properties"];
+    for key in [
+        "sheet", "format", "table", "limit", "offset", "headers", "formulas",
+    ] {
+        assert!(props[key].is_object(), "missing read schema property {key}");
+    }
+}
+
+#[test]
+fn schema_result_exposes_command_specific_outputs() {
+    let json = xli_json(&["schema", "--result", "FormatOutput"]);
+    assert_eq!(json["type"], "object");
+    assert!(json["properties"]["cells_formatted"].is_object());
+}
+
+#[test]
+fn schema_openapi_wraps_request_body_content() {
+    let json = xli_json(&["schema", "--openapi"]);
+    assert_eq!(json["openapi"], "3.0.3");
+    assert!(
+        json["paths"]["/format"]["post"]["requestBody"]["content"]["application/json"]["schema"]
+            .is_object()
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -84,7 +123,13 @@ fn validate_clean_workbook() {
     let path = dir.path().join("valid.xlsx");
     create_workbook(&path);
 
-    let write_out = xli(&["write", path.to_str().unwrap(), "Sheet1!A1", "--value", "hello"]);
+    let write_out = xli(&[
+        "write",
+        path.to_str().unwrap(),
+        "Sheet1!A1",
+        "--value",
+        "hello",
+    ]);
     assert!(write_out.status.success());
 
     let json = xli_json(&["validate", path.to_str().unwrap()]);

@@ -23,6 +23,12 @@ pub fn search_records(
     root: &std::path::Path,
     query: Option<&str>,
     jq_filter: Option<&str>,
+    category: Option<&str>,
+    status: Option<&str>,
+    domain: Option<&str>,
+    scope: Option<&str>,
+    tags: &[String],
+    limit: Option<usize>,
 ) -> Result<Vec<Map<String, Value>>, VaultliError> {
     let mut records = load_index_records(root)?;
     if let Some(query) = query {
@@ -31,6 +37,30 @@ pub fn search_records(
             to_sorted_json_string(&Value::Object(record.clone()))
                 .to_lowercase()
                 .contains(&needle)
+        });
+    }
+
+    for (field, expected) in [
+        ("category", category),
+        ("status", status),
+        ("domain", domain),
+        ("scope", scope),
+    ] {
+        if let Some(expected) = expected {
+            records.retain(|record| record.get(field).and_then(Value::as_str) == Some(expected));
+        }
+    }
+
+    if !tags.is_empty() {
+        records.retain(|record| {
+            let Some(record_tags) = record.get("tags").and_then(Value::as_array) else {
+                return false;
+            };
+            tags.iter().all(|tag| {
+                record_tags
+                    .iter()
+                    .any(|value| value.as_str() == Some(tag.as_str()))
+            })
         });
     }
 
@@ -68,6 +98,9 @@ pub fn search_records(
             }
         }
         records = filtered;
+    }
+    if let Some(limit) = limit {
+        records.truncate(limit);
     }
     Ok(records)
 }

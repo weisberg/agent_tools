@@ -1,7 +1,8 @@
-use rust_xlsxwriter::Workbook;
+use rust_xlsxwriter::{Format, FormatAlign, Workbook};
 use serde_json::Value;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use xli_core::XliError;
+use xli_core::{resolve_number_format, XliError};
 
 pub fn create_blank(path: &Path, sheets: &[String]) -> Result<(), XliError> {
     let mut workbook = Workbook::new();
@@ -26,11 +27,36 @@ pub fn create_blank(path: &Path, sheets: &[String]) -> Result<(), XliError> {
 }
 
 pub fn create_from_csv(csv_path: &Path, out_path: &Path, sheet_name: &str) -> Result<(), XliError> {
+    create_from_csv_with_options(csv_path, out_path, sheet_name, &CsvCreateOptions::default())
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct CsvCreateOptions {
+    pub columns: Option<Vec<String>>,
+    pub hidden_columns: Vec<String>,
+    pub renames: HashMap<String, String>,
+    pub formats: HashMap<String, ColumnFormat>,
+    pub title: Option<String>,
+    pub total_row: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ColumnFormat {
+    pub number_format: Option<String>,
+    pub alignment: Option<String>,
+}
+
+pub fn create_from_csv_with_options(
+    csv_path: &Path,
+    out_path: &Path,
+    sheet_name: &str,
+    options: &CsvCreateOptions,
+) -> Result<(), XliError> {
     // Use the csv crate for RFC 4180-compliant parsing. The previous
     // line.split(',') approach silently broke quoted fields containing commas
     // (e.g. "Smith, John" would be split into two cells). (Issue #24)
     let mut reader = csv::ReaderBuilder::new()
-        .has_headers(false)
+        .has_headers(true)
         .from_path(csv_path)
         .map_err(|error| match error.kind() {
             csv::ErrorKind::Io(io_err) if io_err.kind() == std::io::ErrorKind::NotFound => {
@@ -43,6 +69,26 @@ pub fn create_from_csv(csv_path: &Path, out_path: &Path, sheet_name: &str) -> Re
             },
         })?;
 
+    let headers: Vec<String> = reader
+        .headers()
+        .map_err(|error| XliError::OoxmlCorrupt {
+            details: error.to_string(),
+        })?
+        .iter()
+        .map(str::to_string)
+        .collect();
+    let rows: Vec<Vec<String>> = reader
+        .records()
+        .map(|record| {
+            record
+                .map(|record| record.iter().map(str::to_string).collect::<Vec<_>>())
+                .map_err(|error| XliError::OoxmlCorrupt {
+                    details: error.to_string(),
+                })
+        })
+        .collect::<Result<_, _>>()?;
+    let column_indices = resolve_csv_columns(&headers, options);
+
     let mut workbook = Workbook::new();
     let worksheet = workbook.add_worksheet();
     worksheet
@@ -52,16 +98,100 @@ pub fn create_from_csv(csv_path: &Path, out_path: &Path, sheet_name: &str) -> Re
             details: Some(error.to_string()),
         })?;
 
-    for (row_idx, record) in reader.records().enumerate() {
-        let record = record.map_err(|error| XliError::OoxmlCorrupt {
-            details: error.to_string(),
-        })?;
-        for (col_idx, field) in record.iter().enumerate() {
+    let header_format = Format::new()
+        .set_bold()
+        .set_font_color("FFFFFF")
+        .set_background_color("4472C4")
+        .set_align(FormatAlign::Center);
+    let title_format = Format::new().set_bold().set_font_size(16.0);
+
+    let mut row_offset = 0_u32;
+    if let Some(title) = options.title.as_ref() {
+        if column_indices.len() > 1 {
             worksheet
-                .write_string(row_idx as u32, col_idx as u16, field)
+                .merge_range(
+                    0,
+                    0,
+                    0,
+                    (column_indices.len() - 1) as u16,
+                    title,
+                    &title_format,
+                )
                 .map_err(|error| XliError::OoxmlCorrupt {
                     details: error.to_string(),
                 })?;
+        } else {
+            worksheet
+                .write_string_with_format(0, 0, title, &title_format)
+                .map_err(|error| XliError::OoxmlCorrupt {
+                    details: error.to_string(),
+                })?;
+        }
+        row_offset = 1;
+    }
+
+    for (out_col, &source_col) in column_indices.iter().enumerate() {
+        let header = &headers[source_col];
+        let display = options.renames.get(header).unwrap_or(header);
+        worksheet
+            .write_string_with_format(row_offset, out_col as u16, display, &header_format)
+            .map_err(|error| XliError::OoxmlCorrupt {
+                details: error.to_string(),
+            })?;
+    }
+
+    for (row_idx, row) in rows.iter().enumerate() {
+        for (out_col, &source_col) in column_indices.iter().enumerate() {
+            let value = row.get(source_col).map(String::as_str).unwrap_or_default();
+            let row_num = row_offset + 1 + row_idx as u32;
+            let col_num = out_col as u16;
+            let format = options
+                .formats
+                .get(&headers[source_col])
+                .map(column_format_to_xlsx);
+            write_csv_cell(worksheet, row_num, col_num, value, format.as_ref())?;
+        }
+    }
+
+    if options.total_row {
+        let total_row = row_offset + 1 + rows.len() as u32;
+        worksheet
+            .write_string(total_row, 0, "Total")
+            .map_err(|error| XliError::OoxmlCorrupt {
+                details: error.to_string(),
+            })?;
+        for (out_col, &source_col) in column_indices.iter().enumerate().skip(1) {
+            let header = &headers[source_col];
+            if options
+                .formats
+                .get(header)
+                .and_then(|format| format.number_format.as_deref())
+                .is_some()
+            {
+                let col_letter = xli_core::col_to_letter(out_col as u32);
+                let start = row_offset + 2;
+                let end = row_offset + 1 + rows.len() as u32;
+                let formula = format!("=SUM({col_letter}{start}:{col_letter}{end})");
+                let format = options.formats.get(header).map(column_format_to_xlsx);
+                if let Some(format) = format.as_ref() {
+                    worksheet
+                        .write_formula_with_format(
+                            total_row,
+                            out_col as u16,
+                            formula.as_str(),
+                            format,
+                        )
+                        .map_err(|error| XliError::OoxmlCorrupt {
+                            details: error.to_string(),
+                        })?;
+                } else {
+                    worksheet
+                        .write_formula(total_row, out_col as u16, formula.as_str())
+                        .map_err(|error| XliError::OoxmlCorrupt {
+                            details: error.to_string(),
+                        })?;
+                }
+            }
         }
     }
 
@@ -70,6 +200,65 @@ pub fn create_from_csv(csv_path: &Path, out_path: &Path, sheet_name: &str) -> Re
         .map_err(|error| XliError::OoxmlCorrupt {
             details: error.to_string(),
         })
+}
+
+fn resolve_csv_columns(headers: &[String], options: &CsvCreateOptions) -> Vec<usize> {
+    let hidden: HashSet<&str> = options.hidden_columns.iter().map(String::as_str).collect();
+    let selected = options
+        .columns
+        .as_ref()
+        .map(|columns| {
+            columns
+                .iter()
+                .filter_map(|name| headers.iter().position(|header| header == name))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_else(|| (0..headers.len()).collect());
+
+    selected
+        .into_iter()
+        .filter(|idx| !hidden.contains(headers[*idx].as_str()))
+        .collect()
+}
+
+fn column_format_to_xlsx(format: &ColumnFormat) -> Format {
+    let mut xlsx = Format::new();
+    if let Some(number_format) = format.number_format.as_ref() {
+        xlsx = xlsx.set_num_format(resolve_number_format(number_format));
+    }
+    if let Some(alignment) = format.alignment.as_deref() {
+        xlsx = match alignment {
+            "left" => xlsx.set_align(FormatAlign::Left),
+            "center" => xlsx.set_align(FormatAlign::Center),
+            "right" => xlsx.set_align(FormatAlign::Right),
+            _ => xlsx,
+        };
+    }
+    xlsx
+}
+
+fn write_csv_cell(
+    worksheet: &mut rust_xlsxwriter::Worksheet,
+    row: u32,
+    col: u16,
+    value: &str,
+    format: Option<&Format>,
+) -> Result<(), XliError> {
+    if let Ok(number) = value.parse::<f64>() {
+        if let Some(format) = format {
+            worksheet.write_number_with_format(row, col, number, format)
+        } else {
+            worksheet.write_number(row, col, number)
+        }
+    } else if let Some(format) = format {
+        worksheet.write_string_with_format(row, col, value, format)
+    } else {
+        worksheet.write_string(row, col, value)
+    }
+    .map(|_| ())
+    .map_err(|error| XliError::OoxmlCorrupt {
+        details: error.to_string(),
+    })
 }
 
 pub fn create_from_markdown(
@@ -425,20 +614,28 @@ mod tests {
         let range = workbook.worksheet_range("Data").expect("range");
         // Row 0: headers
         assert_eq!(
-            range.get_value((0, 0)).map(|c: &calamine::Data| c.to_string()),
+            range
+                .get_value((0, 0))
+                .map(|c: &calamine::Data| c.to_string()),
             Some("Name".to_string())
         );
         assert_eq!(
-            range.get_value((0, 1)).map(|c: &calamine::Data| c.to_string()),
+            range
+                .get_value((0, 1))
+                .map(|c: &calamine::Data| c.to_string()),
             Some("Score".to_string())
         );
         // Row 1: Alice, 95 (as number)
         assert_eq!(
-            range.get_value((1, 0)).map(|c: &calamine::Data| c.to_string()),
+            range
+                .get_value((1, 0))
+                .map(|c: &calamine::Data| c.to_string()),
             Some("Alice".to_string())
         );
         assert_eq!(
-            range.get_value((1, 1)).map(|c: &calamine::Data| c.to_string()),
+            range
+                .get_value((1, 1))
+                .map(|c: &calamine::Data| c.to_string()),
             Some("95".to_string())
         );
     }
@@ -468,12 +665,16 @@ mod tests {
         let mut workbook: Xlsx<_> = open_workbook(&out).expect("open");
         let range = workbook.worksheet_range("Sheet1").expect("range");
         assert_eq!(
-            range.get_value((0, 0)).map(|c: &calamine::Data| c.to_string()),
+            range
+                .get_value((0, 0))
+                .map(|c: &calamine::Data| c.to_string()),
             Some("A".to_string())
         );
         // "1" should be written as number
         assert_eq!(
-            range.get_value((1, 0)).map(|c: &calamine::Data| c.to_string()),
+            range
+                .get_value((1, 0))
+                .map(|c: &calamine::Data| c.to_string()),
             Some("1".to_string())
         );
     }
@@ -506,25 +707,35 @@ mod tests {
         let range = workbook.worksheet_range("Summary").expect("range");
         // Headers
         assert_eq!(
-            range.get_value((0, 0)).map(|c: &calamine::Data| c.to_string()),
+            range
+                .get_value((0, 0))
+                .map(|c: &calamine::Data| c.to_string()),
             Some("Name".to_string())
         );
         assert_eq!(
-            range.get_value((0, 2)).map(|c: &calamine::Data| c.to_string()),
+            range
+                .get_value((0, 2))
+                .map(|c: &calamine::Data| c.to_string()),
             Some("Grade".to_string())
         );
         // Data row 1
         assert_eq!(
-            range.get_value((1, 0)).map(|c: &calamine::Data| c.to_string()),
+            range
+                .get_value((1, 0))
+                .map(|c: &calamine::Data| c.to_string()),
             Some("Alice".to_string())
         );
         assert_eq!(
-            range.get_value((1, 1)).map(|c: &calamine::Data| c.to_string()),
+            range
+                .get_value((1, 1))
+                .map(|c: &calamine::Data| c.to_string()),
             Some("95".to_string())
         );
         // Data row 2
         assert_eq!(
-            range.get_value((2, 2)).map(|c: &calamine::Data| c.to_string()),
+            range
+                .get_value((2, 2))
+                .map(|c: &calamine::Data| c.to_string()),
             Some("B+".to_string())
         );
     }
@@ -554,21 +765,33 @@ mod tests {
         let mut workbook: Xlsx<_> = open_workbook(&out).expect("open");
         let range = workbook.worksheet_range("Sheet1").expect("range");
         // Headers derived from keys of first object
-        let h0 = range.get_value((0, 0)).map(|c: &calamine::Data| c.to_string()).unwrap();
-        let h1 = range.get_value((0, 1)).map(|c: &calamine::Data| c.to_string()).unwrap();
+        let h0 = range
+            .get_value((0, 0))
+            .map(|c: &calamine::Data| c.to_string())
+            .unwrap();
+        let h1 = range
+            .get_value((0, 1))
+            .map(|c: &calamine::Data| c.to_string())
+            .unwrap();
         // Keys may be in any order, so just check both are present
         let mut headers = vec![h0, h1];
         headers.sort();
         assert_eq!(headers, vec!["Name", "Score"]);
         // Data should be in row 1
         // Find which column is "Name"
-        let name_col = if range.get_value((0, 0)).map(|c: &calamine::Data| c.to_string()) == Some("Name".to_string()) {
+        let name_col = if range
+            .get_value((0, 0))
+            .map(|c: &calamine::Data| c.to_string())
+            == Some("Name".to_string())
+        {
             0u16
         } else {
             1u16
         };
         assert_eq!(
-            range.get_value((1, name_col as u32)).map(|c: &calamine::Data| c.to_string()),
+            range
+                .get_value((1, name_col as u32))
+                .map(|c: &calamine::Data| c.to_string()),
             Some("Alice".to_string())
         );
     }

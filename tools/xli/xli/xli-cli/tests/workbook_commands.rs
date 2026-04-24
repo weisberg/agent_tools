@@ -204,6 +204,61 @@ fn format_command_resolves_number_format_aliases() {
 }
 
 #[test]
+fn template_preview_and_apply_basic_table_format() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("test.xlsx");
+    run_status([
+        "create",
+        path.to_str().expect("path"),
+        "--sheets",
+        "Summary",
+    ]);
+    run_status([
+        "write",
+        path.to_str().expect("path"),
+        "Summary!A1",
+        "--value",
+        "\"Revenue\"",
+    ]);
+    run_status([
+        "write",
+        path.to_str().expect("path"),
+        "Summary!A2",
+        "--value",
+        "1234",
+    ]);
+
+    let preview = run_json([
+        "template",
+        "preview",
+        "basic-table-format",
+        "--param",
+        "range=Summary!A1:A2",
+        "--param",
+        "number_format=currency",
+    ]);
+    assert_eq!(preview["status"], "ok");
+    assert_eq!(preview["output"]["ops"].as_array().expect("ops").len(), 3);
+
+    let apply = run_json([
+        "apply",
+        path.to_str().expect("path"),
+        "basic-table-format",
+        "--param",
+        "range=Summary!A1:A2",
+        "--param",
+        "number_format=currency",
+    ]);
+    assert_eq!(apply["status"], "ok");
+
+    let styles = read_styles_xml(&path);
+    assert!(
+        styles.contains("$#,##0;[Red]($#,##0)"),
+        "styles.xml should contain resolved currency format, got: {styles}"
+    );
+}
+
+#[test]
 fn sheet_add_dry_run_does_not_modify_workbook() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("test.xlsx");

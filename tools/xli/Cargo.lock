@@ -2022,6 +2022,7 @@ name = "xli-kb"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "schemars",
  "serde",
  "serde_yaml",
  "tera",
@@ -2081,6 +2082,8 @@ dependencies = [
  "serde_json",
  "xli-calc",
  "xli-core",
+ "xli-kb",
+ "xli-ooxml",
  "xli-read",
 ]
 

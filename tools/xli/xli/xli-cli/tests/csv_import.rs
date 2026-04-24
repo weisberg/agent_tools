@@ -39,7 +39,9 @@ fn csv_simple_import() {
     // Inspect: 1 sheet
     let inspect = xli_json(&["inspect", xlsx_path.to_str().expect("path")]);
     assert_eq!(inspect["status"], "ok");
-    let sheets = inspect["output"]["sheets"].as_array().expect("sheets array");
+    let sheets = inspect["output"]["sheets"]
+        .as_array()
+        .expect("sheets array");
     assert_eq!(sheets.len(), 1);
 
     // Read range: 3 rows (header + 2 data)
@@ -55,6 +57,41 @@ fn csv_simple_import() {
     // Verify data rows
     assert_eq!(rows[1]["A"], "Alice");
     assert_eq!(rows[2]["A"], "Bob");
+}
+
+#[test]
+fn csv_import_supports_report_table_options() {
+    let dir = tempdir().expect("tempdir");
+    let csv_path = dir.path().join("data.csv");
+    let xlsx_path = dir.path().join("out.xlsx");
+    fs::write(&csv_path, "name,revenue,notes\nA,100,keep\nB,200,hide\n").expect("write csv");
+
+    let json = xli_json(&[
+        "create",
+        xlsx_path.to_str().expect("xlsx path"),
+        "--from-csv",
+        csv_path.to_str().expect("csv path"),
+        "--title",
+        "Revenue Report",
+        "--col",
+        "name",
+        "--col",
+        "revenue:currency:right",
+        "--hide",
+        "notes",
+        "--rename",
+        "name:Account",
+        "--total-row",
+    ]);
+    assert_eq!(json["status"], "ok");
+
+    let read = xli_json(&["read", xlsx_path.to_str().expect("path"), "Sheet1!A1:B5"]);
+    assert_eq!(read["status"], "ok");
+    let rows = read["output"]["rows"].as_array().expect("rows");
+    assert_eq!(rows[0]["A"], "Revenue Report");
+    assert_eq!(rows[1]["A"], "Account");
+    assert_eq!(rows[1]["B"], "revenue");
+    assert_eq!(rows[4]["A"], "Total");
 }
 
 #[test]
@@ -98,7 +135,9 @@ fn csv_empty_file() {
     // Inspect: sheet exists with 0 rows
     let inspect = xli_json(&["inspect", xlsx_path.to_str().expect("path")]);
     assert_eq!(inspect["status"], "ok");
-    let sheets = inspect["output"]["sheets"].as_array().expect("sheets array");
+    let sheets = inspect["output"]["sheets"]
+        .as_array()
+        .expect("sheets array");
     assert!(!sheets.is_empty(), "sheet should exist");
     assert_eq!(sheets[0]["rows"], 0);
 }

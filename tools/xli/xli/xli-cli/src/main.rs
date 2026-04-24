@@ -5,9 +5,9 @@ mod output;
 
 use clap::{Parser, Subcommand};
 use commands::{
-    batch::BatchArgs, create::CreateArgs, doctor::DoctorArgs, format::FormatArgs,
+    apply::ApplyArgs, batch::BatchArgs, create::CreateArgs, doctor::DoctorArgs, format::FormatArgs,
     inspect::InspectArgs, lint::LintArgs, read::ReadArgs, recalc::RecalcArgs, schema::SchemaArgs,
-    sheet::SheetArgs, validate::ValidateArgs, write::WriteArgs,
+    sheet::SheetArgs, template::TemplateArgs, validate::ValidateArgs, write::WriteArgs,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -34,11 +34,13 @@ enum Commands {
     Format(FormatArgs),
     Sheet(SheetArgs),
     Batch(BatchArgs),
+    Apply(ApplyArgs),
     Create(CreateArgs),
     Lint(LintArgs),
     Recalc(RecalcArgs),
     Validate(ValidateArgs),
     Doctor(DoctorArgs),
+    Template(TemplateArgs),
     Schema(SchemaArgs),
 }
 
@@ -76,11 +78,13 @@ fn run(cli: Cli) -> anyhow::Result<bool> {
         Commands::Format(args) => commands::format::run(args, cli.human),
         Commands::Sheet(args) => commands::sheet::run(args, cli.human),
         Commands::Batch(args) => commands::batch::run(args, cli.human),
+        Commands::Apply(args) => commands::apply::run(args, cli.human),
         Commands::Create(args) => commands::create::run(args, cli.human),
         Commands::Lint(args) => commands::lint::run(args, cli.human),
         Commands::Recalc(args) => commands::recalc::run(args, cli.human),
         Commands::Validate(args) => commands::validate::run(args, cli.human),
         Commands::Doctor(args) => commands::doctor::run(args, cli.human),
+        Commands::Template(args) => commands::template::run(args, cli.human),
         Commands::Schema(args) => commands::schema::run(args, cli.human),
     }
 }

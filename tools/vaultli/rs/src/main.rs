@@ -54,6 +54,18 @@ enum Commands {
         root: PathBuf,
         #[arg(long)]
         jq: Option<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        domain: Option<String>,
+        #[arg(long)]
+        scope: Option<String>,
+        #[arg(long = "tag")]
+        tags: Vec<String>,
+        #[arg(long)]
+        limit: Option<usize>,
     },
     Show {
         id: String,
@@ -125,9 +137,29 @@ fn run(cli: Cli) -> Result<i32, (VaultliError, bool)> {
             let result = build_index(&root, full).map_err(|error| (error, as_json))?;
             emit_result(serde_json::to_value(result).unwrap(), as_json);
         }
-        Commands::Search { query, root, jq } => {
-            let result = search_records(&root, query.as_deref(), jq.as_deref())
-                .map_err(|error| (error, as_json))?;
+        Commands::Search {
+            query,
+            root,
+            jq,
+            category,
+            status,
+            domain,
+            scope,
+            tags,
+            limit,
+        } => {
+            let result = search_records(
+                &root,
+                query.as_deref(),
+                jq.as_deref(),
+                category.as_deref(),
+                status.as_deref(),
+                domain.as_deref(),
+                scope.as_deref(),
+                &tags,
+                limit,
+            )
+            .map_err(|error| (error, as_json))?;
             emit_result(json!({ "results": result, "total": result.len() }), as_json);
         }
         Commands::Show { id, root } => {

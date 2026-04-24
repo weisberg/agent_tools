@@ -69,7 +69,7 @@ If you want the actual content behind a match, use the indexed `file` path and, 
 |---|---|
 | `init [path]` | Create a new vault root with `.kbroot` and an empty `INDEX.jsonl` |
 | `index [--full]` | Rebuild the vault index |
-| `search <query>` | Search indexed metadata |
+| `search <query>` | Search indexed metadata, optionally narrowed by category, status, domain, scope, tags, or limit |
 | `show <id>` | Show one indexed record by `id` |
 | `add <file>` | Scaffold metadata for a file and re-index |
 | `scaffold <file>` | Create frontmatter or sidecar metadata without re-indexing |
@@ -102,6 +102,7 @@ vaultli --json ingest ./kb --root ./kb --dry-run
 vaultli --json index --root ./kb
 vaultli --json validate --root ./kb
 vaultli --json search retention --root ./kb
+vaultli --json search --root ./kb --category query --tag retention --limit 5
 vaultli --json show queries/retention --root ./kb
 ```
 
@@ -138,6 +139,10 @@ For a new agent, the safest default loop is:
 5. Run `index`.
 6. Run `validate`.
 7. Use `search` to shortlist records, then open the real files.
+
+Use first-class filters before reaching for `--jq`: `--category`, `--status`,
+`--domain`, `--scope`, repeated `--tag`, and `--limit` all operate on indexed
+metadata and are available in both implementations.
 
 ## Implementations
 

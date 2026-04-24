@@ -42,6 +42,12 @@ def _build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("query", nargs="?", default=None)
     search_parser.add_argument("--root", default=".")
     search_parser.add_argument("--jq", dest="jq_filter", default=None, help="jq filter expression")
+    search_parser.add_argument("--category", default=None, help="Filter by exact category")
+    search_parser.add_argument("--status", default=None, help="Filter by exact status")
+    search_parser.add_argument("--domain", default=None, help="Filter by exact domain")
+    search_parser.add_argument("--scope", default=None, help="Filter by exact scope")
+    search_parser.add_argument("--tag", action="append", default=[], help="Require a tag; repeat for AND filtering")
+    search_parser.add_argument("--limit", type=int, default=None, help="Limit the number of returned records")
 
     add_parser = subparsers.add_parser("add", help="Add metadata to a file and re-index")
     add_parser.add_argument("file")
@@ -176,7 +182,20 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "search":
-            _print_search_results(search_index(args.query, root=args.root, jq_filter=args.jq_filter), as_json)
+            _print_search_results(
+                search_index(
+                    args.query,
+                    root=args.root,
+                    jq_filter=args.jq_filter,
+                    category=args.category,
+                    status=args.status,
+                    domain=args.domain,
+                    scope=args.scope,
+                    tags=args.tag,
+                    limit=args.limit,
+                ),
+                as_json,
+            )
             return 0
 
         if args.command == "add":

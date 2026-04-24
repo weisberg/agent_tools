@@ -350,6 +350,54 @@ def test_search_and_show_read_index(vault: Path) -> None:
     assert shown["title"] == "CUPED Guide"
 
 
+def test_search_supports_field_filters_tags_and_limit(vault: Path) -> None:
+    _write(
+        vault / "docs" / "guide.md",
+        _md(
+            """
+            id: docs/guide
+            title: Guide
+            description: Helpful guide
+            category: reference
+            status: active
+            domain: tooling
+            scope: team
+            tags: [tooling, onboarding]
+            """,
+            "Body.\n",
+        ),
+    )
+    _write(
+        vault / "docs" / "draft.md",
+        _md(
+            """
+            id: docs/draft
+            title: Draft
+            description: Draft note
+            category: note
+            status: draft
+            domain: finance
+            scope: personal
+            tags: [finance]
+            """,
+            "Body.\n",
+        ),
+    )
+    build_index(vault, full=True)
+
+    results = search_index(
+        root=vault,
+        category="reference",
+        status="active",
+        domain="tooling",
+        scope="team",
+        tags=["tooling", "onboarding"],
+        limit=1,
+    )
+
+    assert [record["id"] for record in results] == ["docs/guide"]
+
+
 def test_validate_reports_broken_sources_and_dangling_refs(vault: Path) -> None:
     _write(
         vault / "docs" / "guide.md",
@@ -500,6 +548,47 @@ def test_cli_ingest_json_output(vault: Path, capsys: pytest.CaptureFixture[str])
     assert exit_code == 0
     assert payload["ok"] is True
     assert payload["result"]["scaffolded"][0]["file"] == "docs/notes.md"
+
+
+def test_cli_search_filters_json_output(vault: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _write(
+        vault / "docs" / "guide.md",
+        _md(
+            """
+            id: docs/guide
+            title: Guide
+            description: Helpful guide
+            category: reference
+            status: active
+            tags: [tooling]
+            """,
+            "Body.\n",
+        ),
+    )
+    build_index(vault, full=True)
+
+    exit_code = main(
+        [
+            "--json",
+            "search",
+            "--root",
+            str(vault),
+            "--category",
+            "reference",
+            "--status",
+            "active",
+            "--tag",
+            "tooling",
+            "--limit",
+            "1",
+        ]
+    )
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert payload["result"]["total"] == 1
+    assert payload["result"]["results"][0]["id"] == "docs/guide"
 
 
 @pytest.mark.skipif(shutil.which("jq") is None, reason="jq not installed")

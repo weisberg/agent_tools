@@ -79,15 +79,13 @@ fn read_range_with_headers() {
     let path = dir.path().join("test.xlsx");
     create_and_populate(&path);
 
-    let json = xli_json(&[
-        "read",
-        path.to_str().unwrap(),
-        "Sheet1!A1:B5",
-        "--headers",
-    ]);
+    let json = xli_json(&["read", path.to_str().unwrap(), "Sheet1!A1:B5", "--headers"]);
     assert_eq!(json["status"], "ok");
     let headers = json["output"]["headers"].as_array().expect("headers array");
-    assert_eq!(headers, &[Value::String("Name".into()), Value::String("Score".into())]);
+    assert_eq!(
+        headers,
+        &[Value::String("Name".into()), Value::String("Score".into())]
+    );
 }
 
 #[test]

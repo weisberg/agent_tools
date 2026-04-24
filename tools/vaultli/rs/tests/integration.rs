@@ -10,6 +10,7 @@ use vaultli::index::{build_index, parse_markdown_file};
 use vaultli::infer::infer_frontmatter;
 use vaultli::paths::find_root;
 use vaultli::scaffold::{add_file, ingest_path, init_vault, scaffold_file};
+use vaultli::search::search_records;
 use vaultli::validate::validate_vault;
 
 const VAULT_MARKER: &str = ".kbroot";
@@ -142,6 +143,48 @@ fn ingests_directory_with_dry_run_and_indexing() {
     assert_eq!(ingested.get("indexed"), Some(&Value::Bool(true)));
     assert!(root.join("queries/report.sql.md").exists());
     assert!(fs::read_to_string(&notes).unwrap().starts_with("---\n"));
+}
+
+#[test]
+fn searches_with_field_tag_filters_and_limit() {
+    let root = temp_dir("search-filters");
+    init_vault(&root).unwrap();
+
+    let guide = root.join("docs/guide.md");
+    fs::create_dir_all(guide.parent().unwrap()).unwrap();
+    fs::write(
+        &guide,
+        "---\nid: docs/guide\ntitle: Guide\ndescription: Helpful guide\ncategory: reference\nstatus: active\ndomain: tooling\nscope: team\ntags:\n  - tooling\n  - onboarding\n---\nBody\n",
+    )
+    .unwrap();
+
+    let draft = root.join("docs/draft.md");
+    fs::write(
+        &draft,
+        "---\nid: docs/draft\ntitle: Draft\ndescription: Draft note\ncategory: note\nstatus: draft\ndomain: finance\nscope: personal\ntags:\n  - finance\n---\nBody\n",
+    )
+    .unwrap();
+
+    build_index(&root, true).unwrap();
+    let tags = vec!["tooling".to_string(), "onboarding".to_string()];
+    let results = search_records(
+        &root,
+        None,
+        None,
+        Some("reference"),
+        Some("active"),
+        Some("tooling"),
+        Some("team"),
+        &tags,
+        Some(1),
+    )
+    .unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        results[0].get("id"),
+        Some(&Value::String("docs/guide".into()))
+    );
 }
 
 #[test]

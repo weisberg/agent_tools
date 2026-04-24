@@ -26,10 +26,7 @@ fn create_workbook(path: &std::path::Path) {
 
 fn get_fingerprint(path: &std::path::Path) -> String {
     let json = xli_json(&["inspect", path.to_str().unwrap()]);
-    json["output"]["fingerprint"]
-        .as_str()
-        .unwrap()
-        .to_string()
+    json["output"]["fingerprint"].as_str().unwrap().to_string()
 }
 
 #[test]
@@ -40,7 +37,13 @@ fn fingerprint_changes_after_write() {
 
     let fp1 = get_fingerprint(&path);
 
-    let write = xli_json(&["write", path.to_str().unwrap(), "Sheet1!A1", "--value", "42"]);
+    let write = xli_json(&[
+        "write",
+        path.to_str().unwrap(),
+        "Sheet1!A1",
+        "--value",
+        "42",
+    ]);
     assert_eq!(write["status"], "ok");
 
     let fp2 = get_fingerprint(&path);
@@ -147,7 +150,13 @@ fn format_dry_run_preserves_workbook() {
     create_workbook(&path);
 
     // Write a value so the format has a target cell.
-    xli_json(&["write", path.to_str().unwrap(), "Sheet1!A1", "--value", "hello"]);
+    xli_json(&[
+        "write",
+        path.to_str().unwrap(),
+        "Sheet1!A1",
+        "--value",
+        "hello",
+    ]);
 
     let fp_before = get_fingerprint(&path);
 
@@ -179,12 +188,7 @@ fn batch_dry_run_reports_ops_without_committing() {
 {"op":"write","address":"Sheet1!A2","value":200}"#;
 
     let output = Command::new(env!("CARGO_BIN_EXE_xli"))
-        .args([
-            "batch",
-            path.to_str().unwrap(),
-            "--stdin",
-            "--dry-run",
-        ])
+        .args(["batch", path.to_str().unwrap(), "--stdin", "--dry-run"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .spawn()

@@ -122,10 +122,7 @@ fn batch_sheet_ops() {
 
     let inspect = xli_json(&["inspect", path.to_str().unwrap()]);
     let sheets = inspect["output"]["sheets"].as_array().expect("sheets");
-    let names: Vec<&str> = sheets
-        .iter()
-        .map(|s| s["name"].as_str().unwrap())
-        .collect();
+    let names: Vec<&str> = sheets.iter().map(|s| s["name"].as_str().unwrap()).collect();
     assert!(names.contains(&"NewSheet"));
 }
 

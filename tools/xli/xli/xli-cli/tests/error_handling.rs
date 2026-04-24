@@ -60,12 +60,7 @@ fn format_missing_file_returns_error() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("nonexistent.xlsx");
 
-    let json = xli_error(&[
-        "format",
-        path.to_str().unwrap(),
-        "Sheet1!A1:A1",
-        "--bold",
-    ]);
+    let json = xli_error(&["format", path.to_str().unwrap(), "Sheet1!A1:A1", "--bold"]);
     assert_eq!(json["status"], "error");
     assert_eq!(json["errors"][0]["code"], "FILE_NOT_FOUND");
 }

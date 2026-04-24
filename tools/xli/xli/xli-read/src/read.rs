@@ -214,9 +214,7 @@ pub fn read_all_sheets(path: &Path) -> Result<Value, XliError> {
             continue;
         }
 
-        let range = workbook
-            .worksheet_range(name)
-            .map_err(calamine_error)?;
+        let range = workbook.worksheet_range(name).map_err(calamine_error)?;
 
         let mut matrix: Vec<Vec<Value>> = Vec::new();
         for row in range.rows() {

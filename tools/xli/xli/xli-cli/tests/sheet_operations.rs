@@ -94,14 +94,7 @@ fn sheet_add_after() {
     let path = dir.path().join("test.xlsx");
     create_workbook(&path, "A,B");
 
-    let out = xli_json(&[
-        "sheet",
-        path.to_str().unwrap(),
-        "add",
-        "X",
-        "--after",
-        "A",
-    ]);
+    let out = xli_json(&["sheet", path.to_str().unwrap(), "add", "X", "--after", "A"]);
     assert_eq!(out["status"], "ok");
 
     let names = sheet_names(&path);

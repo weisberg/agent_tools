@@ -340,8 +340,17 @@ def search_index(
     *,
     root: Path | str | None = None,
     jq_filter: str | None = None,
+    category: str | None = None,
+    status: str | None = None,
+    domain: str | None = None,
+    scope: str | None = None,
+    tags: list[str] | None = None,
+    limit: int | None = None,
 ) -> list[dict[str, Any]]:
     """Search the index using a keyword query and optional jq filter."""
+
+    if limit is not None and limit < 0:
+        raise VaultliError("limit must be greater than or equal to 0", code="INVALID_LIMIT")
 
     records = load_index_records(root)
     if query:
@@ -350,6 +359,25 @@ def search_index(
             record
             for record in records
             if needle in json.dumps(record, sort_keys=True, ensure_ascii=False).casefold()
+        ]
+
+    field_filters = {
+        "category": category,
+        "status": status,
+        "domain": domain,
+        "scope": scope,
+    }
+    for field, expected in field_filters.items():
+        if expected is not None:
+            records = [record for record in records if record.get(field) == expected]
+
+    if tags:
+        expected_tags = set(tags)
+        records = [
+            record
+            for record in records
+            if isinstance(record.get("tags"), list)
+            and expected_tags.issubset(set(record["tags"]))
         ]
 
     if jq_filter:
@@ -380,6 +408,9 @@ def search_index(
                 raise VaultliError("jq filter must emit JSON objects", code="JQ_FILTER_INVALID")
             filtered.append(parsed)
         records = filtered
+
+    if limit is not None:
+        records = records[:limit]
 
     return records
 
