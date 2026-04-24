@@ -123,6 +123,14 @@ fn parser_backed_jql_reports_errors_with_rule_ids() {
 }
 
 #[test]
+fn daemon_status_reports_stateless_fallback() {
+    let home = TempDir::new().unwrap();
+    let status = stdout_json(jirali(&home).args(["daemon", "status"]).assert());
+    assert_eq!(status["ok"], true);
+    assert_eq!(status["fallback"], "stateless");
+}
+
+#[test]
 fn adf_pipeline_supports_marks_links_code_and_tables() {
     let home = TempDir::new().unwrap();
     let adf = stdout_json(
@@ -141,4 +149,3 @@ fn adf_pipeline_supports_marks_links_code_and_tables() {
     assert!(text.contains("table"));
     assert!(text.contains("codeBlock"));
 }
-

@@ -49,6 +49,21 @@ cargo run -- api GET /rest/api/3/myself
 | 7 | Validation failed |
 | 8 | Timeout |
 
+## Implementation Status
+
+Jirali now has two execution paths:
+
+- **Live Jira-backed:** `api`, `graphql`, and configured-profile paths for
+  `issue view/list/create/edit/delete/transition` and `comment` commands. A
+  profile is considered live when `site_url` is configured and the profile mode
+  is not `local`.
+- **Local/fixture-backed:** commands without a live profile continue to use
+  deterministic local state under `JIRALI_HOME`. This is intentional for agent
+  rehearsal and CI tests.
+
+`jirali tools` reports implementation status per command group so agents can
+tell which surfaces are safe for live workflows.
+
 ## Roadmap Coverage
 
 The first implementation covers the GitHub roadmap issues for:
@@ -67,7 +82,8 @@ The first implementation covers the GitHub roadmap issues for:
 - v1.0 hardening surfaces for MCP bridge, PII masking, schema versioning,
   observability metadata, docs, and tests
 
-Live Jira behavior is intentionally concentrated in `api`/`graphql` until each
-named command has a real Jira sandbox fixture. The local command model keeps
-agent contract tests deterministic while the HTTP escape hatch preserves access
-to the full Jira API.
+Live Jira behavior is implemented for the core issue and comment path and
+covered by a local mock-Jira integration test. Broader report, JSM,
+cross-product, automation, and Assets commands still expose schema-stable
+surfaces and deterministic local behavior while their endpoint-specific clients
+are expanded.
