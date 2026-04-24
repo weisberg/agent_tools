@@ -8,7 +8,8 @@ Implemented today:
 
 - `inspect`, `read`, `write`, `format`, `sheet`, `batch`, `apply`, `create`, `lint`, `recalc`, `validate`, `doctor`, `template`, and `schema`
 - Atomic commits, dry runs, and fingerprint compare-and-swap on mutating workbook commands
-- CSV, Markdown table, and JSON workbook creation
+- CSV, Markdown table, and JSON workbook creation, including CSV column-name
+  report options
 - Built-in template discovery and preview through `xli template`
 - Template application through `xli apply`, backed by the same atomic path as `xli batch`
 
@@ -16,7 +17,8 @@ Still planned or partial:
 
 - Native OOXML mutation for all edit paths. The current mutation path uses `umya-spreadsheet` and reports that warning in JSON envelopes.
 - First-class `profile`, `diff`, `chart`, `table`, `repair`, and `ooxml` command families.
-- Rich report-table ergonomics beyond the initial number-format aliases and basic table template.
+- Rich report-table ergonomics beyond number-format aliases, CSV report options,
+  and the basic table template.
 
 ## Build
 
@@ -70,6 +72,19 @@ Format a range. Number formats accept literal Excel formats or aliases such as `
 
 ```bash
 cargo run -p xli-cli -- format /tmp/demo.xlsx "Summary!B:B" --number-format currency
+```
+
+Create a formatted CSV-backed report table:
+
+```bash
+cargo run -p xli-cli -- create /tmp/report.xlsx \
+  --from-csv data.csv \
+  --title "Revenue Report" \
+  --col Account \
+  --col Revenue:currency:right \
+  --hide InternalNotes \
+  --rename Account:Customer \
+  --total-row
 ```
 
 Run a batch:
@@ -137,7 +152,7 @@ Use `xli-companion` when you need Python's ecosystem: dataframe validation, reco
 | `batch` | Implemented | NDJSON micro-ops in one atomic commit |
 | `apply` | Implemented minimal | Built-in template expansion into batch ops |
 | `template` | Implemented minimal | List, preview, and validate built-in templates |
-| `create` | Implemented | Blank, CSV, Markdown table, and JSON inputs |
+| `create` | Implemented | Blank, CSV, Markdown table, JSON, and CSV report-table options |
 | `lint` | Implemented MVP | Fast structural/formula checks |
 | `recalc` | Implemented | LibreOffice subprocess path |
 | `validate` | Implemented MVP | Post-edit workbook validation checks |

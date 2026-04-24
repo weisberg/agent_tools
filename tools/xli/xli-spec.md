@@ -384,7 +384,7 @@ Streams micro-ops from ndjson into one atomic commit. This is the bridge between
 
 ```bash
 # From file
-xli batch report.xlsx --ops edits.ndjson
+xli batch report.xlsx --file-input edits.ndjson
 
 # From stdin — agent streams ops as it computes them
 cat <<'EOF' | xli batch report.xlsx --stdin
@@ -396,7 +396,7 @@ cat <<'EOF' | xli batch report.xlsx --stdin
 EOF
 
 # Dry-run
-xli batch report.xlsx --ops edits.ndjson --dry-run
+xli batch report.xlsx --file-input edits.ndjson --dry-run
 ```
 
 **Response:**
@@ -421,16 +421,23 @@ xli batch report.xlsx --ops edits.ndjson --dry-run
 
 #### `xli apply`
 
-The power command. Applies a YAML plan from the knowledge base as a single atomic commit. Uses Tera (Jinja2-compatible) for parameter interpolation.
+Applies a built-in knowledge-base template as a single atomic commit. The
+current MVP expands built-in templates into the same ndjson micro-ops used by
+`xli batch`; external YAML plan files and Tera interpolation remain planned.
 
 ```bash
-xli apply report.xlsx --spec templates/cuped-results-table.yaml \
-  --vars '{"metric": "conversion_rate", "pre_period": "2025-Q3"}'
+xli template list
+xli template preview basic-table-format --param range=Summary!A1:D20
 
-xli apply report.xlsx --spec templates/quarterly-report-format.yaml --dry-run
+xli apply report.xlsx basic-table-format \
+  --param range=Summary!A1:D20 \
+  --param number_format=currency
+
+xli apply report.xlsx basic-table-format --param range=Summary!A1:D20 --dry-run
 ```
 
-See Section 8 for the full plan spec schema and a worked CUPED example.
+The first built-in template is `basic-table-format`, which applies header
+formatting, column widths, and an optional body number format.
 
 #### `xli create`
 
@@ -440,14 +447,24 @@ Creates a new workbook. Uses `rust_xlsxwriter` for maximum fidelity with the Exc
 # Empty workbook
 xli create report.xlsx
 
-# From template
-xli create report.xlsx --template templates/experiment-report.yaml
+# Named sheets
+xli create report.xlsx --sheets Summary,Data
 
-# From CSV (import + auto-format)
-xli create report.xlsx --from data.csv --auto-format
+# From CSV
+xli create report.xlsx --from-csv data.csv
 
-# From multiple CSVs (one sheet each)
-xli create report.xlsx --from "sends.csv:Email Sends" --from "conversions.csv:Conversions"
+# From CSV with report-table conveniences
+xli create report.xlsx --from-csv data.csv \
+  --title "Revenue Report" \
+  --col Account \
+  --col Revenue:currency:right \
+  --hide InternalNotes \
+  --rename Account:Customer \
+  --total-row
+
+# From Markdown table or JSON workbook spec
+xli create report.xlsx --from-markdown table.md
+xli create report.xlsx --from-json workbook.json
 ```
 
 #### `xli lint`
@@ -672,10 +689,8 @@ Emits JSON schema for all commands, plan specs, and result envelopes.
 
 ```bash
 xli schema                  # Full schema for all commands
-xli schema write            # Schema for just the write command
-xli schema plan             # Schema for YAML plan files accepted by `apply`
-xli schema result           # Schema for result envelopes returned by all commands
-xli schema batch-op         # Schema for ndjson ops accepted by `batch`
+xli schema --command write  # Schema for just the write command
+xli schema --result FormatOutput
 xli schema --openapi        # OpenAPI-compatible schema (for MCP bridge)
 ```
 
@@ -685,9 +700,8 @@ Manages knowledge base templates.
 
 ```bash
 xli template list
-xli template preview financial-summary
-xli template apply financial-summary --to report.xlsx
-xli template validate my-custom-template.yaml
+xli template preview basic-table-format --param range=Summary!A1:D20
+xli template validate basic-table-format --param range=Summary!A1:D20
 ```
 
 ---
@@ -1336,7 +1350,7 @@ Rules used by `lint`, `validate`, and `doctor`:
 | Write a formula | `xli write file.xlsx "B10" --formula "=SUM(B5:B9)"` |
 | Format cells | `xli format file.xlsx "A1:G1" --bold --fill 4472C4` |
 | Batch edits | `echo '...' \| xli batch file.xlsx --stdin` |
-| Apply template | `xli apply file.xlsx --spec templates/financial-summary.yaml` |
+| Apply template | `xli apply file.xlsx basic-table-format --param range=Sheet!A1:D20` |
 | Full quality check | `xli doctor file.xlsx` |
 
 ## Workflow
@@ -1354,7 +1368,7 @@ Rules used by `lint`, `validate`, and `doctor`:
 - ALWAYS run `xli doctor` after finishing edits to catch formula errors
 - Parse all XLI output as JSON — never use regex on XLI output
 - Use `xli batch --stdin` for >20 related edits instead of individual commits
-- Use `xli apply --spec` for operations defined in the knowledge base
+- Use `xli template preview` and `xli apply` for built-in knowledge-base operations
 - Use `xli read --limit N` for large sheets to avoid context window overflow
 - Use `--expect-fingerprint` when multiple agents may edit the same file
 - Each xli call is an atomic commit. Safe to retry any single operation on failure.
@@ -1365,7 +1379,7 @@ Rules used by `lint`, `validate`, and `doctor`:
 In the Agile Agentic Analytics ecosystem, XLI is primarily consumed by two sub-agents:
 
 - **athena-analyst** — Queries data from Athena, then uses XLI to write results into formatted workbooks. Workflow: `sqlservd query → xli create → xli batch (data + formulas) → xli doctor`.
-- **experiment-analyst** — Runs CUPED analysis, then uses XLI to produce experiment report workbooks. Uses `xli apply --spec cuped-results-table.yaml` with parameters derived from the analysis output.
+- **experiment-analyst** — Runs CUPED analysis, then uses XLI to produce experiment report workbooks. Current MVP uses `xli create`, `xli batch`, and built-in `xli apply` templates; richer CUPED-specific templates remain planned.
 
 ### 9.3 Permissions Model
 
@@ -1420,7 +1434,7 @@ The atomic commit model depends on predictable, fast execution.
 **Goal:** An agent can inspect, read, write, format, batch, recalculate, lint, validate, and create workbooks using CLI commands instead of generating Python scripts. Every mutating command is an atomic workbook commit with fingerprinting.
 
 **Scope:**
-- `inspect`, `read`, `write`, `format`, `sheet`, `batch`, `lint`, `recalc`, `validate`, `doctor`, `create`, `schema`
+- `inspect`, `read`, `write`, `format`, `sheet`, `batch`, `apply`, `template`, `lint`, `recalc`, `validate`, `doctor`, `create`, `schema`
 - Atomic commit layer: locks, fingerprinting, staging, `sync_all()`, atomic rename
 - `--expect-fingerprint` on all mutating commands
 - OOXML patch engine: cell values/formulas, shared strings, styles/number formats, defined names, sheet add/rename/delete, workbook metadata, macro part pass-through
@@ -1430,27 +1444,26 @@ The atomic commit model depends on predictable, fast execution.
 - Structured JSON envelopes with transaction metadata
 - Structured error handling with fix suggestions
 - Formula normalization checks in `lint` (`_xlfn.`, `_xlpm.`, defined names)
-- Knowledge base loader (templates, rules)
+- Minimal built-in knowledge base loader (`basic-table-format`)
 - SKILL.md for Claude Code
 - Cross-compilation for Linux (x86_64, aarch64) and macOS (x86_64, aarch64)
 - Release binaries on GitHub Releases
 
-**Not in scope:** `apply`, `diff`, `profile`, `chart`, `repair`, `ooxml` commands, Tera-based plan engine.
+**Not in scope:** `diff`, `profile`, `chart`, `repair`, `ooxml` commands, external YAML plan files, Tera-based plan engine.
 
 ### Phase 2: Plans and Patch Coverage (v0.2.0)
 
 **Goal:** Complex multi-step operations are declarative YAML plans. The OOXML patch engine covers the most important formatting and structural operations, reducing reliance on umya.
 
 **Scope:**
-- `apply` command with Tera-based plan engine
+- external YAML/Tera plan engine for `apply`
 - `repair` command for auto-fixable lint issues
 - `profile` command for data profiling
 - `chart` command (basic chart creation)
 - `ooxml unpack|pack|diff|grep` commands
 - Dry-run mode for `apply` and `batch`
 - OOXML patch coverage extended to: comments/notes, data validation, conditional formatting, tables, column widths/row heights
-- Built-in template library (formatting, CUPED results, experiment report scaffolds)
-- `template` command (list, preview, validate)
+- expanded built-in template library (formatting, CUPED results, experiment report scaffolds)
 
 ### Phase 3: Intelligence (v0.3.0)
 
