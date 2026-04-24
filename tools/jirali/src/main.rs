@@ -1358,6 +1358,40 @@ fn save_config(ctx: &Context, config: &Config) -> Result<()> {
     fs::write(ctx.config_path(), text).map_err(|e| JiraliError::Io(e.to_string()))
 }
 
+fn secret_path(ctx: &Context, profile: &str, kind: &str) -> PathBuf {
+    ctx.home.join("secrets").join(format!("{profile}.{kind}"))
+}
+
+fn store_secret(ctx: &Context, kind: &str, value: &str) -> Result<()> {
+    let dir = ctx.home.join("secrets");
+    fs::create_dir_all(&dir).map_err(|e| JiraliError::Io(e.to_string()))?;
+    let path = secret_path(ctx, &ctx.profile, kind);
+    fs::write(&path, value).map_err(|e| JiraliError::Io(e.to_string()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
+            .map_err(|e| JiraliError::Io(e.to_string()))?;
+    }
+    Ok(())
+}
+
+fn load_secret(ctx: &Context, profile: &Profile, kind: &str) -> Option<String> {
+    match kind {
+        "api-token" => env::var("JIRALI_API_TOKEN")
+            .ok()
+            .or_else(|| profile.api_token.clone())
+            .or_else(|| fs::read_to_string(secret_path(ctx, &ctx.profile, kind)).ok()),
+        "pat" => env::var("JIRALI_PAT")
+            .ok()
+            .or_else(|| profile.pat.clone())
+            .or_else(|| fs::read_to_string(secret_path(ctx, &ctx.profile, kind)).ok()),
+        _ => None,
+    }
+    .map(|s| s.trim().to_string())
+    .filter(|s| !s.is_empty())
+}
+
 fn active_profile(ctx: &Context) -> Result<Option<Profile>> {
     let config = load_config(ctx)?;
     Ok(config.profiles.get(&ctx.profile).cloned())
@@ -1835,6 +1869,7 @@ fn issue(ctx: &Context, cmd: IssueCommand) -> Result<Value> {
                 history: vec![],
             };
             state.issues.insert(key.clone(), issue);
+            let _ = cache_issue(ctx, &json!(state.issues[&key]));
             save_state(ctx, &state)?;
             Ok(
                 json!({"key": key, "id": state.issues[&key].id, "self": format!("local://issue/{key}")}),
@@ -2875,15 +2910,22 @@ fn local(ctx: &Context, cmd: LocalCommand) -> Result<Value> {
     let state = load_state(ctx)?;
     match cmd {
         LocalCommand::Embed { jql } => {
+            for issue in state.issues.values() {
+                let _ = cache_issue(ctx, &json!(issue));
+            }
             Ok(json!({"embedded": state.issues.len(), "jql": jql, "vector_store": "local"}))
         }
         LocalCommand::Search { query, semantic } => {
-            let results: Vec<_> = state
-                .issues
-                .values()
-                .filter(|i| i.summary.to_lowercase().contains(&query.to_lowercase()))
-                .collect();
-            Ok(json!({"query": query, "semantic": semantic, "data": results}))
+            let mut results = cache_search(ctx, &query)?;
+            if results.is_empty() {
+                results = state
+                    .issues
+                    .values()
+                    .filter(|i| i.summary.to_lowercase().contains(&query.to_lowercase()))
+                    .map(|i| json!(i))
+                    .collect();
+            }
+            Ok(json!({"query": query, "semantic": semantic, "backend": if semantic { "sqlite-vector-abstraction" } else { "sqlite-fts5" }, "data": results}))
         }
         LocalCommand::Nearest { key, k } => Ok(json!({"key": key, "k": k, "neighbors": []})),
         LocalCommand::Invalidate { key } => {
@@ -3218,19 +3260,161 @@ fn jql_lint(jql: &str) -> Value {
     let mut warnings = Vec::new();
     let mut errors = Vec::new();
     let lower = jql.to_lowercase();
+    let tokens = lex_query(jql);
+    let known_fields: BTreeSet<&str> = [
+        "project",
+        "status",
+        "assignee",
+        "priority",
+        "created",
+        "updated",
+        "summary",
+        "labels",
+        "issuetype",
+        "resolution",
+        "fixversion",
+        "component",
+    ]
+    .into_iter()
+    .collect();
+    for window in tokens.windows(3) {
+        let field = window[0].text.to_lowercase();
+        let op = window[1].text.to_lowercase();
+        if is_identifier(&window[0].text)
+            && matches!(op.as_str(), "=" | "!=" | "in" | "~" | ">" | "<" | ">=" | "<=")
+            && !known_fields.contains(field.as_str())
+            && !field.starts_with("customfield_")
+        {
+            errors.push(json!({
+                "rule": "unknown_field",
+                "severity": "error",
+                "span": {"start": window[0].start, "end": window[0].end},
+                "message": format!("Unknown or uncached JQL field '{}'.", window[0].text),
+                "remediation": "Run `jirali alias refresh` or use a known Jira field/customfield id."
+            }));
+        }
+        if matches!(field.as_str(), "created" | "updated")
+            && matches!(op.as_str(), "=" | "!=" | "~")
+        {
+            errors.push(json!({
+                "rule": "type_mismatch",
+                "severity": "error",
+                "span": {"start": window[1].start, "end": window[1].end},
+                "message": format!("Date field '{}' should use a range/date operator, not '{}'.", window[0].text, window[1].text),
+                "remediation": "Use >=, <=, >, <, startOfWeek(), startOfDay(), or an ISO date."
+            }));
+        }
+    }
     if lower.contains("!=") || lower.contains(" not ") {
-        warnings.push(json!({"rule": "negation", "message": "Negation can force broad scans; prefer positive indexed predicates."}));
+        warnings.push(json!({
+            "rule": "negation",
+            "severity": "warning",
+            "span": span_for(jql, "!=").or_else(|| span_for(&lower, " not ")),
+            "message": "Negation can force broad scans; prefer positive indexed predicates.",
+            "remediation": "Use positive status/category predicates when possible."
+        }));
     }
     if lower.matches(" and ").count() > 2 {
-        warnings.push(json!({"rule": "top_level_and", "message": "Many top-level AND clauses can become hard for agents and Jira to reason about."}));
+        warnings.push(json!({
+            "rule": "top_level_and",
+            "severity": "warning",
+            "message": "Many top-level AND clauses can become hard for agents and Jira to reason about.",
+            "remediation": "Consider a saved filter or split the query into smaller bounded searches."
+        }));
     }
     if lower.contains("order by") && !lower.contains("updated") {
-        warnings.push(json!({"rule": "unbounded_order_by", "message": "Prefer ORDER BY updated DESC with an explicit limit."}));
+        warnings.push(json!({
+            "rule": "unbounded_order_by",
+            "severity": "warning",
+            "span": span_for(&lower, "order by"),
+            "message": "Prefer ORDER BY updated DESC with an explicit limit.",
+            "remediation": "Sort by updated DESC for agent loops and pass --limit."
+        }));
     }
     if jql.trim().is_empty() {
-        errors.push(json!({"rule": "empty", "message": "JQL must not be empty."}));
+        errors.push(json!({"rule": "empty", "severity": "error", "message": "JQL must not be empty.", "remediation": "Provide a bounded JQL query."}));
     }
-    json!({"valid": errors.is_empty(), "warnings": warnings, "errors": errors})
+    if unbalanced(jql, '(', ')') || unbalanced(jql, '"', '"') {
+        errors.push(json!({
+            "rule": "syntax_unbalanced",
+            "severity": "error",
+            "message": "JQL appears to contain unbalanced parentheses or quotes.",
+            "remediation": "Check grouping and quoted string literals."
+        }));
+    }
+    json!({"valid": errors.is_empty(), "parser": "jirali-simple-ast-v1", "tokens": tokens, "warnings": warnings, "errors": errors})
+}
+
+#[derive(Debug, Serialize)]
+struct QueryToken {
+    text: String,
+    start: usize,
+    end: usize,
+}
+
+fn lex_query(query: &str) -> Vec<QueryToken> {
+    let mut out = Vec::new();
+    let mut start = None;
+    for (idx, ch) in query.char_indices() {
+        if ch.is_whitespace() || matches!(ch, '(' | ')' | ',') {
+            if let Some(s) = start.take() {
+                out.push(QueryToken {
+                    text: query[s..idx].to_string(),
+                    start: s,
+                    end: idx,
+                });
+            }
+            if matches!(ch, '(' | ')' | ',') {
+                out.push(QueryToken {
+                    text: ch.to_string(),
+                    start: idx,
+                    end: idx + ch.len_utf8(),
+                });
+            }
+        } else if start.is_none() {
+            start = Some(idx);
+        }
+    }
+    if let Some(s) = start {
+        out.push(QueryToken {
+            text: query[s..].to_string(),
+            start: s,
+            end: query.len(),
+        });
+    }
+    out
+}
+
+fn is_identifier(value: &str) -> bool {
+    value
+        .chars()
+        .next()
+        .map(|ch| ch.is_ascii_alphabetic() || ch == '_')
+        .unwrap_or(false)
+}
+
+fn span_for(haystack: &str, needle: &str) -> Option<Value> {
+    haystack
+        .find(needle)
+        .map(|start| json!({"start": start, "end": start + needle.len()}))
+}
+
+fn unbalanced(query: &str, open: char, close: char) -> bool {
+    if open == close {
+        return query.matches(open).count() % 2 != 0;
+    }
+    let mut depth = 0isize;
+    for ch in query.chars() {
+        if ch == open {
+            depth += 1;
+        } else if ch == close {
+            depth -= 1;
+        }
+        if depth < 0 {
+            return true;
+        }
+    }
+    depth != 0
 }
 
 fn explain_jql(jql: &str) -> String {
@@ -3240,18 +3424,183 @@ fn explain_jql(jql: &str) -> String {
 }
 
 fn markdown_to_adf(markdown: &str) -> Value {
-    let content: Vec<Value> = markdown.lines().map(|line| {
-        if let Some(text) = line.strip_prefix("# ") {
-            json!({"type": "heading", "attrs": {"level": 1}, "content": [{"type": "text", "text": text}]})
-        } else if line.starts_with("- ") {
-            json!({"type": "bulletList", "content": [{"type": "listItem", "content": [{"type": "paragraph", "content": [{"type": "text", "text": line.trim_start_matches("- ")}]}]}]})
-        } else if line.starts_with("```") {
-            json!({"type": "codeBlock", "content": []})
-        } else {
-            json!({"type": "paragraph", "content": inline_text(line)})
+    let mut options = Options::empty();
+    options.insert(Options::ENABLE_TABLES);
+    options.insert(Options::ENABLE_TASKLISTS);
+    options.insert(Options::ENABLE_STRIKETHROUGH);
+    options.insert(Options::ENABLE_FOOTNOTES);
+
+    let mut content = Vec::new();
+    let mut inline = Vec::<Value>::new();
+    let mut text_buffer = String::new();
+    let mut list_stack: Vec<Vec<Value>> = Vec::new();
+    let mut code_lang: Option<String> = None;
+    let mut code_text = String::new();
+    let mut table_rows: Vec<Value> = Vec::new();
+    let mut row_cells: Vec<Value> = Vec::new();
+    let mut cell_inline: Vec<Value> = Vec::new();
+    let mut active_table = false;
+    let mut marks: Vec<&'static str> = Vec::new();
+
+    let push_text = |text_buffer: &mut String, inline: &mut Vec<Value>, marks: &[&str]| {
+        if text_buffer.is_empty() {
+            return;
         }
-    }).collect();
+        inline.push(text_node(text_buffer, marks));
+        text_buffer.clear();
+    };
+
+    for event in MarkdownParser::new_ext(markdown, options) {
+        match event {
+            Event::Start(Tag::Paragraph) => {
+                inline.clear();
+                text_buffer.clear();
+            }
+            Event::End(TagEnd::Paragraph) => {
+                push_text(&mut text_buffer, &mut inline, &marks);
+                let paragraph = json!({"type": "paragraph", "content": inline.clone()});
+                if active_table {
+                    cell_inline.extend(inline.clone());
+                } else if let Some(items) = list_stack.last_mut() {
+                    items.push(json!({"type": "listItem", "content": [paragraph]}));
+                } else {
+                    content.push(paragraph);
+                }
+                inline.clear();
+            }
+            Event::Start(Tag::Heading { level, .. }) => {
+                inline.clear();
+                text_buffer.clear();
+                let level_num = match level {
+                    HeadingLevel::H1 => 1,
+                    HeadingLevel::H2 => 2,
+                    HeadingLevel::H3 => 3,
+                    HeadingLevel::H4 => 4,
+                    HeadingLevel::H5 => 5,
+                    HeadingLevel::H6 => 6,
+                };
+                inline.push(json!({"_heading_level": level_num}));
+            }
+            Event::End(TagEnd::Heading(_)) => {
+                let level = inline
+                    .first()
+                    .and_then(|v| v.get("_heading_level"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or(1);
+                if inline.first().and_then(|v| v.get("_heading_level")).is_some() {
+                    inline.remove(0);
+                }
+                push_text(&mut text_buffer, &mut inline, &marks);
+                content.push(json!({"type": "heading", "attrs": {"level": level}, "content": inline.clone()}));
+                inline.clear();
+            }
+            Event::Start(Tag::List(Some(_))) | Event::Start(Tag::List(None)) => {
+                list_stack.push(Vec::new());
+            }
+            Event::End(TagEnd::List(_)) => {
+                if let Some(items) = list_stack.pop() {
+                    content.push(json!({"type": "bulletList", "content": items}));
+                }
+            }
+            Event::Start(Tag::BlockQuote(_)) => {
+                inline.clear();
+                text_buffer.clear();
+            }
+            Event::End(TagEnd::BlockQuote(_)) => {
+                push_text(&mut text_buffer, &mut inline, &marks);
+                content.push(json!({"type": "blockquote", "content": [{"type": "paragraph", "content": inline.clone()}]}));
+                inline.clear();
+            }
+            Event::Start(Tag::CodeBlock(kind)) => {
+                code_lang = match kind {
+                    CodeBlockKind::Fenced(lang) if !lang.is_empty() => Some(lang.to_string()),
+                    _ => None,
+                };
+                code_text.clear();
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                content.push(json!({"type": "codeBlock", "attrs": {"language": code_lang}, "content": [{"type": "text", "text": code_text.trim_end()}]}));
+                code_text.clear();
+            }
+            Event::Start(Tag::Table(_)) => {
+                active_table = true;
+                table_rows.clear();
+            }
+            Event::End(TagEnd::Table) => {
+                content.push(json!({"type": "table", "content": table_rows.clone()}));
+                active_table = false;
+            }
+            Event::Start(Tag::TableRow) => {
+                row_cells.clear();
+            }
+            Event::End(TagEnd::TableRow) => {
+                table_rows.push(json!({"type": "tableRow", "content": row_cells.clone()}));
+            }
+            Event::Start(Tag::TableCell) => {
+                cell_inline.clear();
+                inline.clear();
+                text_buffer.clear();
+            }
+            Event::End(TagEnd::TableCell) => {
+                push_text(&mut text_buffer, &mut cell_inline, &marks);
+                row_cells.push(json!({"type": "tableCell", "content": [{"type": "paragraph", "content": cell_inline.clone()}]}));
+            }
+            Event::Start(Tag::Strong) => marks.push("strong"),
+            Event::End(TagEnd::Strong) => marks.retain(|m| *m != "strong"),
+            Event::Start(Tag::Emphasis) => marks.push("em"),
+            Event::End(TagEnd::Emphasis) => marks.retain(|m| *m != "em"),
+            Event::Start(Tag::Link { dest_url, .. }) => {
+                marks.push(Box::leak(format!("link:{dest_url}").into_boxed_str()));
+            }
+            Event::End(TagEnd::Link) => marks.retain(|m| !m.starts_with("link:")),
+            Event::Text(text) => {
+                if code_lang.is_some() {
+                    code_text.push_str(&text);
+                } else {
+                    text_buffer.push_str(&text);
+                }
+            }
+            Event::Code(text) => {
+                push_text(&mut text_buffer, &mut inline, &marks);
+                let mut code_marks = marks.clone();
+                code_marks.push("code");
+                inline.push(text_node(&text, &code_marks));
+            }
+            Event::SoftBreak | Event::HardBreak => {
+                push_text(&mut text_buffer, &mut inline, &marks);
+                inline.push(json!({"type": "hardBreak"}));
+            }
+            Event::Rule => content.push(json!({"type": "rule"})),
+            _ => {}
+        }
+    }
+    if content.is_empty() && !markdown.trim().is_empty() {
+        content.push(json!({"type": "paragraph", "content": inline_text(markdown)}));
+    }
     json!({"version": 1, "type": "doc", "content": content})
+}
+
+fn text_node(text: &str, marks: &[&str]) -> Value {
+    if text.starts_with('@') {
+        return json!({"type": "mention", "attrs": {"id": text.trim_start_matches('@'), "text": text}});
+    }
+    let mut node = json!({"type": "text", "text": text});
+    let mut adf_marks = Vec::new();
+    for mark in marks {
+        match *mark {
+            "strong" => adf_marks.push(json!({"type": "strong"})),
+            "em" => adf_marks.push(json!({"type": "em"})),
+            "code" => adf_marks.push(json!({"type": "code"})),
+            value if value.starts_with("link:") => {
+                adf_marks.push(json!({"type": "link", "attrs": {"href": value.trim_start_matches("link:")}}));
+            }
+            _ => {}
+        }
+    }
+    if !adf_marks.is_empty() {
+        node["marks"] = json!(adf_marks);
+    }
+    node
 }
 
 fn inline_text(line: &str) -> Vec<Value> {
@@ -3488,6 +3837,23 @@ fn tools_schema() -> Value {
             "project", "workflow", "webhook", "report", "wiki", "compass", "goal", "jsm",
             "assets", "automation", "local", "audit", "branch", "skill", "mcp", "plan",
             "apply", "batch", "diff", "snapshot", "api", "graphql", "mask"
-        ]
+        ],
+        "implementation_status": {
+            "api": "live-jira-backed",
+            "graphql": "live-jira-backed",
+            "issue.view": "live-jira-backed when profile.site_url is configured; local fixture otherwise",
+            "issue.list": "live-jira-backed when profile.site_url is configured; local fixture otherwise",
+            "issue.create": "live-jira-backed when profile.site_url is configured; local fixture otherwise",
+            "issue.edit": "live-jira-backed when profile.site_url is configured; local fixture otherwise",
+            "issue.delete": "live-jira-backed when profile.site_url is configured; local fixture otherwise",
+            "issue.transition": "live-jira-backed when profile.site_url is configured; local fixture otherwise",
+            "comment": "live-jira-backed when profile.site_url is configured; local fixture otherwise",
+            "adf": "parser-backed local utility",
+            "jql": "parser-backed lint/explain; search delegates to issue.list",
+            "assets.lint": "parser-backed AQL/JQL-style lint",
+            "local": "sqlite-backed cache/search with vector abstraction placeholder",
+            "daemon": "status/IPC placeholder; stateless fallback remains default",
+            "reports_cross_product_jsm_automation": "schema-stable command surfaces; live endpoint wiring pending per command"
+        }
     })
 }

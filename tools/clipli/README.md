@@ -169,4 +169,4 @@ cargo run -- doctor --json --skip-clipboard
 
 - [CLIPLI_SPEC.md](/Users/weisberg/Documents/Development/agent_tools/tools/clipli/CLIPLI_SPEC.md) for the fuller product spec
 - [CLIPLI_PLAN.md](/Users/weisberg/Documents/Development/agent_tools/tools/clipli/CLIPLI_PLAN.md) for roadmap and implementation status
-- [CLIPLI_SKILL.md](/Users/weisberg/Documents/Development/agent_tools/tools/clipli/CLIPLI_SKILL.md) for agent-facing workflow guidance
+- [clipli/SKILL.md](/Users/weisberg/Documents/Development/agent_tools/tools/clipli/clipli/SKILL.md) for agent-facing workflow guidance
