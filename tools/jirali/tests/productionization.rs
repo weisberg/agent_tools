@@ -109,6 +109,88 @@ fn live_http_errors_map_to_structured_exit_codes() {
 }
 
 #[test]
+fn issue_list_preserves_v3_permission_failure_without_legacy_fallback_masking() {
+    let home = TempDir::new().unwrap();
+    let base = mock_once(401, r#"{"errorMessages":["auth required"]}"#);
+    jirali(&home)
+        .args([
+            "auth",
+            "login",
+            "--method",
+            "api-token",
+            "--site-url",
+            &base,
+            "--email",
+            "agent@example.com",
+            "--token",
+            "secret-token",
+        ])
+        .assert()
+        .success();
+
+    jirali(&home)
+        .args(["issue", "list", "--jql", "ORDER BY updated DESC"])
+        .assert()
+        .code(4)
+        .stderr(predicate::str::contains("\"code\":\"PERMISSION_DENIED\""));
+}
+
+#[test]
+fn issue_list_preserves_v3_validation_failure_without_legacy_fallback_masking() {
+    let home = TempDir::new().unwrap();
+    let base = mock_once(400, r#"{"errorMessages":["unbounded jql"]}"#);
+    jirali(&home)
+        .args([
+            "auth",
+            "login",
+            "--method",
+            "api-token",
+            "--site-url",
+            &base,
+            "--email",
+            "agent@example.com",
+            "--token",
+            "secret-token",
+        ])
+        .assert()
+        .success();
+
+    jirali(&home)
+        .args(["issue", "list", "--jql", "ORDER BY updated DESC"])
+        .assert()
+        .code(7)
+        .stderr(predicate::str::contains("\"code\":\"VALIDATION_FAILED\""));
+}
+
+#[test]
+fn auth_login_normalizes_jira_web_ui_site_url() {
+    let home = TempDir::new().unwrap();
+    let login = stdout_json(
+        jirali(&home)
+            .args([
+                "auth",
+                "login",
+                "--method",
+                "api-token",
+                "--site-url",
+                "https://example.atlassian.net/jira/",
+                "--email",
+                "agent@example.com",
+                "--token",
+                "secret-token",
+            ])
+            .assert(),
+    );
+    assert_eq!(login["site_url"], "https://example.atlassian.net");
+
+    let config = stdout_json(jirali(&home).args(["config", "show"]).assert());
+    assert_eq!(
+        config["profiles"]["default"]["site_url"],
+        "https://example.atlassian.net"
+    );
+}
+
+#[test]
 fn parser_backed_jql_reports_errors_with_rule_ids() {
     let home = TempDir::new().unwrap();
     let lint = stdout_json(

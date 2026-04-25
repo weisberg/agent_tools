@@ -539,6 +539,355 @@ pub fn generate_html(headers: &[String], rows: &[Vec<String>], config: &ExcelCon
     html
 }
 
+pub fn generate_svg(headers: &[String], rows: &[Vec<String>], config: &ExcelConfig) -> String {
+    let col_indices = resolve_columns(headers, config);
+    let ncols = col_indices.len();
+    let font_size = parse_font_size(&config.font_size).unwrap_or(12.0);
+    let row_height = config.row_height.unwrap_or(28).max(18);
+    let header_height = config.header_height.unwrap_or(30).max(20);
+    let title_height = if config.title.is_some() { 42 } else { 0 };
+    let total_row_data = if config.total_row {
+        Some(compute_total_row(headers, rows, &col_indices, config))
+    } else {
+        None
+    };
+
+    let mut col_widths = Vec::with_capacity(ncols);
+    for &idx in &col_indices {
+        let header_len = display_name(&headers[idx], config).chars().count();
+        let max_data_len = rows
+            .iter()
+            .filter_map(|row| row.get(idx))
+            .map(|value| value.chars().count())
+            .max()
+            .unwrap_or(0);
+        let max_total_len = total_row_data
+            .as_ref()
+            .and_then(|total| total.get(col_widths.len()))
+            .map(|value| value.chars().count())
+            .unwrap_or(0);
+        let chars = header_len.max(max_data_len).max(max_total_len);
+        col_widths.push(((chars as u32 * 8) + 32).clamp(88, 260));
+    }
+
+    let width: u32 = col_widths.iter().sum();
+    let body_rows = rows.len() as u32 + u32::from(total_row_data.is_some());
+    let height = title_height + header_height + body_rows * row_height;
+
+    let mut svg = String::new();
+    svg.push_str(&format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">"#
+    ));
+    svg.push_str(&format!(
+        r#"<rect width="100%" height="100%" fill="white"/><g font-family="{}" font-size="{font_size}">"#,
+        escape_xml(&config.font)
+    ));
+
+    let mut y = 0u32;
+    if let Some(title) = &config.title {
+        write_svg_rect(&mut svg, 0, y, width, title_height, "white", "#8EA9DB");
+        write_svg_text(
+            &mut svg,
+            title,
+            0,
+            y,
+            width,
+            title_height,
+            &SvgTextStyle {
+                fill: "black",
+                weight: "700",
+                style: "normal",
+                anchor: "middle",
+                font_size: 20.0,
+            },
+        );
+        y += title_height;
+    }
+
+    let mut x = 0u32;
+    for (pos, &idx) in col_indices.iter().enumerate() {
+        let width = col_widths[pos];
+        write_svg_rect(
+            &mut svg,
+            x,
+            y,
+            width,
+            header_height,
+            &config.header_bg,
+            "#8EA9DB",
+        );
+        write_svg_text(
+            &mut svg,
+            &display_name(&headers[idx], config),
+            x,
+            y,
+            width,
+            header_height,
+            &SvgTextStyle {
+                fill: &config.header_fg,
+                weight: "700",
+                style: "normal",
+                anchor: "middle",
+                font_size,
+            },
+        );
+        x += width;
+    }
+    y += header_height;
+
+    for (row_idx, row) in rows.iter().enumerate() {
+        write_svg_data_row(
+            &mut svg,
+            row,
+            headers,
+            &col_indices,
+            &col_widths,
+            y,
+            row_height,
+            row_idx,
+            config,
+            false,
+        );
+        y += row_height;
+    }
+
+    if let Some(total_data) = total_row_data {
+        write_svg_data_row(
+            &mut svg,
+            &total_data,
+            headers,
+            &col_indices,
+            &col_widths,
+            y,
+            row_height,
+            rows.len(),
+            config,
+            true,
+        );
+    }
+
+    svg.push_str("</g></svg>");
+    svg
+}
+
+pub fn svg_to_png(svg: &str, scale: f32) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let mut options = resvg::usvg::Options::default();
+    // Without this, resvg ships an empty font database and every <text>
+    // element rasterizes to nothing.
+    options.fontdb_mut().load_system_fonts();
+    let tree = resvg::usvg::Tree::from_str(svg, &options)?;
+    let size = tree.size().to_int_size();
+    let scale = if scale > 0.0 { scale } else { 1.0 };
+    let scaled_w = ((size.width() as f32) * scale).round().max(1.0) as u32;
+    let scaled_h = ((size.height() as f32) * scale).round().max(1.0) as u32;
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(scaled_w, scaled_h)
+        .ok_or("failed to allocate PNG pixmap")?;
+    resvg::render(
+        &tree,
+        resvg::tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    Ok(pixmap.encode_png()?)
+}
+
+/// Apply a clipli number-format name to a raw cell value for display in
+/// SVG/PNG output. Excel's `mso-number-format` codes only run inside Excel
+/// itself; the rasterizer needs the value pre-formatted.
+fn format_value_for_display(value: &str, format: &str) -> String {
+    if value.trim().is_empty() {
+        return value.to_string();
+    }
+    match format {
+        "currency" | "accounting" => format_as_currency(value).unwrap_or_else(|| value.to_string()),
+        "integer" => format_as_integer(value).unwrap_or_else(|| value.to_string()),
+        "percent_int" => format_as_percent(value, 0).unwrap_or_else(|| value.to_string()),
+        "percent_1dp" => format_as_percent(value, 1).unwrap_or_else(|| value.to_string()),
+        "percent" => format_as_percent(value, 2).unwrap_or_else(|| value.to_string()),
+        _ => value.to_string(),
+    }
+}
+
+fn comma_group(n: i64) -> String {
+    let neg = n < 0;
+    let mut s = n.abs().to_string();
+    let mut out = String::new();
+    while s.len() > 3 {
+        let tail = s.split_off(s.len() - 3);
+        out = format!(",{}{}", tail, out);
+    }
+    out = format!("{}{}", s, out);
+    if neg {
+        format!("-{out}")
+    } else {
+        out
+    }
+}
+
+fn format_as_currency(value: &str) -> Option<String> {
+    let n: f64 = value.trim().parse().ok()?;
+    let neg = n < 0.0;
+    let abs = n.abs();
+    let body = if abs.fract() == 0.0 {
+        format!("${}", comma_group(abs as i64))
+    } else {
+        let whole = abs.trunc() as i64;
+        let cents = (abs.fract() * 100.0).round() as i64;
+        format!("${}.{:02}", comma_group(whole), cents)
+    };
+    Some(if neg { format!("({body})") } else { body })
+}
+
+fn format_as_integer(value: &str) -> Option<String> {
+    let n: f64 = value.trim().parse().ok()?;
+    Some(comma_group(n.round() as i64))
+}
+
+fn format_as_percent(value: &str, decimals: usize) -> Option<String> {
+    let n: f64 = value.trim().parse().ok()?;
+    Some(format!("{:.*}%", decimals, n))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_svg_data_row(
+    svg: &mut String,
+    row: &[String],
+    headers: &[String],
+    col_indices: &[usize],
+    col_widths: &[u32],
+    y: u32,
+    row_height: u32,
+    row_idx: usize,
+    config: &ExcelConfig,
+    is_total: bool,
+) {
+    let font_size = parse_font_size(&config.font_size).unwrap_or(12.0);
+    let mut x = 0u32;
+    for (pos, &idx) in col_indices.iter().enumerate() {
+        let width = col_widths[pos];
+        let raw_value = row
+            .get(if is_total { pos } else { idx })
+            .map(|s| s.as_str())
+            .unwrap_or("");
+        let col_name = &headers[idx];
+        let props = resolve_cell_props(raw_value, col_name, row_idx, config);
+        // Apply the column's number format so SVG/PNG output shows
+        // "$4,230,000" instead of the raw "4230000". The total row is already
+        // pre-formatted upstream, so we only re-format data rows here.
+        let formatted = if !is_total {
+            config
+                .col_formats
+                .get(col_name)
+                .and_then(|fmt| fmt.number_format.as_deref())
+                .map(|fmt| format_value_for_display(raw_value, fmt))
+        } else {
+            None
+        };
+        let value = formatted.as_deref().unwrap_or(raw_value);
+        let bg = if is_total {
+            "#F2F2F2"
+        } else {
+            props
+                .bg_color
+                .unwrap_or(if config.style == TableStyle::Table {
+                    &config.band_bg
+                } else {
+                    "white"
+                })
+        };
+        let fill = props.fg_color.unwrap_or("black");
+        let anchor = match props.alignment.unwrap_or("left") {
+            "right" => "end",
+            "center" => "middle",
+            _ => "start",
+        };
+        write_svg_rect(svg, x, y, width, row_height, bg, "#8EA9DB");
+        write_svg_text(
+            svg,
+            value,
+            x,
+            y,
+            width,
+            row_height,
+            &SvgTextStyle {
+                fill,
+                weight: if props.is_bold || is_total {
+                    "700"
+                } else {
+                    "400"
+                },
+                style: if props.is_italic { "italic" } else { "normal" },
+                anchor,
+                font_size,
+            },
+        );
+        x += width;
+    }
+}
+
+struct SvgTextStyle<'a> {
+    fill: &'a str,
+    weight: &'a str,
+    style: &'a str,
+    anchor: &'a str,
+    font_size: f32,
+}
+
+fn write_svg_rect(
+    svg: &mut String,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    fill: &str,
+    stroke: &str,
+) {
+    svg.push_str(&format!(
+        r#"<rect x="{x}" y="{y}" width="{width}" height="{height}" fill="{}" stroke="{}" stroke-width="1"/>"#,
+        escape_xml(fill),
+        escape_xml(stroke)
+    ));
+}
+
+fn write_svg_text(
+    svg: &mut String,
+    text: &str,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    style: &SvgTextStyle,
+) {
+    let padding = 10u32;
+    let text_x = match style.anchor {
+        "end" => x + width.saturating_sub(padding),
+        "middle" => x + width / 2,
+        _ => x + padding,
+    };
+    let text_y = y as f32 + height as f32 / 2.0 + style.font_size * 0.35;
+    svg.push_str(&format!(
+        r#"<text x="{text_x}" y="{text_y:.1}" fill="{}" font-size="{:.1}" font-weight="{}" font-style="{}" text-anchor="{}">{}</text>"#,
+        escape_xml(style.fill),
+        style.font_size,
+        style.weight,
+        style.style,
+        style.anchor,
+        escape_xml(text)
+    ));
+}
+
+fn parse_font_size(value: &str) -> Option<f32> {
+    value.trim_end_matches("pt").parse::<f32>().ok()
+}
+
+fn escape_xml(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
 fn write_envelope(html: &mut String) {
     html.push_str(
         "<html xmlns:v=\"urn:schemas-microsoft-com:vml\"\n\
@@ -1012,4 +1361,36 @@ pub fn parse_formula_spec(spec: &str) -> Result<(String, usize, String), String>
         .map_err(|_| format!("invalid row index '{}' in --formula spec", parts[1]))?;
     let formula = parts[2].to_string();
     Ok((col, row, formula))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn generate_svg_outputs_table_text_and_escapes_xml() {
+        let headers = vec!["Name".to_string(), "Revenue".to_string()];
+        let rows = vec![vec!["Alice & Bob".to_string(), "$1,200".to_string()]];
+        let config = ExcelConfig {
+            title: Some("Q1 <Report>".to_string()),
+            ..ExcelConfig::default()
+        };
+
+        let svg = generate_svg(&headers, &rows, &config);
+
+        assert!(svg.starts_with("<svg"));
+        assert!(svg.contains("Q1 &lt;Report&gt;"));
+        assert!(svg.contains("Alice &amp; Bob"));
+        assert!(svg.contains("Revenue"));
+    }
+
+    #[test]
+    fn svg_to_png_returns_png_bytes() {
+        let headers = vec!["Name".to_string()];
+        let rows = vec![vec!["Alice".to_string()]];
+        let svg = generate_svg(&headers, &rows, &ExcelConfig::default());
+        let png = svg_to_png(&svg).unwrap();
+
+        assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+    }
 }

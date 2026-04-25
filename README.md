@@ -53,6 +53,8 @@ Highlights:
 - Stable JSON stdout, structured JSON errors, and meaningful exit codes.
 - Local deterministic state for tests, rehearsal, and offline planning.
 - Live Jira REST and GraphQL escape hatches for Atlassian Cloud/Data Center.
+- Atlassian Cloud URL handling that normalizes `/jira/` web UI links and
+  documents direct vs. scoped API token REST bases.
 - Core issue, comment, JQL, ADF, auth, audit, sprint, link, attachment,
   worklog, hierarchy, release, report, and planning surfaces.
 
@@ -77,17 +79,17 @@ Start here: [`tools/vaultli/README.md`](tools/vaultli/README.md)
 
 Make the system clipboard programmable. Capture formatted content, convert rich
 formats, templatize snippets, render them with fresh data, and generate
-Excel-friendly clipboard payloads.
+Excel-friendly clipboard payloads and table images.
 
 Highlights:
 
-- Inspect, read, and write HTML, RTF, plain text, PNG, TIFF, and PDF clipboard
+- Inspect, read, and write HTML, RTF, plain text, SVG, PNG, TIFF, and PDF clipboard
   content.
 - Capture formatted clipboard content as reusable templates.
 - Render templates with JSON data and paste them back with formatting intact.
 - Convert between RTF, HTML, plain text, and Jinja2-style templates.
-- Generate Excel-compatible HTML from CSV and edit clipboard tables by A1 cell
-  reference.
+- Generate Excel-style tables from CSV as editable HTML or copied SVG/PNG images,
+  then edit clipboard tables by A1 cell reference.
 
 Start here: [`tools/clipli/README.md`](tools/clipli/README.md)
 

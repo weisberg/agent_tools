@@ -35,6 +35,40 @@ Then use the raw REST escape hatch:
 cargo run -- api GET /rest/api/3/myself
 ```
 
+### Atlassian Cloud URL and Token Notes
+
+Use the site root as `--site-url`, for example
+`https://example.atlassian.net`. The browser URL
+`https://example.atlassian.net/jira/` is the web UI path, not the REST API
+base. Jirali normalizes a trailing `/jira/` during login and live requests, but
+docs and scripts should still use the root URL.
+
+Atlassian Cloud API tokens use Basic auth with the Atlassian account email and
+token. For classic/direct API tokens, REST calls use:
+
+```text
+https://example.atlassian.net/rest/api/3/...
+```
+
+Atlassian scoped API tokens may require the gateway base instead:
+
+```text
+https://api.atlassian.com/ex/jira/{cloudId}/rest/api/3/...
+```
+
+The `cloudId` can be discovered without credentials:
+
+```bash
+curl https://example.atlassian.net/_edge/tenant_info
+```
+
+Live diagnostics on 2026-04-24 confirmed that Basic auth works for both the
+direct site URL and the gateway URL for the tested personal API token, while
+Bearer auth was not valid for that token. If `/rest/api/3/myself` fails with
+`Client must be authenticated to access this resource`, verify the email/token
+pair, confirm whether the token is scoped, and try the gateway URL with Basic
+auth before assuming Jira is unavailable.
+
 ## Exit Codes
 
 | Code | Meaning |

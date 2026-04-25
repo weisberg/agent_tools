@@ -13,6 +13,7 @@ pub enum PbType {
     Html,      // public.html
     Rtf,       // public.rtf
     PlainText, // public.utf8-plain-text
+    Svg,       // public.svg-image
     Png,       // public.png
     Tiff,      // public.tiff
     Pdf,       // com.adobe.pdf
@@ -26,6 +27,7 @@ impl PbType {
             Self::Html => "public.html",
             Self::Rtf => "public.rtf",
             Self::PlainText => "public.utf8-plain-text",
+            Self::Svg => "public.svg-image",
             Self::Png => "public.png",
             Self::Tiff => "public.tiff",
             Self::Pdf => "com.adobe.pdf",
@@ -40,6 +42,7 @@ impl PbType {
             "public.html" => Self::Html,
             "public.rtf" => Self::Rtf,
             "public.utf8-plain-text" => Self::PlainText,
+            "public.svg-image" | "image/svg+xml" => Self::Svg,
             "public.png" => Self::Png,
             "public.tiff" => Self::Tiff,
             "com.adobe.pdf" => Self::Pdf,
@@ -74,7 +77,9 @@ impl PbTypeEntry {
     #[allow(dead_code)]
     pub fn as_utf8_str(&self) -> Option<&str> {
         match self.pb_type {
-            PbType::Html | PbType::Rtf | PbType::PlainText => std::str::from_utf8(&self.data).ok(),
+            PbType::Html | PbType::Rtf | PbType::PlainText | PbType::Svg => {
+                std::str::from_utf8(&self.data).ok()
+            }
             _ => None,
         }
     }
@@ -248,6 +253,7 @@ mod tests {
             PbType::Html,
             PbType::Rtf,
             PbType::PlainText,
+            PbType::Svg,
             PbType::Png,
             PbType::Tiff,
             PbType::Pdf,
@@ -314,7 +320,7 @@ mod tests {
 
     #[test]
     fn as_utf8_str_text_types() {
-        for pb_type in [PbType::Html, PbType::Rtf, PbType::PlainText] {
+        for pb_type in [PbType::Html, PbType::Rtf, PbType::PlainText, PbType::Svg] {
             let entry = PbTypeEntry {
                 pb_type,
                 uti: pb_type.uti().to_string(),

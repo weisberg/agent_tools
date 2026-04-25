@@ -9,7 +9,8 @@ description: |
   HTML, (4) capturing clipboard content as reusable templates, (5) RTF/HTML/plain text
   conversion, (6) template management (versioning, linting, search, import/export),
   (7) checking local clipboard/config readiness with doctor, (8) agent-command
-  templatization and batch rendering.
+  templatization and batch rendering, (9) copying generated Excel-style tables
+  as SVG or PNG image artifacts instead of editable HTML.
   Requires macOS. Binary must be built first with cargo build --release.
 ---
 
@@ -51,6 +52,7 @@ If a new agent is handed `clipli` as a skill, the main thing to understand is th
 - `paste` renders from stored template data. It does not use the current clipboard as input.
 - `render` writes files or stdout only. It does not touch the clipboard.
 - `capture --strategy agent --agent-command <cmd>` invokes an external process directly, passes a JSON request on stdin, and validates JSON from stdout.
+- If the user asks for an Excel table copied as SVG or PNG, use `clipli excel --copy-as svg` or `clipli excel --copy-as png`; do not use the default editable HTML clipboard path for that request.
 - If the clipboard format is unknown, start with `inspect`.
 
 ## Safe Vs Mutating Commands
@@ -91,6 +93,8 @@ CSV file  →  clipli excel  →  clipboard  →  Cmd+V into Excel
 | I want to... | Use |
 |---|---|
 | Turn a CSV into a formatted Excel table | `clipli excel data.csv` |
+| Copy an Excel-style table as SVG | `clipli excel data.csv --copy-as svg` |
+| Copy an Excel-style table as PNG | `clipli excel data.csv --copy-as png` |
 | Tweak colors/values on an existing clipboard table | `clipli excel-edit --set-bg "C3:#A0D771"` |
 | Put arbitrary HTML on the clipboard | `clipli write --type html -i file.html` |
 | Generate a table from JSON with a Jinja2 template | `clipli paste --from-table` |
@@ -104,11 +108,17 @@ CSV file  →  clipli excel  →  clipboard  →  Cmd+V into Excel
 
 ## 1. CSV to Excel Table
 
-Reads a CSV, generates Excel-native HTML, writes it to the clipboard. User then Cmd+V into Excel.
+Reads a CSV, generates Excel-native HTML by default, and writes it to the clipboard. It can also copy the same styled table as SVG or PNG when the user requests an image artifact. User then Cmd+V into the target app.
+
+When the user asks for SVG or PNG, pass `--copy-as svg` or `--copy-as png`. In those modes, `clipli` copies the requested image artifact to the clipboard instead of HTML.
 
 ```bash
 # Simplest — default formatting, all columns
 clipli excel data.csv
+
+# Copy an image artifact instead of editable Excel HTML
+clipli excel data.csv --copy-as svg
+clipli excel data.csv --copy-as png
 
 # With column formatting (repeatable flag: NAME:FORMAT[:ALIGN])
 clipli excel data.csv \
@@ -139,6 +149,8 @@ clipli excel data.csv \
 
 # Preview without copying to clipboard
 clipli excel data.csv --col "Revenue:currency" --dry-run > preview.html
+clipli excel data.csv --copy-as svg --dry-run > preview.svg
+clipli excel data.csv --copy-as png --dry-run --out-file preview.png
 
 # Pipe from stdin
 cat data.csv | clipli excel -
@@ -223,7 +235,7 @@ clipli read --type png -o screenshot.png    # binary types REQUIRE --output
 clipli read --type html -c                  # clean Office HTML cruft before output
 ```
 
-Supported types: `html`, `rtf`, `plain`, `png`, `tiff`, `pdf`. Binary types (`png`, `tiff`, `pdf`) require `--output` (can't print binary to terminal).
+Supported types: `html`, `rtf`, `plain`, `svg`, `png`, `tiff`, `pdf`. Binary types (`png`, `tiff`, `pdf`) require `--output` (can't print binary to terminal). SVG is text and can be printed to stdout.
 
 **Write** — put content onto the clipboard:
 
@@ -231,6 +243,7 @@ Supported types: `html`, `rtf`, `plain`, `png`, `tiff`, `pdf`. Binary types (`pn
 clipli write --type html -i report.html     # from file
 clipli write --type plain -i notes.md       # plain text from file
 echo "hello" | clipli write --type plain    # from stdin
+clipli write --type svg -i diagram.svg      # SVG text content
 clipli write --type png -i image.png        # binary content
 ```
 
@@ -430,7 +443,7 @@ clipli delete quarterly_report --keep-versions  # remove live template, preserve
 
 ## Excel Format Reference
 
-The `clipli excel` command generates Excel-native HTML (Office XML namespaces, `mso-*` properties, `mso-pattern`, `ProgId=Excel.Sheet`). Users never need to think about this — the command handles it.
+The default `clipli excel` command generates Excel-native HTML (Office XML namespaces, `mso-*` properties, `mso-pattern`, `ProgId=Excel.Sheet`). Users never need to think about this — the command handles it. When users request an image copy, `clipli excel --copy-as svg` copies SVG and `clipli excel --copy-as png` copies PNG instead of editable HTML.
 
 For hand-crafted Excel HTML via `clipli write --type html`, see [references/excel_format.md](references/excel_format.md).
 

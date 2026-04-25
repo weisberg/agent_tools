@@ -2,6 +2,10 @@
 
 This document describes everything learned about generating HTML that Excel's paste parser correctly interprets. It serves as the definitive reference for the companion `table_excel.html.j2` template.
 
+This reference covers the editable HTML path. For `clipli excel` image output,
+use `--copy-as svg` or `--copy-as png`; those modes render the CSV table as an
+image artifact on the clipboard instead of producing Excel-editable HTML.
+
 ---
 
 ## Why a separate Excel template exists

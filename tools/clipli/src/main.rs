@@ -328,7 +328,7 @@ enum Commands {
         #[arg(long)]
         name: Option<String>,
     },
-    /// Generate Excel-compatible HTML from CSV and write to clipboard
+    /// Generate an Excel-style table from CSV as HTML, SVG, or PNG
     Excel {
         /// CSV file path (or - for stdin)
         file: PathBuf,
@@ -378,6 +378,15 @@ enum Commands {
         /// Hyperlink pattern: NAME:URL_PATTERN with {} placeholder (repeatable)
         #[arg(long = "link", value_name = "NAME:URL")]
         links: Vec<String>,
+        /// Clipboard artifact to generate: html (editable table), svg, or png
+        #[arg(long, default_value = "html")]
+        copy_as: String,
+        /// Write dry-run output to a file; required for PNG dry-run
+        #[arg(long, short = 'o')]
+        out_file: Option<PathBuf>,
+        /// PNG scale factor (e.g. 2.5 = 250% size). Only applies when --copy-as png. Default 1.0
+        #[arg(long, default_value = "1.0")]
+        png_scale: f32,
         /// Merged title row above the header
         #[arg(long)]
         title: Option<String>,
@@ -408,7 +417,7 @@ enum Commands {
         /// Column font size override: NAME:SIZE (repeatable)
         #[arg(long = "col-font-size", value_name = "NAME:SIZE")]
         col_font_sizes: Vec<String>,
-        /// Print HTML to stdout instead of writing to clipboard
+        /// Print or write the generated artifact instead of writing to clipboard
         #[arg(long)]
         dry_run: bool,
         #[arg(long)]
@@ -648,6 +657,9 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
             bg_colors,
             color_rules,
             links,
+            copy_as,
+            out_file,
+            png_scale,
             title,
             total_row,
             total_formula,
@@ -677,6 +689,9 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
             bg_colors,
             color_rules,
             links,
+            copy_as,
+            out_file,
+            png_scale,
             title,
             total_row,
             total_formula,
@@ -1668,6 +1683,9 @@ fn cmd_excel(
     bg_colors: Vec<String>,
     color_rules: Vec<String>,
     links: Vec<String>,
+    copy_as: String,
+    out_file: Option<PathBuf>,
+    png_scale: f32,
     title: Option<String>,
     total_row: bool,
     total_formula: bool,
@@ -1781,38 +1799,122 @@ fn cmd_excel(
         cell_formulas,
     };
 
-    let html = excel::generate_html(&headers, &rows, &config);
-
-    if dry_run {
-        print!("{}", html);
-        return Ok(());
-    }
-
-    let plain = render::html_to_plain_text(&html);
-    pb::write_html(&html, Some(&plain))?;
-
+    let copy_as = copy_as.to_ascii_lowercase();
     let visible_cols = config
         .columns
         .as_ref()
         .map(|c| c.len())
         .unwrap_or(headers.len());
-    if json {
-        println!(
-            "{}",
-            serde_json::json!({
-                "ok": true,
-                "rows": rows.len(),
-                "columns": visible_cols,
-            })
-        );
-    } else {
-        eprintln!(
-            "Wrote {} rows × {} cols to clipboard ({})",
-            rows.len(),
-            visible_cols,
-            style
-        );
+
+    match copy_as.as_str() {
+        "html" => {
+            let html = excel::generate_html(&headers, &rows, &config);
+
+            if dry_run {
+                if let Some(path) = out_file {
+                    std::fs::write(&path, html.as_bytes())?;
+                } else {
+                    print!("{}", html);
+                }
+                return Ok(());
+            }
+
+            let plain = render::html_to_plain_text(&html);
+            pb::write_html(&html, Some(&plain))?;
+
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": true,
+                        "rows": rows.len(),
+                        "columns": visible_cols,
+                        "format": "html",
+                        "bytes": html.len(),
+                    })
+                );
+            } else {
+                eprintln!(
+                    "Wrote {} rows × {} cols to clipboard ({})",
+                    rows.len(),
+                    visible_cols,
+                    style
+                );
+            }
+        }
+        "svg" => {
+            let svg = excel::generate_svg(&headers, &rows, &config);
+
+            if dry_run {
+                if let Some(path) = out_file {
+                    std::fs::write(&path, svg.as_bytes())?;
+                } else {
+                    print!("{}", svg);
+                }
+                return Ok(());
+            }
+
+            pb::write(&[(PbType::Svg, svg.as_bytes())])?;
+
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": true,
+                        "rows": rows.len(),
+                        "columns": visible_cols,
+                        "format": "svg",
+                        "bytes": svg.len(),
+                    })
+                );
+            } else {
+                eprintln!(
+                    "Wrote {} rows × {} cols as SVG to clipboard",
+                    rows.len(),
+                    visible_cols
+                );
+            }
+        }
+        "png" => {
+            let svg = excel::generate_svg(&headers, &rows, &config);
+            let png = excel::svg_to_png(&svg, png_scale)?;
+
+            if dry_run {
+                let path = out_file.ok_or("PNG dry-run requires --out-file <file>")?;
+                std::fs::write(&path, &png)?;
+                return Ok(());
+            }
+
+            pb::write(&[(PbType::Png, &png)])?;
+
+            if json {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "ok": true,
+                        "rows": rows.len(),
+                        "columns": visible_cols,
+                        "format": "png",
+                        "bytes": png.len(),
+                    })
+                );
+            } else {
+                eprintln!(
+                    "Wrote {} rows × {} cols as PNG to clipboard",
+                    rows.len(),
+                    visible_cols
+                );
+            }
+        }
+        other => {
+            return Err(format!(
+                "unsupported --copy-as '{}': expected html, svg, or png",
+                other
+            )
+            .into());
+        }
     }
+
     Ok(())
 }
 
@@ -2111,11 +2213,12 @@ fn parse_pb_type(s: &str) -> Result<PbType, Box<dyn std::error::Error>> {
         "html" => Ok(PbType::Html),
         "rtf" => Ok(PbType::Rtf),
         "plain" | "text" | "plaintext" => Ok(PbType::PlainText),
+        "svg" => Ok(PbType::Svg),
         "png" => Ok(PbType::Png),
         "tiff" => Ok(PbType::Tiff),
         "pdf" => Ok(PbType::Pdf),
         other => Err(format!(
-            "unknown pasteboard type '{}': use html, rtf, plain, png, tiff, or pdf",
+            "unknown pasteboard type '{}': use html, rtf, plain, svg, png, tiff, or pdf",
             other
         )
         .into()),

@@ -902,6 +902,11 @@ Conditional formatting rules (data bars, icon sets, color scales) cannot be tran
 
 VML-based images can theoretically be embedded using `<v:imagedata>` within cells, but clipboard paste of images through HTML is unreliable. Charts are not representable in HTML clipboard format; Excel places them separately as image formats (EMF, PNG) on the clipboard.
 
+For `clipli`, keep this distinction explicit: default `clipli excel` produces
+editable Excel HTML, while `clipli excel --copy-as svg` and
+`clipli excel --copy-as png` copy a rendered table image artifact to the
+clipboard instead of HTML.
+
 ---
 
 ## 19. Reference: Capturing Excel's Actual Output

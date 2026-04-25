@@ -58,3 +58,31 @@ jirali graphql --query '{ ... }'
 ```
 
 Credentials come from the active profile configured with `jirali auth login`.
+
+For Atlassian Cloud, configure `--site-url` with the site root:
+
+```bash
+jirali auth login \
+  --method api-token \
+  --site-url https://example.atlassian.net \
+  --email you@example.com
+```
+
+Do not use the browser UI URL ending in `/jira/` in docs or scripts. Jirali
+normalizes that path defensively, but REST APIs live under the site root. Cloud
+API tokens use Basic auth with `email:api_token`; personal API tokens are not
+Bearer tokens.
+
+If a Cloud token appears valid but REST calls return `Client must be
+authenticated to access this resource`, check whether it is a scoped token. The
+scoped-token Jira gateway base is:
+
+```text
+https://api.atlassian.com/ex/jira/{cloudId}/rest/api/3/...
+```
+
+Find the `cloudId` with:
+
+```bash
+curl https://example.atlassian.net/_edge/tenant_info
+```

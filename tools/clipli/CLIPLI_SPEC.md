@@ -10,7 +10,7 @@
 
 ## 1. Vision
 
-clipli is a Rust CLI that turns the macOS pasteboard into a programmable, template-driven interface for agents and power users. It captures rich clipboard content (HTML, RTF, images) from any application, converts it to reusable Jinja2 templates, and pastes rendered templates back with full formatting preserved.
+clipli is a Rust CLI that turns the macOS pasteboard into a programmable, template-driven interface for agents and power users. It captures rich clipboard content (HTML, RTF, SVG, images) from any application, converts it to reusable Jinja2 templates, and pastes rendered templates back with full formatting preserved.
 
 **The core loop:**
 
@@ -46,7 +46,7 @@ clipli/
 │   ├── model.rs             # Shared data types
 │   ├── rtf.rs               # RTF → HTML conversion via macOS textutil
 │   ├── lint.rs              # Template linter (variable/schema consistency)
-│   ├── excel.rs             # CSV → Excel-native HTML pipeline
+│   ├── excel.rs             # CSV → Excel-style HTML/SVG/PNG pipeline
 │   └── excel_edit.rs        # In-place cell editing of clipboard Excel HTML
 ├── templates/
 │   ├── _base.html.j2        # Base template with common boilerplate
@@ -73,7 +73,7 @@ main.rs
   ├── model      (shared types, used by all)
   ├── rtf        (RTF → HTML via textutil)
   ├── lint       (template variable/schema validation)
-  ├── excel      (CSV → Excel-native HTML)
+  ├── excel      (CSV → Excel-style HTML/SVG/PNG)
   └── excel_edit (cell-level editing of clipboard HTML)
 ```
 
@@ -92,6 +92,7 @@ pub enum PbType {
     Html,          // public.html
     Rtf,           // public.rtf
     PlainText,     // public.utf8-plain-text
+    Svg,           // public.svg-image
     Png,           // public.png
     Tiff,          // public.tiff
     Pdf,           // com.adobe.pdf
@@ -104,6 +105,7 @@ impl PbType {
             Self::Html      => "public.html",
             Self::Rtf       => "public.rtf",
             Self::PlainText => "public.utf8-plain-text",
+            Self::Svg       => "public.svg-image",
             Self::Png       => "public.png",
             Self::Tiff      => "public.tiff",
             Self::Pdf       => "com.adobe.pdf",
@@ -465,11 +467,11 @@ clipli read [OPTIONS]
 **Flags:**
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--type` / `-t` | enum | `html` | Pasteboard type to read: `html`, `rtf`, `plain`, `png`, `pdf` |
+| `--type` / `-t` | enum | `html` | Pasteboard type to read: `html`, `rtf`, `plain`, `svg`, `png`, `tiff`, `pdf` |
 | `--clean` | bool | false | Run through HTML cleaning pipeline before output |
 | `--output` / `-o` | path | stdout | Write to file instead of stdout |
 
-For binary types (`png`, `pdf`, `tiff`), output goes to the file specified by `--output` (required for binary types).
+For binary types (`png`, `pdf`, `tiff`), output goes to the file specified by `--output` (required for binary types). SVG is text and may be printed to stdout or written to a file.
 
 ---
 
@@ -484,7 +486,7 @@ clipli write [OPTIONS]
 **Flags:**
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--type` / `-t` | enum | `html` | Pasteboard type: `html`, `rtf`, `plain` |
+| `--type` / `-t` | enum | `html` | Pasteboard type: `html`, `rtf`, `plain`, `svg`, `png`, `tiff`, `pdf` |
 | `--input` / `-i` | path | stdin | Read from file instead of stdin |
 | `--with-plain` | bool | true | Also write plain-text fallback (auto-stripped from HTML) |
 
@@ -625,7 +627,7 @@ clipli import <FILE> [--force] [--name NAME]
 
 #### `clipli excel`
 
-Generate Excel-compatible HTML from a CSV file and write it to the clipboard. Uses the `table_excel.html.j2` template internally, producing Office-native HTML with `mso-*` properties that Excel recognizes on paste.
+Generate an Excel-style table from a CSV file and write it to the clipboard as editable HTML, SVG, or PNG. The default `html` mode uses the `table_excel.html.j2` template internally, producing Office-native HTML with `mso-*` properties that Excel recognizes on paste. The `svg` and `png` modes copy image artifacts instead of editable HTML.
 
 ```
 clipli excel <FILE> [OPTIONS]
@@ -650,6 +652,8 @@ clipli excel <FILE> [OPTIONS]
 | `--bg-color NAME:HEX` | repeatable | none | Column background color |
 | `--color-if SPEC` | repeatable | none | Conditional color: `COLUMN:OP:VALUE:BG_HEX:FG_HEX`. Ops: `>=`, `<=`, `>`, `<`, `==`, `!=`, `contains`, `empty`, `not_empty` |
 | `--link NAME:URL` | repeatable | none | Hyperlink pattern with `{}` placeholder for cell value |
+| `--copy-as` | enum | `html` | Clipboard artifact to generate: `html` (editable table), `svg`, or `png` |
+| `--out-file` / `-o` | path | none | Write dry-run output to a file; required for PNG dry-run |
 | `--title TEXT` | string | none | Merged title row above the header |
 | `--total-row` | bool | false | Add a total row (auto-sums numeric columns) |
 | `--total-formula` | bool | false | Use SUM formulas in total row instead of pre-computed values |
@@ -660,7 +664,7 @@ clipli excel <FILE> [OPTIONS]
 | `--hide NAME` | repeatable | none | Hide a column |
 | `--rename OLD:NEW` | repeatable | none | Rename a column header |
 | `--col-font-size NAME:SIZE` | repeatable | none | Column font size override |
-| `--dry-run` | bool | false | Print HTML to stdout instead of writing to clipboard |
+| `--dry-run` | bool | false | Print or write the generated artifact instead of writing to clipboard |
 
 ---
 

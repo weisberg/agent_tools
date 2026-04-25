@@ -218,14 +218,17 @@ Requirement language follows RFC 2119: **SHALL** / **SHALL NOT** / **SHOULD** / 
 | FR-AUTH-2 | Jirali SHALL support Personal Access Token (Bearer) authentication for Jira Data Center and Server. |
 | FR-AUTH-3 | Jirali SHALL support OAuth 2.1 authorization code flow with PKCE for interactive users, including a localhost callback listener. |
 | FR-AUTH-4 | Jirali SHALL support OAuth Dynamic Client Registration (DCR) where the upstream endpoint supports it. |
-| FR-AUTH-5 | Jirali SHALL store secrets in the OS keychain by default (Keychain.app, libsecret, wincred). |
-| FR-AUTH-6 | Jirali SHALL accept secrets from environment variables (`JIRALI_API_TOKEN`, `JIRALI_EMAIL`) and from a restrictive-mode config file as fallbacks. |
-| FR-AUTH-7 | Jirali SHALL support mutual TLS client certificates for Data Center deployments. |
-| FR-AUTH-8 | Jirali SHALL support named profiles (`--profile`, `JIRALI_PROFILE`) enabling multi-site operation. |
-| FR-AUTH-9 | Jirali SHALL refresh OAuth access tokens in the background without user intervention when a refresh token is present. |
-| FR-AUTH-10 | Jirali SHALL NOT log secrets or emit them to stdout, stderr, or audit records. |
-| FR-AUTH-11 | Jirali SHALL emit a distinct `User-Agent` string that distinguishes agent-mode (`jirali-agent/<version>`) from human-mode (`jirali-human/<version>`). |
-| FR-AUTH-12 | Jirali SHALL support a configurable correlation ID header (`X-Jirali-Correlation-Id`) on every outbound request. |
+| FR-AUTH-5 | Jirali SHALL normalize Atlassian Cloud web UI URLs ending in `/jira/` to the site root before constructing REST URLs. |
+| FR-AUTH-6 | Jirali SHALL support Atlassian Cloud direct API token calls at `https://<site>.atlassian.net/rest/api/...` and scoped-token gateway calls at `https://api.atlassian.com/ex/jira/{cloudId}/rest/api/...`. |
+| FR-AUTH-7 | Jirali SHALL discover or accept the Atlassian Cloud ID used by scoped-token gateway URLs. |
+| FR-AUTH-8 | Jirali SHALL store secrets in the OS keychain by default (Keychain.app, libsecret, wincred). |
+| FR-AUTH-9 | Jirali SHALL accept secrets from environment variables (`JIRALI_API_TOKEN`, `JIRALI_EMAIL`) and from a restrictive-mode config file as fallbacks. |
+| FR-AUTH-10 | Jirali SHALL support mutual TLS client certificates for Data Center deployments. |
+| FR-AUTH-11 | Jirali SHALL support named profiles (`--profile`, `JIRALI_PROFILE`) enabling multi-site operation. |
+| FR-AUTH-12 | Jirali SHALL refresh OAuth access tokens in the background without user intervention when a refresh token is present. |
+| FR-AUTH-13 | Jirali SHALL NOT log secrets or emit them to stdout, stderr, or audit records. |
+| FR-AUTH-14 | Jirali SHALL emit a distinct `User-Agent` string that distinguishes agent-mode (`jirali-agent/<version>`) from human-mode (`jirali-human/<version>`). |
+| FR-AUTH-15 | Jirali SHALL support a configurable correlation ID header (`X-Jirali-Correlation-Id`) on every outbound request. |
 
 #### 6.1.2 Issue operations (FR-ISSUE)
 

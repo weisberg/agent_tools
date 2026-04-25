@@ -1427,6 +1427,14 @@ fn live_profile(ctx: &Context) -> Result<Option<Profile>> {
     }
 }
 
+fn normalize_site_url(raw: &str) -> String {
+    let mut url = raw.trim().trim_end_matches('/').to_string();
+    if let Some(base) = url.strip_suffix("/jira") {
+        url = base.to_string();
+    }
+    url
+}
+
 fn jira_request(
     ctx: &Context,
     profile: &Profile,
@@ -1438,6 +1446,7 @@ fn jira_request(
         .site_url
         .as_ref()
         .ok_or_else(|| JiraliError::Usage("profile is missing site_url".into()))?;
+    let site = normalize_site_url(site);
     let url = if path.starts_with("http://") || path.starts_with("https://") {
         path.to_string()
     } else {
@@ -1596,7 +1605,11 @@ fn auth(ctx: &Context, cmd: AuthCommand) -> Result<Value> {
         AuthCommand::Login(args) => {
             let mut config = load_config(ctx)?;
             let profile = config.profiles.entry(ctx.profile.clone()).or_default();
-            profile.site_url = args.site_url.or(profile.site_url.clone());
+            profile.site_url = args
+                .site_url
+                .as_deref()
+                .map(normalize_site_url)
+                .or(profile.site_url.clone());
             profile.email = args.email.or(profile.email.clone());
             profile.auth_method = Some(args.method.clone());
             let mut secret_stored = profile.api_token.is_some() || profile.pat.is_some();
@@ -1788,22 +1801,35 @@ fn issue(ctx: &Context, cmd: IssueCommand) -> Result<Value> {
                     "maxResults": args.limit,
                     "nextPageToken": args.page_token,
                 });
-                let value = jira_request(
+                let primary = jira_request(
                     ctx,
                     &profile,
                     Method::POST,
                     "/rest/api/3/search/jql",
                     Some(body),
-                )
-                .or_else(|_| {
-                    jira_request(
+                );
+                let value = match primary {
+                    Ok(value) => value,
+                    Err(JiraliError::Permission(message)) => {
+                        return Err(JiraliError::Permission(message))
+                    }
+                    Err(JiraliError::RateLimited(message)) => {
+                        return Err(JiraliError::RateLimited(message))
+                    }
+                    Err(JiraliError::Timeout(message)) => {
+                        return Err(JiraliError::Timeout(message))
+                    }
+                    Err(JiraliError::Validation(message)) => {
+                        return Err(JiraliError::Validation(message))
+                    }
+                    Err(_) => jira_request(
                         ctx,
                         &profile,
                         Method::POST,
                         "/rest/api/2/search",
                         Some(json!({"jql": jql, "maxResults": args.limit})),
-                    )
-                })?;
+                    )?,
+                };
                 if let Some(issues) = value.get("issues").and_then(Value::as_array) {
                     for issue in issues {
                         let _ = cache_issue(ctx, issue);
@@ -3106,6 +3132,7 @@ fn api(ctx: &Context, args: ApiArgs) -> Result<Value> {
         .site_url
         .as_ref()
         .ok_or_else(|| JiraliError::Usage("profile is missing site_url".into()))?;
+    let site = normalize_site_url(site);
     let url = if args.path.starts_with("http") {
         args.path.clone()
     } else {

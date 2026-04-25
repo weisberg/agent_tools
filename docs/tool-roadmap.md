@@ -32,8 +32,8 @@ Start with:
 
 ### `clipli`
 
-macOS clipboard intelligence for capture, templated paste, Excel-native HTML
-generation, and format conversion.
+macOS clipboard intelligence for capture, templated paste, Excel-style HTML/SVG/PNG
+table generation, and format conversion.
 
 Best when an agent needs to inspect the current clipboard, preserve formatting,
 or preview rich output before writing it back.

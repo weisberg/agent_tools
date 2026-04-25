@@ -232,3 +232,48 @@ fn test_doctor_json_skip_clipboard() {
         .stdout(predicate::str::contains(r#""pasteboard""#))
         .stdout(predicate::str::contains(r#""skipped""#));
 }
+
+#[test]
+fn test_excel_svg_dry_run() {
+    clipli()
+        .args(["excel", "-", "--copy-as", "svg", "--dry-run"])
+        .write_stdin("Name,Revenue\nAlice,$1200\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<svg"))
+        .stdout(predicate::str::contains("Alice"))
+        .stdout(predicate::str::contains("Revenue"));
+}
+
+#[test]
+fn test_excel_png_dry_run_requires_output_file() {
+    clipli()
+        .args(["excel", "-", "--copy-as", "png", "--dry-run"])
+        .write_stdin("Name,Revenue\nAlice,$1200\n")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("PNG dry-run requires --out-file"));
+}
+
+#[test]
+fn test_excel_png_dry_run_writes_png_file() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let png_path = dir.path().join("table.png");
+
+    clipli()
+        .args([
+            "excel",
+            "-",
+            "--copy-as",
+            "png",
+            "--dry-run",
+            "--out-file",
+            png_path.to_str().unwrap(),
+        ])
+        .write_stdin("Name,Revenue\nAlice,$1200\n")
+        .assert()
+        .success();
+
+    let png = std::fs::read(png_path).unwrap();
+    assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+}

@@ -1,5 +1,10 @@
 # Excel Clipboard HTML Quick Reference
 
+This reference covers the editable HTML path used by `clipli excel` by default.
+If a user asks for a table copied as SVG or PNG, use `clipli excel --copy-as svg`
+or `clipli excel --copy-as png` so the requested image artifact is placed on the
+clipboard instead.
+
 ## Critical Rules
 
 - Use `background:` not `background-color:` — Excel ignores `background-color`

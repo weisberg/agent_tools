@@ -28,8 +28,8 @@ The next stage is to turn that solid core into a more complete product: close th
 
 ### What is already implemented
 
-- [x] `inspect`, `read`, `write`, `capture`, `paste`, `list`, `show`, `edit`, `delete`, `versions`, `restore`, `lint`, `search`, `export`, `import`, `excel`, `excel-edit`, and `convert` commands (18 total)
-- [x] pasteboard support for HTML, RTF, plain text, PNG, TIFF, and PDF payloads
+- [x] `inspect`, `read`, `write`, `capture`, `paste`, `list`, `show`, `edit`, `delete`, `versions`, `restore`, `lint`, `search`, `export`, `import`, `excel`, `excel-edit`, `render`, `convert`, and `doctor` commands (20 total)
+- [x] pasteboard support for HTML, RTF, plain text, SVG, PNG, TIFF, and PDF payloads
 - [x] HTML cleaning with target-aware CSS filtering for Excel, PowerPoint, Google Sheets, and generic HTML
 - [x] Jinja2-compatible rendering with custom filters and HTML-to-plain-text conversion
 - [x] heuristic templatization for dates, currency, percentages, emails, large numbers, quarters, and cell text
@@ -49,10 +49,11 @@ The next stage is to turn that solid core into a more complete product: close th
 - [x] batch template rendering via `render`
 - [x] `-v` / `-vv` / `-vvv` tracing for automation debugging
 - [x] `doctor` environment readiness checks with JSON output
+- [x] `excel --copy-as svg|png` image clipboard output for table artifacts
 
 ### Verified baseline
 
-`cargo test` passes 205 tests with 0 failures, including the unit and integration suites, with 7 GUI-dependent pasteboard tests still ignored as expected.
+`cargo test` passes 210 tests with 0 failures, including the unit and integration suites, with 7 GUI-dependent pasteboard tests still ignored as expected.
 
 ### Completed so far
 
@@ -65,7 +66,7 @@ The next stage is to turn that solid core into a more complete product: close th
 - [x] the current automated baseline is green across unit and integration tests, with only GUI-dependent clipboard tests ignored
 - [x] **v0.2 complete:** RTF conversion via `textutil` (`src/rtf.rs`), config cascade with all 6 fields wired, `capture --preview`, JSON error output with `code()` on all error types and `--json` detection in `main()`, 186 tests passing
 - [x] **v0.3 complete:** template versioning (snapshot/list/load/restore, prune to 20 max), template linting (`src/lint.rs`, 5 checks), full-text search, import/export ZIP bundles with `manifest.json`, store durability (atomic writes via temp dir + rename, `delete --keep-versions`), auto-snapshots on `edit`
-- [x] **v0.4 implemented:** external agent command execution, agent response validation, batch `render`, JSON-oriented automation output, debug tracing, and `doctor` readiness checks, 205 tests passing
+- [x] **v0.4 implemented:** external agent command execution, agent response validation, batch `render`, JSON-oriented automation output, debug tracing, `doctor` readiness checks, and SVG/PNG table clipboard output, 210 tests passing
 
 ### Highest-confidence gaps from the current implementation
 

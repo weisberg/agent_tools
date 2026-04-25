@@ -17,14 +17,14 @@ That makes it useful for workflows like:
 - saving a formatted table, slide fragment, or document snippet as a reusable template
 - filling the same template with new values and pasting it back into Office or browser apps
 - converting clipboard or file content between HTML, Jinja2 templates, RTF, and plain text
-- generating Excel-compatible HTML from CSV so it pastes cleanly into Excel
+- generating Excel-style tables from CSV as editable HTML or copied SVG/PNG images
 - making targeted edits to clipboard table cells without rebuilding the whole artifact
 
 ## Core Capabilities
 
 ### Clipboard inspection and I/O
 
-`clipli` can inspect the current clipboard and read or write several rich formats used by macOS apps, including HTML, RTF, plain text, PNG, TIFF, and PDF.
+`clipli` can inspect the current clipboard and read or write several rich formats used by macOS apps, including HTML, RTF, plain text, SVG, PNG, TIFF, and PDF.
 
 Typical commands:
 
@@ -79,12 +79,18 @@ clipli convert --from j2 --to html -D '{"name":"Alice"}' -i template.j2
 
 ### Excel-focused workflows
 
-`clipli` can turn CSV into Excel-compatible HTML and place it on the clipboard, then refine pasted table content by A1-style cell reference.
+`clipli` can turn CSV into Excel-compatible HTML and place it on the clipboard, copy the same table as SVG or PNG when an image is requested, then refine pasted HTML table content by A1-style cell reference.
+
+Use the default `html` mode when the table should remain editable after pasting into Excel. Use `--copy-as svg` or `--copy-as png` when the user explicitly asks for an image artifact; those modes copy only the requested image format to the clipboard.
 
 Typical commands:
 
 ```bash
 clipli excel data.csv --col "Revenue:currency:right"
+clipli excel data.csv --copy-as svg
+clipli excel data.csv --copy-as png
+clipli excel data.csv --copy-as svg --dry-run > preview.svg
+clipli excel data.csv --copy-as png --dry-run --out-file preview.png
 clipli excel-edit --set-bg "D4:#A0D771" --set-fg "D4:#628048"
 ```
 
@@ -101,7 +107,7 @@ Current top-level commands:
 - `versions`, `restore` — inspect and roll back template history
 - `lint`, `search` — validate and discover templates
 - `export`, `import` — move templates between machines
-- `excel`, `excel-edit` — build and tweak Excel-friendly clipboard content
+- `excel`, `excel-edit` — build Excel-style clipboard content as editable HTML or SVG/PNG images, then tweak editable HTML tables
 - `render` — render a template to files or stdout without touching the clipboard
 - `convert` — convert between supported formats
 - `doctor` — check local environment, config, store, pasteboard, and agent readiness
