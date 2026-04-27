@@ -74,6 +74,10 @@ pub(crate) fn run_apply_plan(args: ApplyPlanArgs) -> Result<Outcome, MdliError> 
             ));
         }
     }
+    let recipe_hash = plan_root
+        .get("recipe_hash")
+        .and_then(|v| v.as_str())
+        .map(ToString::to_string);
     let ops = plan_root
         .get("ops")
         .and_then(|v| v.as_array())
@@ -82,7 +86,7 @@ pub(crate) fn run_apply_plan(args: ApplyPlanArgs) -> Result<Outcome, MdliError> 
     let before = doc.render();
     let mut applied = Vec::new();
     for op in &ops {
-        apply_plan_op(&mut doc, op)?;
+        apply_plan_op(&mut doc, op, recipe_hash.as_deref())?;
         applied.push(op.clone());
     }
     let changed = before != doc.render();
@@ -114,7 +118,7 @@ pub(crate) fn run_patch(args: PatchArgs) -> Result<Outcome, MdliError> {
     let before = doc.render();
     let mut applied = Vec::new();
     for op in &ops {
-        apply_plan_op(&mut doc, op)?;
+        apply_plan_op(&mut doc, op, None)?;
         applied.push(op.clone());
     }
     let changed = before != doc.render();
@@ -127,7 +131,11 @@ pub(crate) fn run_patch(args: PatchArgs) -> Result<Outcome, MdliError> {
     }))
 }
 
-fn apply_plan_op(doc: &mut MarkdownDocument, op: &Value) -> Result<(), MdliError> {
+fn apply_plan_op(
+    doc: &mut MarkdownDocument,
+    op: &Value,
+    recipe_hash: Option<&str>,
+) -> Result<(), MdliError> {
     let kind = op
         .get("op")
         .and_then(|v| v.as_str())
@@ -140,7 +148,9 @@ fn apply_plan_op(doc: &mut MarkdownDocument, op: &Value) -> Result<(), MdliError
         "rename_section" => apply_rename_section(doc, op),
         "delete_section" => apply_delete_section(doc, op),
         "replace_section_body" => apply_replace_section_body(doc, op),
-        "replace_block" | "replace_managed_section_body" => apply_replace_block(doc, op),
+        "replace_block" | "replace_managed_section_body" => {
+            apply_replace_block(doc, op, recipe_hash)
+        }
         "ensure_block" => apply_ensure_block(doc, op),
         "lock_block" | "unlock_block" => apply_set_block_lock(doc, op, kind == "lock_block"),
         "replace_table" => apply_replace_table(doc, op),
@@ -250,7 +260,11 @@ fn apply_replace_section_body(doc: &mut MarkdownDocument, op: &Value) -> Result<
     Ok(())
 }
 
-fn apply_replace_block(doc: &mut MarkdownDocument, op: &Value) -> Result<(), MdliError> {
+fn apply_replace_block(
+    doc: &mut MarkdownDocument,
+    op: &Value,
+    recipe_hash: Option<&str>,
+) -> Result<(), MdliError> {
     let id = require_str(op, "id")?.to_string();
     let body = if let Some(file) = op.get("body_from_file").and_then(|v| v.as_str()) {
         read_text_path(Path::new(file))?
@@ -268,14 +282,53 @@ fn apply_replace_block(doc: &mut MarkdownDocument, op: &Value) -> Result<(), Mdl
         .or_else(|| op.get("section"))
         .and_then(|v| v.as_str());
     if let Some(parent) = parent {
-        return ensure_or_replace_block_in_section(doc, parent, &id, body_lines, "end", true);
+        return upsert_block_with_provenance(doc, parent, &id, body_lines, recipe_hash);
     }
     let on_modified = match op.get("on_modified").and_then(|v| v.as_str()) {
         Some("force") => OnModified::Force,
         Some("three-way") => OnModified::ThreeWay,
         _ => OnModified::Fail,
     };
+    if recipe_hash.is_some() {
+        return replace_block_with_provenance(doc, &id, body_lines, &on_modified, recipe_hash);
+    }
     replace_block(doc, &id, body_lines, &on_modified)
+}
+
+fn upsert_block_with_provenance(
+    doc: &mut MarkdownDocument,
+    parent_section: &str,
+    block_id: &str,
+    body: Vec<String>,
+    recipe_hash: Option<&str>,
+) -> Result<(), MdliError> {
+    let index = index_document(doc);
+    if index.blocks.iter().any(|b| b.id == block_id) {
+        return replace_block_with_provenance(
+            doc,
+            block_id,
+            body,
+            &OnModified::Force,
+            recipe_hash,
+        );
+    }
+    let section = resolve_section(&index, parent_section)?;
+    let lines = render_block_lines_with_provenance(block_id, body, false, recipe_hash);
+    let insert_at = section.end;
+    let mut insertion = Vec::new();
+    if insert_at > 0
+        && doc
+            .lines
+            .get(insert_at - 1)
+            .map(|l| !l.trim().is_empty())
+            .unwrap_or(false)
+    {
+        insertion.push(String::new());
+    }
+    insertion.extend(lines);
+    insertion.push(String::new());
+    doc.lines.splice(insert_at..insert_at, insertion);
+    Ok(())
 }
 
 fn apply_ensure_block(doc: &mut MarkdownDocument, op: &Value) -> Result<(), MdliError> {

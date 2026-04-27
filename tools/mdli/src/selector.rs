@@ -1,5 +1,7 @@
 use std::collections::BTreeSet;
 
+use serde_json::{json, Value};
+
 use crate::*;
 
 pub(crate) fn resolve_section(
@@ -13,7 +15,12 @@ pub(crate) fn resolve_section(
         .cloned()
         .collect::<Vec<_>>();
     if !by_id.is_empty() {
-        return one_match(by_id, "E_SELECTOR_NOT_FOUND", "no section matched selector");
+        return one_match(
+            by_id,
+            "E_SELECTOR_NOT_FOUND",
+            format!("no section matched selector {selector}"),
+            section_match_details,
+        );
     }
     let wanted = split_path(selector);
     let matches = index
@@ -28,7 +35,8 @@ pub(crate) fn resolve_section(
     one_match(
         matches,
         "E_SELECTOR_NOT_FOUND",
-        "no section matched selector",
+        format!("no section matched selector {selector}"),
+        section_match_details,
     )
 }
 
@@ -46,6 +54,7 @@ pub(crate) fn resolve_table_by_name(
         matches,
         "E_SELECTOR_NOT_FOUND",
         format!("no table named {name}"),
+        table_match_details,
     )
 }
 
@@ -60,22 +69,57 @@ pub(crate) fn resolve_block(index: &DocumentIndex, id: &str) -> Result<BlockInfo
         matches,
         "E_SELECTOR_NOT_FOUND",
         format!("no block with id {id}"),
+        block_match_details,
     )
 }
 
-pub(crate) fn one_match<T>(
+pub(crate) fn one_match<T, F>(
     matches: Vec<T>,
     missing_code: &'static str,
     missing: impl Into<String>,
-) -> Result<T, MdliError> {
+    describe: F,
+) -> Result<T, MdliError>
+where
+    F: Fn(&T) -> Value,
+{
     match matches.len() {
         0 => Err(MdliError::user(missing_code, missing.into())),
         1 => Ok(matches.into_iter().next().unwrap()),
-        _ => Err(MdliError::user(
-            "E_AMBIGUOUS_SELECTOR",
-            "selector matched more than one structure",
-        )),
+        _ => {
+            let descriptions = matches.iter().map(&describe).collect::<Vec<_>>();
+            Err(MdliError::user(
+                "E_AMBIGUOUS_SELECTOR",
+                "selector matched more than one structure",
+            )
+            .with_details(json!({"matches": descriptions})))
+        }
     }
+}
+
+fn section_match_details(s: &SectionInfo) -> Value {
+    json!({
+        "id": s.id,
+        "path": s.path,
+        "line": s.line,
+        "level": s.level,
+    })
+}
+
+fn table_match_details(t: &TableInfo) -> Value {
+    json!({
+        "name": t.name,
+        "section_id": t.section_id,
+        "section_path": t.section_path,
+        "line": t.line,
+    })
+}
+
+fn block_match_details(b: &BlockInfo) -> Value {
+    json!({
+        "id": b.id,
+        "line": b.line,
+        "locked": b.locked,
+    })
 }
 
 pub(crate) fn selector_from_id_path(

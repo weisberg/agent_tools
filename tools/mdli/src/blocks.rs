@@ -145,26 +145,97 @@ pub(crate) fn replace_block(
     if let Some(expected) = &block.checksum {
         let actual = checksum_body(&doc.lines[block.start + 1..block.end - 1]);
         if expected != &actual {
-            match on_modified {
-                OnModified::Fail => {
-                    return Err(MdliError::invariant(
-                        "E_BLOCK_MODIFIED",
-                        format!("block {block_id} checksum does not match"),
-                    ));
-                }
-                OnModified::ThreeWay => {
-                    return Err(MdliError::invariant(
-                        "E_BLOCK_MODIFIED",
-                        "three-way conflict artifacts are not implemented in this MVP",
-                    ));
-                }
-                OnModified::Force => {}
-            }
+            handle_block_conflict(
+                doc,
+                block_id,
+                expected,
+                &actual,
+                &doc.lines[block.start + 1..block.end - 1].to_vec(),
+                &body,
+                on_modified,
+            )?;
         }
     }
     let rendered = render_block_lines(block_id, body, false);
     doc.lines.splice(block.start..block.end, rendered);
     Ok(())
+}
+
+pub(crate) fn handle_block_conflict(
+    doc: &MarkdownDocument,
+    block_id: &str,
+    recorded_checksum: &str,
+    actual_checksum: &str,
+    on_disk_body: &[String],
+    incoming_body: &[String],
+    on_modified: &OnModified,
+) -> Result<(), MdliError> {
+    match on_modified {
+        OnModified::Fail => Err(MdliError::invariant(
+            "E_BLOCK_MODIFIED",
+            format!("block {block_id} checksum does not match"),
+        )),
+        OnModified::ThreeWay => {
+            let artifact = write_three_way_artifact(
+                doc,
+                block_id,
+                recorded_checksum,
+                actual_checksum,
+                on_disk_body,
+                incoming_body,
+            )?;
+            Err(MdliError::invariant(
+                "E_BLOCK_MODIFIED",
+                format!(
+                    "block {block_id} checksum does not match; wrote three-way artifact to {artifact}"
+                ),
+            ))
+        }
+        OnModified::Force => Ok(()),
+    }
+}
+
+fn write_three_way_artifact(
+    doc: &MarkdownDocument,
+    block_id: &str,
+    recorded_checksum: &str,
+    actual_checksum: &str,
+    on_disk_body: &[String],
+    incoming_body: &[String],
+) -> Result<String, MdliError> {
+    let source = doc.source_path.as_ref().ok_or_else(|| {
+        MdliError::user(
+            "E_WRITE_FAILED",
+            "three-way conflict artifacts require a real file path",
+        )
+    })?;
+    let artifact_path = {
+        let mut buf = source.clone().into_os_string();
+        buf.push(".mdli.conflict");
+        std::path::PathBuf::from(buf)
+    };
+    let artifact = serde_json::json!({
+        "schema": OUTPUT_SCHEMA,
+        "kind": "three-way-conflict",
+        "block_id": block_id,
+        "source_path": source.display().to_string(),
+        "recorded_checksum": recorded_checksum,
+        "actual_checksum": actual_checksum,
+        "on_disk_body": on_disk_body.join("\n"),
+        "incoming_body": incoming_body.join("\n"),
+    });
+    let serialized = serde_json::to_string_pretty(&artifact).unwrap_or_default();
+    std::fs::write(&artifact_path, serialized).map_err(|e| {
+        MdliError::io(
+            "E_WRITE_FAILED",
+            format!(
+                "failed to write three-way artifact {}",
+                artifact_path.display()
+            ),
+            e,
+        )
+    })?;
+    Ok(artifact_path.display().to_string())
 }
 
 pub(crate) fn block_set_lock(args: BlockGetMutateArgs, locked: bool) -> Result<Outcome, MdliError> {

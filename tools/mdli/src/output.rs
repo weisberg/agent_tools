@@ -43,16 +43,25 @@ pub(crate) fn emit_success(outcome: Outcome, force_json: bool) {
 
 pub(crate) fn emit_error(err: &MdliError, force_json: bool) {
     if force_json {
+        let mut payload = json!({
+            "code": err.code(),
+            "message": err.message()
+        });
+        if let (Some(details), Some(obj)) = (err.details(), payload.as_object_mut()) {
+            obj.insert("details".to_string(), details.clone());
+        }
         print_json(&json!({
             "schema": OUTPUT_SCHEMA,
             "ok": false,
-            "error": {
-                "code": err.code(),
-                "message": err.message()
-            }
+            "error": payload,
         }));
     } else {
         eprintln!("{}: {}", err.code(), err.message());
+        if let Some(details) = err.details() {
+            if let Ok(serialized) = serde_json::to_string_pretty(details) {
+                eprintln!("{}: details {}", err.code(), serialized);
+            }
+        }
     }
 }
 

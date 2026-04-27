@@ -137,11 +137,18 @@ MVP surface implemented (PRD Phases 1–4): `inspect`, `tree`, `context`,
 `id list/assign`, `section list/get/ensure/replace/delete/move/rename`,
 `table list/get/replace/upsert/delete-row/sort/fmt`,
 `block list/get/ensure/replace/lock/unlock`, `frontmatter get/set/delete`,
-`lint`. Post-MVP layer also implemented (Phases 5–7): `template render`,
-`recipe validate`, `apply`, `build`, `plan`, `apply-plan`, `patch`.
+`lint`, `validate --schema`. Post-MVP layer also implemented (Phases 5–7):
+`template render`, `recipe validate`, `apply`, `build`, `plan`, `apply-plan`,
+`patch`. `block replace --on-modified three-way` writes a
+`<file>.mdli.conflict` JSON sidecar with the recorded, on-disk, and incoming
+bodies. `E_AMBIGUOUS_SELECTOR` carries a structured `details.matches` array
+so agents can disambiguate without re-parsing.
 
-Not yet implemented: `validate FILE --schema ...`, semantic `diff` (Phase 8),
-three-way conflict artifacts, and Git integration.
+`apply` and `apply-plan` produce byte-identical output (recipe-hash
+provenance is now threaded through the plan).
+
+Not yet implemented: semantic `diff` (Phase 8). Git integration is
+backlogged.
 
 Current docs:
 
@@ -149,11 +156,12 @@ Current docs:
 - `tools/mdli/SKILL.md`
 - `tools/mdli/mdli-prd-final.md`
 
-Test coverage: 76 integration tests across `cli_contract`, `fixtures`,
-`recipe`, `template`, `tree`, and `context`, plus a fixture corpus covering
-the PRD's documented edge cases (duplicate headings, escaped `>`, Unicode,
-code-fence content, malformed tables, locked/tampered blocks, orphan markers,
-newer-version markers, inline HTML, YAML/TOML frontmatter, CRLF, BOM).
+Test coverage: 84 integration tests across `cli_contract`, `fixtures`,
+`recipe`, `template`, `tree`, `context`, and `validate`, plus a fixture
+corpus covering the PRD's documented edge cases (duplicate headings, escaped
+`>`, Unicode, code-fence content, malformed tables, locked/tampered blocks,
+orphan markers, newer-version markers, inline HTML, YAML/TOML frontmatter,
+CRLF, BOM).
 
 The legacy Python script `tools/mdli/markdown_cleaner.py` is superseded by the
 Rust crate.

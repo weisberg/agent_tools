@@ -20,6 +20,7 @@ mod tables;
 mod template;
 mod tree;
 mod util;
+mod validate;
 
 pub use cli::main_entry;
 
@@ -46,3 +47,4 @@ pub(crate) use tables::*;
 pub(crate) use template::*;
 pub(crate) use tree::*;
 pub(crate) use util::*;
+pub(crate) use validate::*;

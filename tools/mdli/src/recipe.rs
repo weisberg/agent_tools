@@ -357,21 +357,15 @@ pub(crate) fn replace_block_with_provenance(
     if let Some(expected) = &block.checksum {
         let actual = checksum_body(&doc.lines[block.start + 1..block.end - 1]);
         if expected != &actual {
-            match on_modified {
-                OnModified::Fail => {
-                    return Err(MdliError::invariant(
-                        "E_BLOCK_MODIFIED",
-                        format!("block {block_id} checksum does not match"),
-                    ));
-                }
-                OnModified::ThreeWay => {
-                    return Err(MdliError::invariant(
-                        "E_BLOCK_MODIFIED",
-                        "three-way conflict artifacts are not implemented in this MVP",
-                    ));
-                }
-                OnModified::Force => {}
-            }
+            handle_block_conflict(
+                doc,
+                block_id,
+                expected,
+                &actual,
+                &doc.lines[block.start + 1..block.end - 1].to_vec(),
+                &body,
+                on_modified,
+            )?;
         }
     }
     let rendered = render_block_lines_with_provenance(block_id, body, false, recipe_hash);

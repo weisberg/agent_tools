@@ -582,6 +582,67 @@ fn block_replace_force_overwrites_modified_content() {
 }
 
 #[test]
+fn block_replace_three_way_writes_conflict_artifact() {
+    let dir = tempdir().unwrap();
+    let report = dir.path().join("report.md");
+    let body = dir.path().join("body.md");
+    fs::write(&report, "<!-- mdli:id v=1 id=t -->\n## T\n").unwrap();
+    fs::write(&body, "Initial.\n").unwrap();
+
+    bin()
+        .args([
+            "block",
+            "ensure",
+            report.to_str().unwrap(),
+            "--parent-section",
+            "t",
+            "--id",
+            "t.gen",
+            "--body-from-file",
+            body.to_str().unwrap(),
+            "--write",
+        ])
+        .assert()
+        .success();
+
+    let mut text = fs::read_to_string(&report).unwrap();
+    text = text.replace("Initial.", "Human edit.");
+    fs::write(&report, &text).unwrap();
+    fs::write(&body, "Incoming generated.\n").unwrap();
+
+    bin()
+        .args([
+            "block",
+            "replace",
+            report.to_str().unwrap(),
+            "--id",
+            "t.gen",
+            "--body-from-file",
+            body.to_str().unwrap(),
+            "--on-modified",
+            "three-way",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("E_BLOCK_MODIFIED"))
+        .stderr(predicate::str::contains(".mdli.conflict"));
+
+    let artifact_path = format!("{}.mdli.conflict", report.display());
+    let artifact = fs::read_to_string(&artifact_path).expect("conflict artifact written");
+    assert!(artifact.contains("\"kind\": \"three-way-conflict\""));
+    assert!(artifact.contains("\"block_id\": \"t.gen\""));
+    assert!(artifact.contains("\"on_disk_body\": \"Human edit.\""));
+    assert!(artifact.contains("\"incoming_body\": \"Incoming generated.\""));
+    assert!(artifact.contains("\"recorded_checksum\""));
+    assert!(artifact.contains("\"actual_checksum\""));
+
+    // Source file is left untouched.
+    let after = fs::read_to_string(&report).unwrap();
+    assert!(after.contains("Human edit."));
+    assert!(!after.contains("Incoming generated."));
+}
+
+#[test]
 fn block_lock_then_replace_is_blocked_by_default() {
     let dir = tempdir().unwrap();
     let report = dir.path().join("report.md");
@@ -766,6 +827,33 @@ fn ambiguous_path_selector_errors() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("E_AMBIGUOUS_SELECTOR"));
+}
+
+#[test]
+fn ambiguous_path_selector_lists_match_details() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("doc.md");
+    fs::write(
+        &path,
+        "# Top\n\n## Same\n\nA\n\n## Other\n\n## Same\n\nB\n",
+    )
+    .unwrap();
+
+    bin()
+        .args([
+            "--json",
+            "section",
+            "get",
+            path.to_str().unwrap(),
+            "--path",
+            "Top > Same",
+        ])
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("E_AMBIGUOUS_SELECTOR"))
+        .stdout(predicate::str::contains("\"matches\""))
+        .stdout(predicate::str::contains("\"path\": \"Top > Same\""))
+        .stdout(predicate::str::contains("\"line\""));
 }
 
 #[test]

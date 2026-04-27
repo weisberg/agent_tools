@@ -64,6 +64,7 @@ MVP surface (PRD Phases 1–4) — implemented:
 | Managed blocks | `block list/get/ensure/replace/lock/unlock` |
 | Frontmatter | `frontmatter get/set/delete` (YAML + TOML) |
 | Lint | `lint` (and `lint --fix safe`) |
+| Validate | `validate --schema SCHEMA.yml` |
 
 Post-MVP surface (PRD Phases 5–7) — implemented:
 
@@ -75,10 +76,8 @@ Post-MVP surface (PRD Phases 5–7) — implemented:
 
 Not yet implemented:
 
-- `validate FILE --schema ...` (validation schemas)
 - semantic `diff` (Phase 8)
-- three-way conflict artifacts (currently returns `E_BLOCK_MODIFIED`)
-- Git integration (`--require-clean-git`, snapshot mode)
+- Git integration (`--require-clean-git`, snapshot mode) — backlogged
 
 ## Universal Flags
 
@@ -243,14 +242,81 @@ The fixture corpus in `tests/fixtures/` covers each documented edge case
 tables, locked/tampered blocks, orphan markers, newer-version markers,
 inline HTML, YAML/TOML frontmatter, CRLF, BOM).
 
+## Validation Schemas
+
+Gate a recipe-driven report's structure in CI without requiring the recipe
+itself:
+
+```yaml
+# report.schema.yml
+schema: mdli/validation/v1
+required_sections:
+  - id: cashplus.okr
+    level: 2
+  - id: cashplus.analytics
+    level: 2
+required_tables:
+  - name: analytics-tickets
+    columns: [Ticket, Summary, Status, Priority]
+    key: Ticket
+managed_blocks:
+  - id: cashplus.analytics.generated
+    locked: false
+```
+
+```bash
+mdli validate report.md --schema report.schema.yml
+```
+
+`validate` exits 0 with `"ok": true` when the document satisfies every
+required section, table column shape, table key, and managed-block lock
+state. Each failure is reported as a structured finding with a stable error
+code (`E_VALIDATION_MISSING_SECTION`, `E_VALIDATION_TABLE_COLUMNS`, …).
+
+## Three-way Conflict Resolution
+
+When a managed block has been edited outside `mdli`, `block replace --on-modified three-way`
+writes a `<file>.mdli.conflict` JSON sidecar containing the recorded base
+checksum, the on-disk body, and the incoming body, and exits non-zero. The
+source file is left untouched so an agent can read the artifact, reconcile,
+and re-issue the edit.
+
+```bash
+mdli block replace report.md --id section.gen \
+  --body-from-file body.md --on-modified three-way
+# → exits non-zero, writes report.md.mdli.conflict
+```
+
+## Ambiguity Errors Carry Match Details
+
+`E_AMBIGUOUS_SELECTOR` includes a `matches` array under `error.details` so
+agents can disambiguate without re-parsing the document:
+
+```json
+{
+  "schema": "mdli/output/v1",
+  "ok": false,
+  "error": {
+    "code": "E_AMBIGUOUS_SELECTOR",
+    "message": "selector matched more than one structure",
+    "details": {
+      "matches": [
+        {"id": null, "path": "Top > Same", "line": 3, "level": 2},
+        {"id": null, "path": "Top > Same", "line": 11, "level": 2}
+      ]
+    }
+  }
+}
+```
+
 ## Testing
 
 ```bash
 cargo test
 ```
 
-Currently 76 integration tests across `cli_contract`, `fixtures`, `recipe`,
-`template`, `tree`, and `context`.
+Currently 84 integration tests across `cli_contract`, `fixtures`, `recipe`,
+`template`, `tree`, `context`, and `validate`.
 
 ## Skill
 

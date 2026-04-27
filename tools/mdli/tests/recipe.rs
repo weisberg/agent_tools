@@ -177,18 +177,11 @@ fn plan_then_apply_plan_matches_direct_apply() {
         .assert()
         .success();
 
-    // The two paths should produce equivalent ID/heading/table content. Recipe
-    // provenance differs (apply records the recipe hash; apply-plan does not),
-    // so we compare structural content excluding the begin marker.
+    // apply and apply-plan should produce byte-identical output, including
+    // recipe provenance markers.
     let from_plan = fs::read_to_string(&report).unwrap();
     let from_apply = fs::read_to_string(&report_via_apply).unwrap();
-    let strip = |s: &str| {
-        s.lines()
-            .filter(|l| !l.contains("mdli:begin"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    };
-    assert_eq!(strip(&from_plan), strip(&from_apply));
+    assert_eq!(from_plan, from_apply);
 }
 
 #[test]

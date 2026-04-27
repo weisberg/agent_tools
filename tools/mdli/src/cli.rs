@@ -56,6 +56,8 @@ pub(crate) enum Commands {
     Frontmatter(FrontmatterCommand),
     /// Lint mdli document invariants.
     Lint(LintArgs),
+    /// Validate a document against a structural schema.
+    Validate(ValidateArgs),
     /// Inspect sections, tables, blocks, and lint issues.
     Inspect(FileArgs),
     /// Render the document's heading hierarchy.
@@ -569,6 +571,13 @@ pub(crate) struct LintArgs {
 }
 
 #[derive(Debug, Args)]
+pub(crate) struct ValidateArgs {
+    pub(crate) file: PathBuf,
+    #[arg(long)]
+    pub(crate) schema: PathBuf,
+}
+
+#[derive(Debug, Args)]
 pub(crate) struct FileArgs {
     pub(crate) file: PathBuf,
 }
@@ -601,6 +610,7 @@ pub(crate) fn run(cli: Cli) -> Result<Outcome, MdliError> {
         Commands::Block(cmd) => run_block(cmd),
         Commands::Frontmatter(cmd) => run_frontmatter(cmd),
         Commands::Lint(args) => run_lint(args),
+        Commands::Validate(args) => run_validate(args),
         Commands::Inspect(args) => run_inspect(args),
         Commands::Tree(args) => run_tree(args),
         Commands::Context(args) => run_context(args),

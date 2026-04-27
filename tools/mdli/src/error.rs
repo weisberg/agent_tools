@@ -1,5 +1,6 @@
 use std::io;
 
+use serde_json::Value;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -8,11 +9,16 @@ pub(crate) enum MdliError {
     User {
         code: &'static str,
         message: String,
+        details: Option<Value>,
         #[source]
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
     #[error("{message}")]
-    Invariant { code: &'static str, message: String },
+    Invariant {
+        code: &'static str,
+        message: String,
+        details: Option<Value>,
+    },
     #[error("{message}")]
     Io {
         code: &'static str,
@@ -27,6 +33,7 @@ impl MdliError {
         Self::User {
             code,
             message: message.into(),
+            details: None,
             source: None,
         }
     }
@@ -35,6 +42,7 @@ impl MdliError {
         Self::Invariant {
             code,
             message: message.into(),
+            details: None,
         }
     }
 
@@ -46,6 +54,16 @@ impl MdliError {
         }
     }
 
+    pub(crate) fn with_details(mut self, value: Value) -> Self {
+        match &mut self {
+            Self::User { details, .. } | Self::Invariant { details, .. } => {
+                *details = Some(value);
+            }
+            Self::Io { .. } => {}
+        }
+        self
+    }
+
     pub(crate) fn code(&self) -> &'static str {
         match self {
             Self::User { code, .. } | Self::Invariant { code, .. } | Self::Io { code, .. } => code,
@@ -54,6 +72,13 @@ impl MdliError {
 
     pub(crate) fn message(&self) -> String {
         self.to_string()
+    }
+
+    pub(crate) fn details(&self) -> Option<&Value> {
+        match self {
+            Self::User { details, .. } | Self::Invariant { details, .. } => details.as_ref(),
+            Self::Io { .. } => None,
+        }
     }
 
     pub(crate) fn exit_code(&self) -> i32 {

@@ -62,7 +62,7 @@ not fetch, classify, or transform data.
 
 | Code | When |
 |---|---|
-| `E_AMBIGUOUS_SELECTOR` | path matched multiple sections |
+| `E_AMBIGUOUS_SELECTOR` | path matched multiple sections — `error.details.matches` lists each candidate's id/path/line |
 | `E_SELECTOR_NOT_FOUND` | no section/block/table matched |
 | `E_DUPLICATE_ID` | stable ID appears more than once |
 | `E_BLOCK_MODIFIED` | managed block content was edited outside `mdli` |
@@ -75,6 +75,13 @@ not fetch, classify, or transform data.
 | `E_RECIPE_INVALID` | recipe schema invalid |
 | `E_TEMPLATE_PARSE` | template syntax error |
 | `E_TEMPLATE_MISSING_DATASET` | template references a missing dataset |
+| `E_VALIDATION_SCHEMA_INVALID` | validation schema is missing or wrong version |
+| `E_VALIDATION_MISSING_SECTION` | required section absent (validation finding) |
+| `E_VALIDATION_MISSING_TABLE` | required table absent (validation finding) |
+| `E_VALIDATION_TABLE_COLUMNS` | table columns differ from schema (validation finding) |
+| `E_VALIDATION_TABLE_KEY` | table key differs from schema (validation finding) |
+| `E_VALIDATION_MISSING_BLOCK` | required managed block absent (validation finding) |
+| `E_VALIDATION_BLOCK_LOCK` | managed block locked-state differs from schema (validation finding) |
 
 ## Recommended Workflows
 
@@ -208,9 +215,10 @@ mdli frontmatter get FILE [--key KEY]
 mdli frontmatter set FILE KEY VALUE [--write]
 mdli frontmatter delete FILE KEY [--write]
 
-# lint
+# lint + validate
 mdli lint FILE [--json]
 mdli lint FILE --fix safe [--write]
+mdli validate FILE --schema SCHEMA.yml
 
 # templates / recipes / plan / patch
 mdli template render TEMPLATE.mdli --data NAME=PATH ...
@@ -230,11 +238,29 @@ mdli patch FILE --edits edits.json [--write]
   `--force-locked` (planned).
 - Modified managed blocks fail with `E_BLOCK_MODIFIED`. Pass
   `--on-modified force` only after confirming the human edits are not worth
-  preserving.
+  preserving, or `--on-modified three-way` to write a
+  `<file>.mdli.conflict` JSON sidecar with the recorded, on-disk, and
+  incoming bodies for review.
 - Newer marker versions (`v=2` or higher in a v=1 reader) are preserved on
   read but not modified by default.
 - Duplicate row keys in `--from-rows` error by default. Pass
   `--on-duplicate-key first|last` to choose a tie-breaker.
+
+## Validation as a CI Gate
+
+Pair `apply` with `validate` so a recipe-driven report cannot ship missing a
+required section, table column, or managed block:
+
+```bash
+mdli apply report.md --recipe recipe.yml --data tickets=tickets.ndjson --write
+mdli --json validate report.md --schema report.schema.yml || exit 1
+```
+
+`validate` exits 0 with `"ok": true` when every required structure is
+present and shaped correctly; otherwise it exits 0 with `"ok": false` and a
+list of structured findings (use exit-on-non-`ok` in your CI script as
+above). A bad schema file itself errors with
+`E_VALIDATION_SCHEMA_INVALID`.
 
 ## Composition Boundary
 

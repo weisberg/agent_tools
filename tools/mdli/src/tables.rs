@@ -32,6 +32,14 @@ pub(crate) fn run_table(cmd: TableCommand) -> Result<Outcome, MdliError> {
                     matches,
                     "E_SELECTOR_NOT_FOUND",
                     "no table in selected section",
+                    |t| {
+                        json!({
+                            "name": t.name,
+                            "section_id": t.section_id,
+                            "section_path": t.section_path,
+                            "line": t.line,
+                        })
+                    },
                 )?
             };
             Ok(Outcome::Text(
