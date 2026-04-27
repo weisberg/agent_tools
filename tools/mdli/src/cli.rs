@@ -60,6 +60,8 @@ pub(crate) enum Commands {
     Inspect(FileArgs),
     /// Render the document's heading hierarchy.
     Tree(FileArgs),
+    /// Extract a bounded slice of section context for an agent.
+    Context(ContextArgs),
     /// Render a template to stdout.
     #[command(subcommand)]
     Template(TemplateCommand),
@@ -76,6 +78,26 @@ pub(crate) enum Commands {
     ApplyPlan(ApplyPlanArgs),
     /// Apply a JSON edit list atomically.
     Patch(PatchArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ContextArgs {
+    pub(crate) file: PathBuf,
+    #[arg(long, conflicts_with = "path")]
+    pub(crate) id: Option<String>,
+    #[arg(long)]
+    pub(crate) path: Option<String>,
+    /// Soft cap on returned body size, expressed as approximate token count
+    /// (4 characters per token). The body may be truncated at the nearest
+    /// line boundary; metadata is always returned.
+    #[arg(long, default_value_t = 2000)]
+    pub(crate) max_tokens: usize,
+    /// Include managed-block metadata for blocks inside the selected section.
+    #[arg(long, default_value_t = true)]
+    pub(crate) include_managed_blocks: bool,
+    /// Include the rendered body content. Disable for metadata-only callers.
+    #[arg(long, default_value_t = true)]
+    pub(crate) include_body: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -581,6 +603,7 @@ pub(crate) fn run(cli: Cli) -> Result<Outcome, MdliError> {
         Commands::Lint(args) => run_lint(args),
         Commands::Inspect(args) => run_inspect(args),
         Commands::Tree(args) => run_tree(args),
+        Commands::Context(args) => run_context(args),
         Commands::Template(cmd) => run_template(cmd),
         Commands::Recipe(cmd) => run_recipe(cmd),
         Commands::Apply(args) => run_apply(args),

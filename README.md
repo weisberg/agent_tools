@@ -75,6 +75,29 @@ Highlights:
 
 Start here: [`tools/vaultli/README.md`](tools/vaultli/README.md)
 
+### `mdli` — Markdown Operations CLI
+
+Treat Markdown as an editable AST instead of a string. Stable IDs, named tables,
+managed blocks with checksums, NDJSON-to-table rendering, and recipe-driven
+regeneration — built so AI agents stop hand-building `.md` files line by line.
+
+Highlights:
+
+- Idempotent `section ensure`, `block ensure`, `table replace`, and recipe
+  `apply`/`apply-plan` mutations with stable selectors that survive renames
+  and reordering.
+- Hidden ID and managed-block markers carry SHA-256 checksums so generated
+  content cannot clobber human-authored prose.
+- NDJSON-to-Markdown table rendering with sort, key-based upsert, link
+  patterns, truncation, and rich-cell policy.
+- `inspect`, `tree`, and `context` commands give agents bounded structural
+  views of large reports.
+- Round-trip fidelity contract with a fixture corpus covering CRLF, BOM,
+  duplicate headings, escaped `>`, Unicode, malformed tables, locked/tampered
+  blocks, and YAML/TOML frontmatter.
+
+Start here: [`tools/mdli/README.md`](tools/mdli/README.md)
+
 ### `clipli` — Clipboard Intelligence For macOS
 
 Make the system clipboard programmable. Capture formatted content, convert rich
