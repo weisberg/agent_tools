@@ -47,7 +47,8 @@ Include:
 
 ## Current Caveat
 
-Some legacy tests and older notes reference `tools/md_search.py`,
-`tools/img_manipulate.py`, and `tools/md_clean.py`. These scripts are not
-present in the current tree. Treat them as legacy/planned surfaces unless they
-are restored.
+Some legacy tests and older notes reference `tools/md_search.py` and
+`tools/img_manipulate.py`. These scripts are not present in the current tree.
+Treat them as legacy/planned surfaces unless they are restored. The earlier
+`tools/md_clean.py` notes are superseded by the Rust `mdli` crate at
+`tools/mdli/`.

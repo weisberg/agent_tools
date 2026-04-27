@@ -411,11 +411,10 @@ pub(crate) fn scalar_to_cell(
             RichCellMode::Html => serde_json::to_string(value).unwrap_or_default(),
         },
     };
-    let escaped = raw.replace('|', "\\|");
     if escape_md {
-        Ok(escape_markdown_text(&escaped))
+        Ok(escape_markdown_text(&raw))
     } else {
-        Ok(escaped)
+        Ok(raw)
     }
 }
 
@@ -485,14 +484,14 @@ pub(crate) fn render_table_lines(data: &TableData) -> Vec<String> {
     let mut widths = data
         .columns
         .iter()
-        .map(|c| visible_width(c))
+        .map(|c| rendered_width(c))
         .collect::<Vec<_>>();
     for row in &data.rows {
         for (idx, cell) in row.iter().enumerate() {
             if idx >= widths.len() {
                 widths.push(0);
             }
-            widths[idx] = widths[idx].max(visible_width(cell));
+            widths[idx] = widths[idx].max(rendered_width(cell));
         }
     }
     let mut lines = Vec::new();
@@ -517,18 +516,40 @@ pub(crate) fn render_table_row(cells: &[String], widths: &[usize]) -> String {
         cells
             .iter()
             .enumerate()
-            .map(|(idx, cell)| format!(
-                " {:width$} ",
-                cell,
-                width = widths.get(idx).copied().unwrap_or(0)
-            ))
+            .map(|(idx, cell)| {
+                let escaped = escape_pipe_for_render(cell);
+                format!(
+                    " {:width$} ",
+                    escaped,
+                    width = widths.get(idx).copied().unwrap_or(0)
+                )
+            })
             .collect::<Vec<_>>()
             .join("|")
     )
 }
 
+fn escape_pipe_for_render(cell: &str) -> String {
+    // Re-escape literal pipes that survived split_table_row's unescape pass.
+    // We intentionally do not double-escape `\|` (already escaped).
+    let mut out = String::with_capacity(cell.len());
+    let mut prev_backslash = false;
+    for c in cell.chars() {
+        if c == '|' && !prev_backslash {
+            out.push('\\');
+        }
+        out.push(c);
+        prev_backslash = c == '\\' && !prev_backslash;
+    }
+    out
+}
+
 pub(crate) fn visible_width(s: &str) -> usize {
     s.chars().count()
+}
+
+pub(crate) fn rendered_width(s: &str) -> usize {
+    visible_width(&escape_pipe_for_render(s))
 }
 
 pub(crate) fn table_data_from_lines(

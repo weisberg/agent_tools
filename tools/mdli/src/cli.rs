@@ -58,6 +58,99 @@ pub(crate) enum Commands {
     Lint(LintArgs),
     /// Inspect sections, tables, blocks, and lint issues.
     Inspect(FileArgs),
+    /// Render the document's heading hierarchy.
+    Tree(FileArgs),
+    /// Render a template to stdout.
+    #[command(subcommand)]
+    Template(TemplateCommand),
+    /// Validate an mdli recipe.
+    #[command(subcommand)]
+    Recipe(RecipeCommand),
+    /// Apply a recipe to a document.
+    Apply(ApplyArgs),
+    /// Build a new document from a recipe.
+    Build(BuildArgs),
+    /// Emit a structural edit plan for a recipe.
+    Plan(PlanArgs),
+    /// Apply a previously-recorded edit plan.
+    ApplyPlan(ApplyPlanArgs),
+    /// Apply a JSON edit list atomically.
+    Patch(PatchArgs),
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum TemplateCommand {
+    /// Render a template to stdout using prepared datasets.
+    Render(TemplateRenderArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct TemplateRenderArgs {
+    pub(crate) template: PathBuf,
+    /// Bind a dataset NAME=PATH (NDJSON, JSON array, or scalar JSON value).
+    #[arg(long = "data")]
+    pub(crate) data: Vec<String>,
+}
+
+#[derive(Debug, Subcommand)]
+pub(crate) enum RecipeCommand {
+    /// Validate a recipe schema.
+    Validate(RecipeValidateArgs),
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct RecipeValidateArgs {
+    pub(crate) recipe: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ApplyArgs {
+    pub(crate) file: PathBuf,
+    #[arg(long)]
+    pub(crate) recipe: PathBuf,
+    #[arg(long = "data")]
+    pub(crate) data: Vec<String>,
+    #[command(flatten)]
+    pub(crate) mutate: MutateArgs,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct BuildArgs {
+    #[arg(long)]
+    pub(crate) recipe: PathBuf,
+    #[arg(long = "data")]
+    pub(crate) data: Vec<String>,
+    #[arg(long)]
+    pub(crate) out: PathBuf,
+    #[arg(long)]
+    pub(crate) overwrite: bool,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PlanArgs {
+    pub(crate) file: PathBuf,
+    #[arg(long)]
+    pub(crate) recipe: PathBuf,
+    #[arg(long = "data")]
+    pub(crate) data: Vec<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct ApplyPlanArgs {
+    pub(crate) file: PathBuf,
+    #[arg(long)]
+    pub(crate) plan: PathBuf,
+    #[command(flatten)]
+    pub(crate) mutate: MutateArgs,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct PatchArgs {
+    pub(crate) file: PathBuf,
+    #[arg(long)]
+    pub(crate) edits: PathBuf,
+    #[command(flatten)]
+    pub(crate) mutate: MutateArgs,
 }
 
 #[derive(Debug, Subcommand)]
@@ -487,5 +580,13 @@ pub(crate) fn run(cli: Cli) -> Result<Outcome, MdliError> {
         Commands::Frontmatter(cmd) => run_frontmatter(cmd),
         Commands::Lint(args) => run_lint(args),
         Commands::Inspect(args) => run_inspect(args),
+        Commands::Tree(args) => run_tree(args),
+        Commands::Template(cmd) => run_template(cmd),
+        Commands::Recipe(cmd) => run_recipe(cmd),
+        Commands::Apply(args) => run_apply(args),
+        Commands::Build(args) => run_build(args),
+        Commands::Plan(args) => run_plan(args),
+        Commands::ApplyPlan(args) => run_apply_plan(args),
+        Commands::Patch(args) => run_patch(args),
     }
 }

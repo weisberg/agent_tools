@@ -127,9 +127,29 @@ Jira integration ideas. Current doc:
 
 - `tools/jirali/jirali_brainstorming_features.md`
 
+### `mdli`
+
+Agent-native Markdown document operations. Treats Markdown as an editable AST,
+not a string. Stable IDs, named tables, managed blocks with checksums,
+NDJSON-to-table rendering, idempotent mutations, and dry-run plans.
+
+MVP surface implemented (Phases 1–4 from the PRD): `inspect`, `tree`,
+`id list/assign`, `section list/get/ensure/replace/delete/move/rename`,
+`table list/get/replace/upsert/delete-row/sort/fmt`,
+`block list/get/ensure/replace/lock/unlock`, `frontmatter get/set/delete`,
+`lint`. Post-MVP layer also implemented: `template render`, `recipe validate`,
+`apply`, `build`, `plan`, `apply-plan`, `patch`.
+
+Current docs:
+
+- `tools/mdli/mdli-prd-final.md`
+
+The legacy Python script `tools/mdli/markdown_cleaner.py` is superseded by the
+Rust crate.
+
 ## Legacy Python Tool Ideas
 
-Older docs described three Python tools. Tests for them still exist, but the
+Older docs described two Python tools. Tests for them still exist, but the
 scripts are not present in the current tree.
 
 ### Markdown Search
@@ -167,24 +187,6 @@ Agent test scenarios:
 - Batch-convert `.bmp` files to `.webp`.
 - Crop with out-of-bounds coordinates and return either a clear error or a
   documented clamped result.
-
-### Markdown Cleaner
-
-Intended path: `tools/md_clean.py`; related standalone script:
-`markdown_cleaner.py`.
-
-Proposed behavior:
-
-- Unwrap hard-wrapped paragraphs.
-- Strip redundant `<span>` and `<div>` tags.
-- Normalize EPUB index links.
-- Preserve lists, blockquotes, code fences, and meaningful HTML.
-
-Agent test scenarios:
-
-- Clean EPUB-exported markdown with excessive spans and hard wrapping.
-- Unwrap paragraphs without damaging lists or blockquotes.
-- Convert EPUB-style index links into standard markdown links.
 
 ## Planned Tool Families
 

@@ -54,9 +54,11 @@ pub(crate) fn parse_frontmatter_map(
     let Some((start, end)) = frontmatter_range(lines) else {
         return Ok(BTreeMap::new());
     };
+    let delimiter = lines[start].trim();
+    let separator = if delimiter == "+++" { '=' } else { ':' };
     let mut map = BTreeMap::new();
     for line in &lines[start + 1..end - 1] {
-        if let Some((key, value)) = line.split_once(':') {
+        if let Some((key, value)) = line.split_once(separator) {
             map.insert(
                 key.trim().to_string(),
                 value.trim().trim_matches('"').to_string(),
