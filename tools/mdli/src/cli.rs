@@ -80,6 +80,8 @@ pub(crate) enum Commands {
     ApplyPlan(ApplyPlanArgs),
     /// Apply a JSON edit list atomically.
     Patch(PatchArgs),
+    /// Compute a semantic diff between two Markdown documents.
+    Diff(DiffArgs),
 }
 
 #[derive(Debug, Args)]
@@ -175,6 +177,22 @@ pub(crate) struct PatchArgs {
     pub(crate) edits: PathBuf,
     #[command(flatten)]
     pub(crate) mutate: MutateArgs,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct DiffArgs {
+    /// New (current) document.
+    pub(crate) file: PathBuf,
+    /// Old document to diff against.
+    #[arg(long)]
+    pub(crate) against: PathBuf,
+    /// Render a human-readable text summary instead of JSON. Ignored when
+    /// `--json` is also set.
+    #[arg(long, default_value_t = false)]
+    pub(crate) text: bool,
+    /// Accepted for forward compatibility. mdli diff is always semantic.
+    #[arg(long, default_value_t = false)]
+    pub(crate) semantic: bool,
 }
 
 #[derive(Debug, Subcommand)]
@@ -621,5 +639,6 @@ pub(crate) fn run(cli: Cli) -> Result<Outcome, MdliError> {
         Commands::Plan(args) => run_plan(args),
         Commands::ApplyPlan(args) => run_apply_plan(args),
         Commands::Patch(args) => run_patch(args),
+        Commands::Diff(args) => run_diff(args),
     }
 }

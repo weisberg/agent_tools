@@ -137,18 +137,22 @@ MVP surface implemented (PRD Phases 1–4): `inspect`, `tree`, `context`,
 `id list/assign`, `section list/get/ensure/replace/delete/move/rename`,
 `table list/get/replace/upsert/delete-row/sort/fmt`,
 `block list/get/ensure/replace/lock/unlock`, `frontmatter get/set/delete`,
-`lint`, `validate --schema`. Post-MVP layer also implemented (Phases 5–7):
+`lint`, `validate --schema`. Post-MVP layer also implemented (Phases 5–8):
 `template render`, `recipe validate`, `apply`, `build`, `plan`, `apply-plan`,
-`patch`. `block replace --on-modified three-way` writes a
+`patch`, `diff` (semantic, identity-anchored on stable IDs / table names /
+block IDs). `block replace --on-modified three-way` writes a
 `<file>.mdli.conflict` JSON sidecar with the recorded, on-disk, and incoming
 bodies. `E_AMBIGUOUS_SELECTOR` carries a structured `details.matches` array
 so agents can disambiguate without re-parsing.
 
 `apply` and `apply-plan` produce byte-identical output (recipe-hash
-provenance is now threaded through the plan).
+provenance is threaded through the plan). The `diff` command reports
+structural events (sections renamed/moved, table rows added/removed/updated
+by key, managed-block content/lock changes, locked-edit attempts, tampering,
+frontmatter deltas) and emits a `summary` block of counts suitable for CI
+gating thresholds.
 
-Not yet implemented: semantic `diff` (Phase 8). Git integration is
-backlogged.
+Git integration (`--require-clean-git`, snapshot mode) is backlogged.
 
 Current docs:
 
@@ -156,12 +160,12 @@ Current docs:
 - `tools/mdli/SKILL.md`
 - `tools/mdli/mdli-prd-final.md`
 
-Test coverage: 84 integration tests across `cli_contract`, `fixtures`,
-`recipe`, `template`, `tree`, `context`, and `validate`, plus a fixture
-corpus covering the PRD's documented edge cases (duplicate headings, escaped
-`>`, Unicode, code-fence content, malformed tables, locked/tampered blocks,
-orphan markers, newer-version markers, inline HTML, YAML/TOML frontmatter,
-CRLF, BOM).
+Test coverage: 99 integration tests across `cli_contract`, `fixtures`,
+`recipe`, `template`, `tree`, `context`, `validate`, and `diff`, plus a
+fixture corpus covering the PRD's documented edge cases (duplicate headings,
+escaped `>`, Unicode, code-fence content, malformed tables, locked/tampered
+blocks, orphan markers, newer-version markers, inline HTML, YAML/TOML
+frontmatter, CRLF, BOM).
 
 The legacy Python script `tools/mdli/markdown_cleaner.py` is superseded by the
 Rust crate.

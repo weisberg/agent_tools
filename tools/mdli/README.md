@@ -66,17 +66,17 @@ MVP surface (PRD Phases 1–4) — implemented:
 | Lint | `lint` (and `lint --fix safe`) |
 | Validate | `validate --schema SCHEMA.yml` |
 
-Post-MVP surface (PRD Phases 5–7) — implemented:
+Post-MVP surface (PRD Phases 5–8) — implemented:
 
 | Group | Commands |
 |---|---|
 | Templates | `template render` (`value`, `table`, `if_present` helpers) |
 | Recipes | `recipe validate`, `apply`, `build` |
 | Plans | `plan`, `apply-plan`, `patch` |
+| Diff | `diff FILE --against REF [--text]` |
 
 Not yet implemented:
 
-- semantic `diff` (Phase 8)
 - Git integration (`--require-clean-git`, snapshot mode) — backlogged
 
 ## Universal Flags
@@ -309,14 +309,62 @@ agents can disambiguate without re-parsing the document:
 }
 ```
 
+## Semantic Diff
+
+`mdli diff` computes a structural delta between two Markdown documents.
+Identity is anchored on stable IDs, table names, and managed-block IDs —
+not on heading text or line position — so renames, reorderings, and
+managed-block edits are reported as semantic events instead of dozens of
+red/green text lines.
+
+```bash
+mdli diff report.md --against report.last.md
+mdli diff report.md --against report.last.md --text   # human summary
+```
+
+Finding kinds reported:
+
+| Finding kind | When |
+|---|---|
+| `section.added` / `section.removed` | section ID present on one side only |
+| `section.renamed` | same ID, different title |
+| `section.moved` | same ID, different parent path |
+| `section.level_changed` | same ID, different heading level |
+| `table.added` / `table.removed` | named table present on one side only |
+| `table.columns_changed` / `table.key_changed` | table shape changed |
+| `table.rows_changed` | rows added/removed/updated by `--key` column |
+| `table.body_changed` | rows differ but no shared key — coarse summary only |
+| `block.added` / `block.removed` | managed block present on one side only |
+| `block.content_changed` | managed-block content differs |
+| `block.lock_changed` | locked/unlocked toggled |
+| `block.locked_edit_attempted` | content of a previously-locked block changed |
+| `block.tampered` | block's recorded checksum no longer matches its content |
+| `frontmatter.added` / `removed` / `changed` | frontmatter key delta |
+
+Identity rules:
+
+- Sections without stable IDs fall back to `(path, level)` equality —
+  renames or moves of unmarked sections show up as a delete + add pair.
+  Run `mdli id assign --all` once to lift sections into the wire format
+  if you want rename semantics.
+- Unnamed tables are skipped by `diff` — the named-table marker is the
+  identity boundary.
+- Row-level diff requires the same `--key` column on both sides plus the
+  same column shape. Otherwise `diff` emits a coarse `table.body_changed`
+  finding with just before/after row counts.
+
+The JSON output also carries a `summary` block with counts of every
+finding kind (sections_added, rows_updated, blocks_locked_edit_attempted,
+…), suitable for CI gating thresholds.
+
 ## Testing
 
 ```bash
 cargo test
 ```
 
-Currently 84 integration tests across `cli_contract`, `fixtures`, `recipe`,
-`template`, `tree`, `context`, and `validate`.
+Currently 99 integration tests across `cli_contract`, `fixtures`,
+`recipe`, `template`, `tree`, `context`, `validate`, and `diff`.
 
 ## Skill
 

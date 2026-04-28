@@ -158,7 +158,25 @@ mdli apply-plan cash_plus.md --plan plan.json --write
 `apply-plan` refuses to write if the document changed between `plan` and
 `apply-plan` (preimage-hash mismatch).
 
-### 7. Managed-block ensure
+### 7. Semantic diff for review and CI gating
+
+```bash
+mdli diff report.md --against report.last.md --text
+mdli --json diff report.md --against report.last.md > /tmp/delta.json
+```
+
+`diff` reports structural events — sections added/removed/renamed/moved,
+tables added/removed/columns-changed, table rows added/removed/updated by
+key, managed blocks added/removed/content-changed/lock-changed,
+locked-edit-attempted, tampered (recorded checksum no longer matches
+content), frontmatter add/remove/change. Identity is anchored on stable IDs
+and table names, not on text or line position, so a renamed section is
+*one* finding, not a delete + add. The JSON output's `summary` block has
+counts per kind, suitable for CI gating thresholds (e.g. fail if
+`blocks_locked_edit_attempted > 0` or `sections_removed > 0` without a
+sign-off label).
+
+### 8. Managed-block ensure
 
 ```bash
 mdli block ensure report.md \
@@ -178,6 +196,7 @@ human-authored prose.
 mdli inspect FILE [--json]
 mdli tree FILE
 mdli context FILE (--id ID | --path PATH) [--max-tokens N] [--include-managed-blocks]
+mdli diff FILE --against REF [--text]
 
 # stable IDs
 mdli id list FILE
@@ -280,6 +299,20 @@ mdli table replace report.md \
   --key Ticket \
   --write
 ```
+
+## Diff finding kinds (quick reference)
+
+| Kind | Trigger |
+|---|---|
+| `section.added` / `removed` | section ID on one side only |
+| `section.renamed` / `moved` / `level_changed` | same ID, different title / parent / level |
+| `table.added` / `removed` / `columns_changed` / `key_changed` | named-table delta |
+| `table.rows_changed` | rows added/removed/updated by `--key` |
+| `table.body_changed` | rows differ but no shared key (coarse) |
+| `block.added` / `removed` / `content_changed` / `lock_changed` | managed-block delta |
+| `block.locked_edit_attempted` | locked block's content changed across the diff |
+| `block.tampered` | recorded checksum no longer matches content |
+| `frontmatter.added` / `removed` / `changed` | frontmatter key delta |
 
 ## Wire Format Quick Reference
 

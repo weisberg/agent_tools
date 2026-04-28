@@ -3,6 +3,7 @@
 mod blocks;
 mod cli;
 mod context;
+mod diff;
 mod document;
 mod error;
 mod frontmatter;
@@ -30,6 +31,7 @@ pub(crate) const MARKER_VERSION: &str = "1";
 pub(crate) use blocks::*;
 pub(crate) use cli::*;
 pub(crate) use context::*;
+pub(crate) use diff::*;
 pub(crate) use document::*;
 pub(crate) use error::*;
 pub(crate) use frontmatter::*;
