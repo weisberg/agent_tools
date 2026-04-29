@@ -1,6 +1,12 @@
 use serde_json::json;
 
-use crate::*;
+use crate::{
+    ensure_or_replace_block_in_section, id_marker, index_document, parse_heading, parse_marker,
+    read_text_path, resolve_section, selector_from_id_path, split_body_lines, validate_id,
+    validate_write_emit, MarkdownDocument, MdliError, MutationOutcome, Outcome, SectionCommand,
+    SectionEnsureArgs, SectionMoveArgs, SectionRenameArgs, SectionReplaceArgs,
+    SectionSelectMutateArgs,
+};
 
 pub(crate) fn run_section(cmd: SectionCommand) -> Result<Outcome, MdliError> {
     match cmd {
