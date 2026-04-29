@@ -3,7 +3,12 @@ use std::path::Path;
 
 use serde_json::{json, Map, Value};
 
-use crate::*;
+use crate::{
+    index_document, one_match, read_text_path, resolve_section, resolve_table_by_name,
+    table_marker, validate_write_emit, DuplicateKeyMode, MarkdownDocument, MdliError, MissingMode,
+    MutationOutcome, Outcome, RichCellMode, TableCommand, TableDeleteRowArgs, TableFmtArgs,
+    TableReplaceArgs, TableSortArgs, TableUpsertArgs,
+};
 
 pub(crate) fn run_table(cmd: TableCommand) -> Result<Outcome, MdliError> {
     match cmd {

@@ -407,62 +407,25 @@ fn apply_replace_table(doc: &mut MarkdownDocument, op: &Value) -> Result<(), Mdl
     };
     let from_rows = require_str(op, "rows_from")?.to_string();
     let key = op.get("key").and_then(|v| v.as_str()).map(String::from);
-    let columns = parse_columns(&column_specs)?;
     let rows = read_rows(Path::new(&from_rows))?;
-    let render_options = RenderTableOptions {
-        columns,
-        key: key.clone(),
-        sort: op.get("sort").and_then(|v| v.as_str()).map(String::from),
-        missing: MissingMode::Empty,
-        rich_cell: RichCellMode::Error,
-        duplicate_key: DuplicateKeyMode::Error,
-        empty: op.get("empty").and_then(|v| v.as_str()).map(String::from),
-        links: std::collections::BTreeMap::new(),
-        truncates: std::collections::BTreeMap::new(),
-        escape_markdown: false,
-    };
-    let rendered = render_table_from_rows(&rows, &render_options)?;
-    let index = index_document(doc);
-    let parent = resolve_section(&index, section)?;
-    let existing = name
-        .as_deref()
-        .and_then(|n| {
-            index
-                .tables
-                .iter()
-                .find(|t| t.name.as_deref() == Some(n))
-                .cloned()
-        })
-        .or_else(|| {
-            index
-                .tables
-                .iter()
-                .find(|t| t.start >= parent.heading && t.end <= parent.end)
-                .cloned()
-        });
-    let mut replacement = Vec::new();
-    if let Some(name) = &name {
-        replacement.push(table_marker(name, key.as_deref()));
-    }
-    replacement.extend(rendered.lines);
-    if let Some(table) = existing {
-        doc.lines.splice(table.start..table.end, replacement);
-    } else {
-        let insert_at = parent.end;
-        let mut insertion = Vec::new();
-        if insert_at > 0
-            && doc
-                .lines
-                .get(insert_at - 1)
-                .map(|l| !l.trim().is_empty())
-                .unwrap_or(false)
-        {
-            insertion.push(String::new());
-        }
-        insertion.extend(replacement);
-        insertion.push(String::new());
-        doc.lines.splice(insert_at..insert_at, insertion);
-    }
+    apply_table_replace(
+        doc,
+        TableReplaceInput {
+            section: section.to_string(),
+            name,
+            columns: column_specs,
+            rows,
+            key,
+            sort: op.get("sort").and_then(|v| v.as_str()).map(String::from),
+            missing: MissingMode::Empty,
+            rich_cell: RichCellMode::Error,
+            duplicate_key: DuplicateKeyMode::Error,
+            empty: op.get("empty").and_then(|v| v.as_str()).map(String::from),
+            links: std::collections::BTreeMap::new(),
+            truncates: std::collections::BTreeMap::new(),
+            escape_markdown: false,
+        },
+    )?;
     Ok(())
 }
 
