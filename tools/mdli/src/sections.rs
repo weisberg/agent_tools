@@ -27,82 +27,143 @@ pub(crate) fn run_section(cmd: SectionCommand) -> Result<Outcome, MdliError> {
 }
 
 pub(crate) fn section_ensure(args: SectionEnsureArgs) -> Result<Outcome, MdliError> {
-    validate_id(&args.id)?;
-    if !(1..=6).contains(&args.level) {
+    let mut doc = MarkdownDocument::read(&args.file)?;
+    doc.assert_preimage(&args.mutate.preimage_hash)?;
+    validate_write_emit(&args.mutate)?;
+    let before = doc.render();
+    let mut warnings = Vec::new();
+    let op = apply_section_ensure(
+        &mut doc,
+        SectionEnsureInput {
+            id: args.id,
+            path: args.path,
+            level: args.level,
+            after: args.after,
+            before: args.before,
+            enforce_path: args.enforce_path,
+        },
+    )?;
+    let changed = before != doc.render();
+    if let Some(warning) = op.get("warning") {
+        warnings.push(warning.clone());
+    }
+    Ok(Outcome::Mutated(MutationOutcome {
+        document: doc,
+        changed,
+        ops: vec![op],
+        warnings,
+        flags: args.mutate,
+    }))
+}
+
+#[derive(Debug)]
+pub(crate) struct SectionEnsureInput {
+    pub(crate) id: String,
+    pub(crate) path: String,
+    pub(crate) level: usize,
+    pub(crate) after: Option<String>,
+    pub(crate) before: Option<String>,
+    pub(crate) enforce_path: bool,
+}
+
+pub(crate) fn apply_section_ensure(
+    doc: &mut MarkdownDocument,
+    input: SectionEnsureInput,
+) -> Result<serde_json::Value, MdliError> {
+    validate_id(&input.id)?;
+    if !(1..=6).contains(&input.level) {
         return Err(MdliError::user(
             "E_INVALID_LEVEL",
             "--level must be 1 through 6",
         ));
     }
-    if args.after.is_some() && args.before.is_some() {
+    if input.after.is_some() && input.before.is_some() {
         return Err(MdliError::user(
             "E_INVALID_POSITION",
             "--after and --before are mutually exclusive",
         ));
     }
-    let mut doc = MarkdownDocument::read(&args.file)?;
-    doc.assert_preimage(&args.mutate.preimage_hash)?;
-    validate_write_emit(&args.mutate)?;
-    let before = doc.render();
-    let mut ops = Vec::new();
-    let mut warnings = Vec::new();
     let index = index_document(&doc);
 
     if let Some(section) = index
         .sections
         .iter()
-        .find(|s| s.id.as_deref() == Some(args.id.as_str()))
+        .find(|s| s.id.as_deref() == Some(input.id.as_str()))
     {
-        if section.level != args.level {
+        if section.level != input.level {
             return Err(MdliError::user(
                 "E_SECTION_LEVEL",
                 format!(
                     "section {} is level {}, not {}",
-                    args.id, section.level, args.level
+                    input.id, section.level, input.level
                 ),
             ));
         }
-        if section.path != args.path {
-            if args.enforce_path {
+        if section.path != input.path {
+            if input.enforce_path {
                 return Err(MdliError::user(
                     "E_SECTION_PATH",
                     format!(
                         "section {} path is {}, not {}",
-                        args.id, section.path, args.path
+                        input.id, section.path, input.path
                     ),
                 ));
             }
-            warnings.push(json!({
+            let warning = json!({
                 "code": "W_PATH_MISMATCH",
                 "message": "stable ID matched a section with a different visible path",
-                "id": args.id,
+                "id": input.id,
                 "actual_path": section.path,
-                "requested_path": args.path,
+                "requested_path": input.path,
+            });
+            return Ok(json!({
+                "op": "ensure_section",
+                "action": "reuse",
+                "id": input.id,
+                "path": section.path,
+                "level": section.level,
+                "line": section.line,
+                "warning": warning
             }));
         }
-    } else if let Ok(section) = resolve_section(&index, &args.path) {
-        if section.level != args.level {
+        Ok(json!({
+            "op": "ensure_section",
+            "action": "reuse",
+            "id": input.id,
+            "path": section.path,
+            "level": section.level,
+            "line": section.line
+        }))
+    } else if let Ok(section) = resolve_section(&index, &input.path) {
+        if section.level != input.level {
             return Err(MdliError::user(
                 "E_SECTION_LEVEL",
                 format!(
                     "section path is level {}, not {}",
-                    section.level, args.level
+                    section.level, input.level
                 ),
             ));
         }
-        doc.lines.insert(section.heading, id_marker(&args.id));
-        ops.push(json!({"op": "assign_id", "id": args.id, "path": section.path}));
+        doc.lines.insert(section.heading, id_marker(&input.id));
+        Ok(json!({
+            "op": "ensure_section",
+            "action": "assign_id",
+            "id": input.id,
+            "path": section.path,
+            "level": section.level,
+            "line": section.line
+        }))
     } else {
-        let title = args
+        let title = input
             .path
             .split('>')
             .next_back()
             .map(|s| s.trim().replace("\\>", ">"))
             .filter(|s| !s.is_empty())
             .ok_or_else(|| MdliError::user("E_INVALID_PATH", "--path cannot be empty"))?;
-        let insert_at = if let Some(sel) = args.after.as_deref() {
+        let insert_at = if let Some(sel) = input.after.as_deref() {
             resolve_section(&index, sel)?.end
-        } else if let Some(sel) = args.before.as_deref() {
+        } else if let Some(sel) = input.before.as_deref() {
             resolve_section(&index, sel)?.start
         } else {
             doc.lines.len()
@@ -117,27 +178,20 @@ pub(crate) fn section_ensure(args: SectionEnsureArgs) -> Result<Outcome, MdliErr
         {
             new_lines.push(String::new());
         }
-        new_lines.push(id_marker(&args.id));
-        new_lines.push(format!("{} {}", "#".repeat(args.level), title));
+        new_lines.push(id_marker(&input.id));
+        new_lines.push(format!("{} {}", "#".repeat(input.level), title));
         new_lines.push(String::new());
         doc.lines.splice(insert_at..insert_at, new_lines);
         doc.trailing_newline = true;
-        ops.push(json!({
+        Ok(json!({
             "op": "ensure_section",
-            "id": args.id,
-            "path": args.path,
-            "level": args.level
-        }));
+            "action": "create",
+            "id": input.id,
+            "path": input.path,
+            "level": input.level,
+            "insert_line": insert_at + 1
+        }))
     }
-
-    let changed = before != doc.render();
-    Ok(Outcome::Mutated(MutationOutcome {
-        document: doc,
-        changed,
-        ops,
-        warnings,
-        flags: args.mutate,
-    }))
 }
 
 pub(crate) fn section_replace(args: SectionReplaceArgs) -> Result<Outcome, MdliError> {

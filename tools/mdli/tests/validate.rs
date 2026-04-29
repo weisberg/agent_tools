@@ -35,11 +35,7 @@ fn validate_reports_missing_section() {
     let dir = tempdir().unwrap();
     let doc = dir.path().join("doc.md");
     let schema = dir.path().join("schema.yml");
-    fs::write(
-        &doc,
-        "<!-- mdli:id v=1 id=cashplus.okr -->\n## OKR\n",
-    )
-    .unwrap();
+    fs::write(&doc, "<!-- mdli:id v=1 id=cashplus.okr -->\n## OKR\n").unwrap();
     fs::write(&schema, FULL_SCHEMA).unwrap();
 
     bin()

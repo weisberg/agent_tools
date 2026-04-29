@@ -107,19 +107,14 @@ pub(crate) fn lint_document(doc: &MarkdownDocument) -> Vec<Value> {
     for table in &index.tables {
         let rows = &doc.lines[table.start..table.end];
         let has_marker = table.marker.is_some();
-        if let Ok(data) = table_data_from_lines(rows, has_marker) {
-            let width = data.columns.len();
-            for (idx, row) in data.rows.iter().enumerate() {
-                if row.len() != width {
-                    issues.push(json!({
-                        "rule": "valid-tables",
-                        "severity": "error",
-                        "code": "E_TABLE_INVALID",
-                        "message": "table row has a different cell count than header",
-                        "line": table.line + idx + 2
-                    }));
-                }
-            }
+        if let Err(err) = table_data_from_lines(rows, has_marker) {
+            issues.push(json!({
+                "rule": "valid-tables",
+                "severity": "error",
+                "code": err.code(),
+                "message": err.message(),
+                "line": table.line
+            }));
         }
     }
     let mut open_blocks = Vec::new();

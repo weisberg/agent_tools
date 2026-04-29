@@ -9,11 +9,7 @@ use tempfile::tempdir;
 fn tree_emits_nested_heading_hierarchy() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("doc.md");
-    fs::write(
-        &path,
-        "# Top\n## A\n### A1\n### A2\n## B\n",
-    )
-    .unwrap();
+    fs::write(&path, "# Top\n## A\n### A1\n### A2\n## B\n").unwrap();
 
     bin()
         .args(["tree", path.to_str().unwrap()])

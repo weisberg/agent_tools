@@ -311,7 +311,9 @@ fn split_helper_kv(src: &str) -> Result<Vec<(String, String)>, MdliError> {
     Ok(pairs)
 }
 
-fn read_helper_value(chars: &mut std::iter::Peekable<std::str::Chars>) -> Result<String, MdliError> {
+fn read_helper_value(
+    chars: &mut std::iter::Peekable<std::str::Chars>,
+) -> Result<String, MdliError> {
     let mut depth_brackets = 0i32;
     let mut depth_braces = 0i32;
     let mut value = String::new();
@@ -458,10 +460,7 @@ fn parse_object_usize(src: &str) -> Result<BTreeMap<String, usize>, MdliError> {
         out.insert(
             k.clone(),
             v.as_u64().ok_or_else(|| {
-                MdliError::user(
-                    "E_TEMPLATE_PARSE",
-                    format!("expected integer for key {k}"),
-                )
+                MdliError::user("E_TEMPLATE_PARSE", format!("expected integer for key {k}"))
             })? as usize,
         );
     }
@@ -578,7 +577,10 @@ fn value_to_text(value: &Value) -> String {
     }
 }
 
-pub(crate) fn render_table_helper(helper: &TableHelper, dataset: &Value) -> Result<String, MdliError> {
+pub(crate) fn render_table_helper(
+    helper: &TableHelper,
+    dataset: &Value,
+) -> Result<String, MdliError> {
     let rows: Vec<Map<String, Value>> = match dataset {
         Value::Array(arr) => arr
             .iter()

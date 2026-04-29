@@ -35,11 +35,7 @@ pub(crate) fn run_diff(args: DiffArgs) -> Result<Outcome, MdliError> {
 
     if args.text {
         return Ok(Outcome::Text(render_text(
-            &args,
-            &old_doc,
-            &new_doc,
-            &summary,
-            &findings,
+            &args, &old_doc, &new_doc, &summary, &findings,
         )));
     }
 
@@ -61,11 +57,7 @@ pub(crate) fn run_diff(args: DiffArgs) -> Result<Outcome, MdliError> {
 // sections
 // ---------------------------------------------------------------------------
 
-fn diff_sections(
-    old_idx: &DocumentIndex,
-    new_idx: &DocumentIndex,
-    findings: &mut Vec<Value>,
-) {
+fn diff_sections(old_idx: &DocumentIndex, new_idx: &DocumentIndex, findings: &mut Vec<Value>) {
     let mut old_by_id: BTreeMap<&str, &SectionInfo> = BTreeMap::new();
     let mut new_by_id: BTreeMap<&str, &SectionInfo> = BTreeMap::new();
     let mut old_no_id: Vec<&SectionInfo> = Vec::new();
@@ -268,9 +260,10 @@ fn diff_table_rows(
     };
 
     // Need a key column on both sides for row-level diff.
-    let key_column = old_table.key.as_deref().filter(|k| {
-        new_table.key.as_deref() == Some(k) && old_data.columns == new_data.columns
-    });
+    let key_column = old_table
+        .key
+        .as_deref()
+        .filter(|k| new_table.key.as_deref() == Some(k) && old_data.columns == new_data.columns);
     let Some(key_column) = key_column else {
         if old_data.rows != new_data.rows {
             findings.push(json!({
@@ -372,8 +365,10 @@ fn diff_blocks(
                 "old_locked": old_block.locked,
             })),
             Some(new_block) => {
-                let old_actual = checksum_body(&old_doc.lines[old_block.start + 1..old_block.end - 1]);
-                let new_actual = checksum_body(&new_doc.lines[new_block.start + 1..new_block.end - 1]);
+                let old_actual =
+                    checksum_body(&old_doc.lines[old_block.start + 1..old_block.end - 1]);
+                let new_actual =
+                    checksum_body(&new_doc.lines[new_block.start + 1..new_block.end - 1]);
                 if old_actual != new_actual {
                     findings.push(json!({
                         "kind": "block.content_changed",
@@ -514,9 +509,18 @@ fn compute_summary(findings: &[Value]) -> Value {
             "table.key_changed" => bump(obj, "tables_key_changed", 1),
             "table.rows_changed" => {
                 bump(obj, "tables_rows_changed", 1);
-                let added = f.get("added").and_then(|v| v.as_array()).map_or(0, |a| a.len()) as u64;
-                let removed = f.get("removed").and_then(|v| v.as_array()).map_or(0, |a| a.len()) as u64;
-                let updated = f.get("updated").and_then(|v| v.as_array()).map_or(0, |a| a.len()) as u64;
+                let added = f
+                    .get("added")
+                    .and_then(|v| v.as_array())
+                    .map_or(0, |a| a.len()) as u64;
+                let removed = f
+                    .get("removed")
+                    .and_then(|v| v.as_array())
+                    .map_or(0, |a| a.len()) as u64;
+                let updated = f
+                    .get("updated")
+                    .and_then(|v| v.as_array())
+                    .map_or(0, |a| a.len()) as u64;
                 bump(obj, "rows_added", added);
                 bump(obj, "rows_removed", removed);
                 bump(obj, "rows_updated", updated);
@@ -621,9 +625,15 @@ fn render_text(
             "table.rows_changed" => out.push_str(&format!(
                 "  ~ table {} rows: +{} -{} ~{}\n",
                 f.get("name").and_then(|v| v.as_str()).unwrap_or(""),
-                f.get("added").and_then(|v| v.as_array()).map_or(0, |a| a.len()),
-                f.get("removed").and_then(|v| v.as_array()).map_or(0, |a| a.len()),
-                f.get("updated").and_then(|v| v.as_array()).map_or(0, |a| a.len())
+                f.get("added")
+                    .and_then(|v| v.as_array())
+                    .map_or(0, |a| a.len()),
+                f.get("removed")
+                    .and_then(|v| v.as_array())
+                    .map_or(0, |a| a.len()),
+                f.get("updated")
+                    .and_then(|v| v.as_array())
+                    .map_or(0, |a| a.len())
             )),
             "table.body_changed" => out.push_str(&format!(
                 "  ~ table {} body changed (no shared key)\n",
@@ -644,8 +654,12 @@ fn render_text(
             "block.lock_changed" => out.push_str(&format!(
                 "  ~ block {} locked: {} -> {}\n",
                 f.get("id").and_then(|v| v.as_str()).unwrap_or(""),
-                f.get("old_locked").and_then(|v| v.as_bool()).unwrap_or(false),
-                f.get("new_locked").and_then(|v| v.as_bool()).unwrap_or(false)
+                f.get("old_locked")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false),
+                f.get("new_locked")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
             )),
             "block.locked_edit_attempted" => out.push_str(&format!(
                 "  ! block {} locked-edit attempted\n",

@@ -78,9 +78,7 @@ fn collect_siblings(sections: &[SectionInfo], target: &SectionInfo) -> Vec<Value
     sections
         .iter()
         .filter(|s| {
-            s.level == target.level
-                && s.start != target.start
-                && shares_parent(sections, s, target)
+            s.level == target.level && s.start != target.start && shares_parent(sections, s, target)
         })
         .map(|s| {
             json!({

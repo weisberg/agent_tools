@@ -20,7 +20,14 @@ pub(crate) fn run_plan(args: PlanArgs) -> Result<Outcome, MdliError> {
     // Replay the recipe on a clone to capture ops.
     let mut clone = doc.clone();
     let mut ops = Vec::new();
-    apply_recipe(&mut clone, &recipe, &datasets, &recipe_dir, &recipe_hash, &mut ops)?;
+    apply_recipe(
+        &mut clone,
+        &recipe,
+        &datasets,
+        &recipe_dir,
+        &recipe_hash,
+        &mut ops,
+    )?;
     let preimage_hash = doc.preimage_hash.clone();
     let postimage_hash = sha256_prefixed(clone.render().as_bytes());
 
@@ -61,10 +68,7 @@ pub(crate) fn run_apply_plan(args: ApplyPlanArgs) -> Result<Outcome, MdliError> 
     let plan: Value = serde_json::from_str(&plan_text)
         .map_err(|e| MdliError::user("E_RECIPE_INVALID", format!("invalid plan: {e}")))?;
 
-    let plan_root = plan
-        .get("result")
-        .cloned()
-        .unwrap_or_else(|| plan.clone());
+    let plan_root = plan.get("result").cloned().unwrap_or_else(|| plan.clone());
     if let Some(expected) = plan_root.get("preimage_hash").and_then(|v| v.as_str()) {
         if expected != doc.preimage_hash {
             return Err(MdliError::io(
@@ -112,9 +116,7 @@ pub(crate) fn run_patch(args: PatchArgs) -> Result<Outcome, MdliError> {
     })?;
     let edits: Value = serde_json::from_str(&edits_text)
         .map_err(|e| MdliError::user("E_RECIPE_INVALID", format!("invalid edits JSON: {e}")))?;
-    let ops = edits.as_array().cloned().ok_or_else(|| {
-        MdliError::user("E_RECIPE_INVALID", "edits file must be a JSON array")
-    })?;
+    let ops = patch_ops_from_value(&edits)?;
     let before = doc.render();
     let mut applied = Vec::new();
     for op in &ops {
@@ -129,6 +131,16 @@ pub(crate) fn run_patch(args: PatchArgs) -> Result<Outcome, MdliError> {
         warnings: Vec::new(),
         flags: args.mutate,
     }))
+}
+
+fn patch_ops_from_value(value: &Value) -> Result<Vec<Value>, MdliError> {
+    let ops = value
+        .get("edits")
+        .or_else(|| value.get("ops"))
+        .unwrap_or(value);
+    ops.as_array()
+        .cloned()
+        .ok_or_else(|| MdliError::user("E_RECIPE_INVALID", "edits file must be a JSON array"))
 }
 
 fn apply_plan_op(
@@ -240,7 +252,10 @@ fn apply_replace_section_body(doc: &mut MarkdownDocument, op: &Value) -> Result<
         .or_else(|| op.get("id"))
         .and_then(|v| v.as_str())
         .ok_or_else(|| {
-            MdliError::user("E_RECIPE_INVALID", "replace_section_body needs section or id")
+            MdliError::user(
+                "E_RECIPE_INVALID",
+                "replace_section_body needs section or id",
+            )
         })?;
     let body_path = op
         .get("body_from_file")
@@ -304,13 +319,7 @@ fn upsert_block_with_provenance(
 ) -> Result<(), MdliError> {
     let index = index_document(doc);
     if index.blocks.iter().any(|b| b.id == block_id) {
-        return replace_block_with_provenance(
-            doc,
-            block_id,
-            body,
-            &OnModified::Force,
-            recipe_hash,
-        );
+        return replace_block_with_provenance(doc, block_id, body, &OnModified::Force, recipe_hash);
     }
     let section = resolve_section(&index, parent_section)?;
     let lines = render_block_lines_with_provenance(block_id, body, false, recipe_hash);
@@ -382,14 +391,20 @@ fn apply_set_block_lock(
 fn apply_replace_table(doc: &mut MarkdownDocument, op: &Value) -> Result<(), MdliError> {
     let section = require_str(op, "section_id").or_else(|_| require_str(op, "section"))?;
     let name = op.get("name").and_then(|v| v.as_str()).map(String::from);
-    let column_specs = op
-        .get("columns")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| MdliError::user("E_RECIPE_INVALID", "replace_table needs columns"))?
-        .iter()
-        .map(|v| v.as_str().unwrap_or_default().to_string())
-        .collect::<Vec<_>>()
-        .join(",");
+    let column_specs = match op.get("columns") {
+        Some(Value::Array(columns)) => columns
+            .iter()
+            .map(|v| v.as_str().unwrap_or_default().to_string())
+            .collect::<Vec<_>>()
+            .join(","),
+        Some(Value::String(columns)) => columns.clone(),
+        _ => {
+            return Err(MdliError::user(
+                "E_RECIPE_INVALID",
+                "replace_table needs columns",
+            ));
+        }
+    };
     let from_rows = require_str(op, "rows_from")?.to_string();
     let key = op.get("key").and_then(|v| v.as_str()).map(String::from);
     let columns = parse_columns(&column_specs)?;

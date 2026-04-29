@@ -94,12 +94,7 @@ fn context_resolves_path_selector_when_unambiguous() {
     fs::write(&path, SAMPLE).unwrap();
 
     bin()
-        .args([
-            "context",
-            path.to_str().unwrap(),
-            "--path",
-            "Top > Intro",
-        ])
+        .args(["context", path.to_str().unwrap(), "--path", "Top > Intro"])
         .assert()
         .success()
         .stdout(predicate::str::contains("\"title\": \"Intro\""));
@@ -112,12 +107,7 @@ fn context_errors_when_selector_missing() {
     fs::write(&path, SAMPLE).unwrap();
 
     bin()
-        .args([
-            "context",
-            path.to_str().unwrap(),
-            "--id",
-            "no.such.section",
-        ])
+        .args(["context", path.to_str().unwrap(), "--id", "no.such.section"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("E_SELECTOR_NOT_FOUND"));

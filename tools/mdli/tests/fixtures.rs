@@ -36,14 +36,7 @@ fn assert_zero_diff_idempotent(name: &str) {
     let path_str = path.to_str().unwrap();
 
     let first = bin()
-        .args([
-            "table",
-            "fmt",
-            path_str,
-            "--all",
-            "--emit",
-            "document",
-        ])
+        .args(["table", "fmt", path_str, "--all", "--emit", "document"])
         .assert()
         .success()
         .get_output()

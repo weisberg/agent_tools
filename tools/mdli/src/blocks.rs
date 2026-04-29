@@ -48,12 +48,24 @@ pub(crate) fn run_block(cmd: BlockCommand) -> Result<Outcome, MdliError> {
             validate_write_emit(&args.mutate)?;
             let before = doc.render();
             let body = split_body_lines(&read_text_path(&args.body_from_file)?);
+            let index = index_document(&doc);
+            let block = resolve_block(&index, &args.id)?;
+            let checksum_before = block
+                .checksum
+                .clone()
+                .unwrap_or_else(|| checksum_body(&doc.lines[block.start + 1..block.end - 1]));
+            let checksum_after = checksum_body(&body);
             replace_block(&mut doc, &args.id, body, &args.on_modified)?;
             let changed = before != doc.render();
             Ok(Outcome::Mutated(MutationOutcome {
                 document: doc,
                 changed,
-                ops: vec![json!({"op": "replace_block", "id": args.id})],
+                ops: vec![json!({
+                    "op": "replace_block",
+                    "id": args.id,
+                    "checksum_before": checksum_before,
+                    "checksum_after": checksum_after
+                })],
                 warnings: Vec::new(),
                 flags: args.mutate,
             }))

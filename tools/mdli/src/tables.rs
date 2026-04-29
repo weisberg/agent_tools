@@ -59,24 +59,73 @@ pub(crate) fn table_replace(args: TableReplaceArgs) -> Result<Outcome, MdliError
     doc.assert_preimage(&args.mutate.preimage_hash)?;
     validate_write_emit(&args.mutate)?;
     let before = doc.render();
-    let columns = parse_columns(&args.columns)?;
     let rows = read_rows(&args.from_rows)?;
+    let op = apply_table_replace(
+        &mut doc,
+        TableReplaceInput {
+            section: args.section,
+            name: args.name,
+            columns: args.columns,
+            rows,
+            key: args.key,
+            sort: args.sort,
+            missing: args.missing,
+            rich_cell: args.on_rich_cell,
+            duplicate_key: args.on_duplicate_key,
+            empty: args.empty,
+            links: parse_assignment_map(&args.links)?,
+            truncates: parse_usize_map(&args.truncates)?,
+            escape_markdown: args.escape_markdown,
+        },
+    )?;
+    let changed = before != doc.render();
+    Ok(Outcome::Mutated(MutationOutcome {
+        document: doc,
+        changed,
+        ops: vec![op],
+        warnings: Vec::new(),
+        flags: args.mutate,
+    }))
+}
+
+#[derive(Debug)]
+pub(crate) struct TableReplaceInput {
+    pub(crate) section: String,
+    pub(crate) name: Option<String>,
+    pub(crate) columns: String,
+    pub(crate) rows: Vec<Map<String, Value>>,
+    pub(crate) key: Option<String>,
+    pub(crate) sort: Option<String>,
+    pub(crate) missing: MissingMode,
+    pub(crate) rich_cell: RichCellMode,
+    pub(crate) duplicate_key: DuplicateKeyMode,
+    pub(crate) empty: Option<String>,
+    pub(crate) links: BTreeMap<String, String>,
+    pub(crate) truncates: BTreeMap<String, usize>,
+    pub(crate) escape_markdown: bool,
+}
+
+pub(crate) fn apply_table_replace(
+    doc: &mut MarkdownDocument,
+    input: TableReplaceInput,
+) -> Result<Value, MdliError> {
+    let columns = parse_columns(&input.columns)?;
     let render_options = RenderTableOptions {
         columns,
-        key: args.key.clone(),
-        sort: args.sort.clone(),
-        missing: args.missing,
-        rich_cell: args.on_rich_cell,
-        duplicate_key: args.on_duplicate_key,
-        empty: args.empty,
-        links: parse_assignment_map(&args.links)?,
-        truncates: parse_usize_map(&args.truncates)?,
-        escape_markdown: args.escape_markdown,
+        key: input.key.clone(),
+        sort: input.sort.clone(),
+        missing: input.missing,
+        rich_cell: input.rich_cell,
+        duplicate_key: input.duplicate_key,
+        empty: input.empty,
+        links: input.links,
+        truncates: input.truncates,
+        escape_markdown: input.escape_markdown,
     };
-    let rendered = render_table_from_rows(&rows, &render_options)?;
+    let rendered = render_table_from_rows(&input.rows, &render_options)?;
     let index = index_document(&doc);
-    let section = resolve_section(&index, &args.section)?;
-    let existing = args
+    let section = resolve_section(&index, &input.section)?;
+    let existing = input
         .name
         .as_deref()
         .and_then(|name| {
@@ -93,11 +142,23 @@ pub(crate) fn table_replace(args: TableReplaceArgs) -> Result<Outcome, MdliError
                 .find(|t| t.start >= section.heading && t.end <= section.end)
                 .cloned()
         });
+    let before_data = existing.as_ref().and_then(|table| {
+        table_data_from_lines(&doc.lines[table.start..table.end], table.marker.is_some()).ok()
+    });
+    let rows_before = before_data
+        .as_ref()
+        .map(|data| data.rows.len())
+        .unwrap_or(0);
     let mut replacement = Vec::new();
-    if let Some(name) = &args.name {
-        replacement.push(table_marker(name, args.key.as_deref()));
+    if let Some(name) = &input.name {
+        replacement.push(table_marker(name, input.key.as_deref()));
     }
     replacement.extend(rendered.lines);
+    let action = if existing.is_some() {
+        "replace"
+    } else {
+        "insert"
+    };
     if let Some(table) = existing {
         doc.lines.splice(table.start..table.end, replacement);
     } else {
@@ -116,17 +177,18 @@ pub(crate) fn table_replace(args: TableReplaceArgs) -> Result<Outcome, MdliError
         insertion.push(String::new());
         doc.lines.splice(insert_at..insert_at, insertion);
     }
-    let changed = before != doc.render();
-    Ok(Outcome::Mutated(MutationOutcome {
-        document: doc,
-        changed,
-        ops: vec![json!({
-            "op": "replace_table",
-            "table": args.name,
-            "rows_after": rendered.row_count
-        })],
-        warnings: Vec::new(),
-        flags: args.mutate,
+    let (rows_added, rows_removed, rows_updated) =
+        table_row_delta(before_data.as_ref(), &render_options, &input.rows)?;
+    Ok(json!({
+        "op": "replace_table",
+        "action": action,
+        "section": input.section,
+        "table": input.name,
+        "rows_before": rows_before,
+        "rows_after": rendered.row_count,
+        "rows_added": rows_added,
+        "rows_removed": rows_removed,
+        "rows_updated": rows_updated
     }))
 }
 
@@ -384,6 +446,62 @@ pub(crate) fn render_table_from_rows(
     })
 }
 
+fn table_row_delta(
+    before: Option<&TableData>,
+    opts: &RenderTableOptions,
+    rows: &[Map<String, Value>],
+) -> Result<(Value, Value, Value), MdliError> {
+    let Some(before) = before else {
+        return Ok((json!(0), json!(0), json!(0)));
+    };
+    let Some(key) = &opts.key else {
+        return Ok((Value::Null, Value::Null, Value::Null));
+    };
+    let Some(before_key_idx) = before.columns.iter().position(|col| col == key) else {
+        return Ok((Value::Null, Value::Null, Value::Null));
+    };
+
+    let rendered_after = render_table_from_rows(rows, opts)?;
+    let after = table_data_from_lines(&rendered_after.lines, false)?;
+    let Some(after_key_idx) = after.columns.iter().position(|col| col == key) else {
+        return Ok((Value::Null, Value::Null, Value::Null));
+    };
+
+    let before_by_key = before
+        .rows
+        .iter()
+        .filter_map(|row| {
+            row.get(before_key_idx)
+                .map(|key| (key.clone(), row.clone()))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let after_by_key = after
+        .rows
+        .iter()
+        .filter_map(|row| row.get(after_key_idx).map(|key| (key.clone(), row.clone())))
+        .collect::<BTreeMap<_, _>>();
+
+    let rows_added = after_by_key
+        .keys()
+        .filter(|key| !before_by_key.contains_key(*key))
+        .count();
+    let rows_removed = before_by_key
+        .keys()
+        .filter(|key| !after_by_key.contains_key(*key))
+        .count();
+    let rows_updated = after_by_key
+        .iter()
+        .filter(|(key, after_row)| {
+            before_by_key
+                .get(*key)
+                .map(|before_row| before_row != *after_row)
+                .unwrap_or(false)
+        })
+        .count();
+
+    Ok((json!(rows_added), json!(rows_removed), json!(rows_updated)))
+}
+
 pub(crate) fn scalar_to_cell(
     value: &Value,
     rich_mode: &RichCellMode,
@@ -584,6 +702,16 @@ pub(crate) fn table_data_from_lines(
         .filter(|line| is_table_row(line))
         .map(|line| split_table_row(line))
         .collect::<Vec<_>>();
+    if let Some(row) = rows.iter().find(|row| row.len() != columns.len()) {
+        return Err(MdliError::user(
+            "E_TABLE_INVALID",
+            format!(
+                "table row has {} cells but header has {}",
+                row.len(),
+                columns.len()
+            ),
+        ));
+    }
     Ok(TableData { columns, rows })
 }
 

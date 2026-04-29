@@ -79,11 +79,7 @@ fn template_if_present_block_is_skipped_when_dataset_absent() {
 fn template_missing_dataset_errors() {
     let dir = tempdir().unwrap();
     let template = dir.path().join("t.mdli");
-    fs::write(
-        &template,
-        "{{ table missing columns=[\"X=x\"] }}\n",
-    )
-    .unwrap();
+    fs::write(&template, "{{ table missing columns=[\"X=x\"] }}\n").unwrap();
 
     bin()
         .args(["template", "render", template.to_str().unwrap()])

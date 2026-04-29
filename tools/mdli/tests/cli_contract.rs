@@ -2,6 +2,7 @@ mod common;
 
 use common::bin;
 use predicates::prelude::*;
+use serde_json::Value;
 use std::fs;
 use tempfile::tempdir;
 
@@ -182,11 +183,7 @@ fn section_move_repositions_section() {
 fn section_rename_updates_visible_heading_only() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("report.md");
-    fs::write(
-        &path,
-        "<!-- mdli:id v=1 id=report.intro -->\n## Intro\n",
-    )
-    .unwrap();
+    fs::write(&path, "<!-- mdli:id v=1 id=report.intro -->\n## Intro\n").unwrap();
 
     bin()
         .args([
@@ -475,6 +472,107 @@ fn table_replace_rejects_duplicate_keys_by_default() {
         .stderr(predicate::str::contains("E_TABLE_DUPLICATE_KEY"));
 }
 
+#[test]
+fn table_replace_plan_reports_row_delta() {
+    let dir = tempdir().unwrap();
+    let report = dir.path().join("report.md");
+    let rows = dir.path().join("rows.ndjson");
+    fs::write(
+        &report,
+        "# Report\n\n<!-- mdli:id v=1 id=report.analytics -->\n## Analytics\n\n<!-- mdli:table v=1 name=analytics-tickets key=Ticket -->\n| Ticket | Summary | Status |\n|---|---|---|\n| CP-1 | Old | Open |\n| CP-2 | Remove me | Done |\n",
+    )
+    .unwrap();
+    fs::write(
+        &rows,
+        "{\"key\":\"CP-1\",\"summary\":\"New\",\"status\":\"Open\"}\n{\"key\":\"CP-3\",\"summary\":\"Added\",\"status\":\"Open\"}\n",
+    )
+    .unwrap();
+
+    let output = bin()
+        .args([
+            "table",
+            "replace",
+            report.to_str().unwrap(),
+            "--section",
+            "report.analytics",
+            "--name",
+            "analytics-tickets",
+            "--columns",
+            "Ticket=key,Summary=summary,Status=status",
+            "--from-rows",
+            rows.to_str().unwrap(),
+            "--key",
+            "Ticket",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let op = &json["result"]["ops"][0];
+    assert_eq!(op["rows_before"], 2);
+    assert_eq!(op["rows_after"], 2);
+    assert_eq!(op["rows_added"], 1);
+    assert_eq!(op["rows_removed"], 1);
+    assert_eq!(op["rows_updated"], 1);
+    assert_eq!(
+        fs::read_to_string(&report).unwrap().matches("CP-3").count(),
+        0
+    );
+}
+
+#[test]
+fn table_replace_rejects_rich_cells_and_allows_missing_empty() {
+    let dir = tempdir().unwrap();
+    let report = dir.path().join("report.md");
+    let rows = dir.path().join("rows.ndjson");
+    fs::write(
+        &report,
+        "# Report\n\n<!-- mdli:id v=1 id=report.analytics -->\n## Analytics\n",
+    )
+    .unwrap();
+    fs::write(&rows, "{\"key\":\"CP-1\",\"details\":{\"nested\":true}}\n").unwrap();
+
+    bin()
+        .args([
+            "table",
+            "replace",
+            report.to_str().unwrap(),
+            "--section",
+            "report.analytics",
+            "--columns",
+            "Ticket=key,Details=details,Optional=missing",
+            "--from-rows",
+            rows.to_str().unwrap(),
+            "--missing",
+            "empty",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("E_RICH_CELL"));
+
+    bin()
+        .args([
+            "table",
+            "replace",
+            report.to_str().unwrap(),
+            "--section",
+            "report.analytics",
+            "--columns",
+            "Ticket=key,Details=details,Optional=missing",
+            "--from-rows",
+            rows.to_str().unwrap(),
+            "--missing",
+            "empty",
+            "--on-rich-cell",
+            "json",
+            "--emit",
+            "document",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("{\"nested\":true}"));
+}
+
 // ---------------------------------------------------------------------------
 // managed blocks
 // ---------------------------------------------------------------------------
@@ -532,11 +630,7 @@ fn block_replace_force_overwrites_modified_content() {
     let dir = tempdir().unwrap();
     let report = dir.path().join("report.md");
     let body = dir.path().join("body.md");
-    fs::write(
-        &report,
-        "<!-- mdli:id v=1 id=t -->\n## T\n",
-    )
-    .unwrap();
+    fs::write(&report, "<!-- mdli:id v=1 id=t -->\n## T\n").unwrap();
     fs::write(&body, "Initial.\n").unwrap();
 
     bin()
@@ -810,11 +904,7 @@ fn inspect_emits_sections_tables_blocks_and_issues() {
 fn ambiguous_path_selector_errors() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("doc.md");
-    fs::write(
-        &path,
-        "# Top\n\n## Same\n\nA\n\n## Other\n\n## Same\n\nB\n",
-    )
-    .unwrap();
+    fs::write(&path, "# Top\n\n## Same\n\nA\n\n## Other\n\n## Same\n\nB\n").unwrap();
 
     bin()
         .args([
@@ -833,11 +923,7 @@ fn ambiguous_path_selector_errors() {
 fn ambiguous_path_selector_lists_match_details() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("doc.md");
-    fs::write(
-        &path,
-        "# Top\n\n## Same\n\nA\n\n## Other\n\n## Same\n\nB\n",
-    )
-    .unwrap();
+    fs::write(&path, "# Top\n\n## Same\n\nA\n\n## Other\n\n## Same\n\nB\n").unwrap();
 
     bin()
         .args([
