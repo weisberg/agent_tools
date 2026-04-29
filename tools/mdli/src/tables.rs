@@ -128,7 +128,7 @@ pub(crate) fn apply_table_replace(
         escape_markdown: input.escape_markdown,
     };
     let rendered = render_table_from_rows(&input.rows, &render_options)?;
-    let index = index_document(&doc);
+    let index = index_document(doc);
     let section = resolve_section(&index, &input.section)?;
     let existing = input
         .name

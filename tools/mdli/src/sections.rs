@@ -89,7 +89,7 @@ pub(crate) fn apply_section_ensure(
             "--after and --before are mutually exclusive",
         ));
     }
-    let index = index_document(&doc);
+    let index = index_document(doc);
 
     if let Some(section) = index
         .sections

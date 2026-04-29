@@ -9,7 +9,7 @@ pub(crate) enum MdliError {
     User {
         code: &'static str,
         message: String,
-        details: Option<Value>,
+        details: Option<Box<Value>>,
         #[source]
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
@@ -17,7 +17,7 @@ pub(crate) enum MdliError {
     Invariant {
         code: &'static str,
         message: String,
-        details: Option<Value>,
+        details: Option<Box<Value>>,
     },
     #[error("{message}")]
     Io {
@@ -57,7 +57,7 @@ impl MdliError {
     pub(crate) fn with_details(mut self, value: Value) -> Self {
         match &mut self {
             Self::User { details, .. } | Self::Invariant { details, .. } => {
-                *details = Some(value);
+                *details = Some(Box::new(value));
             }
             Self::Io { .. } => {}
         }
@@ -76,7 +76,7 @@ impl MdliError {
 
     pub(crate) fn details(&self) -> Option<&Value> {
         match self {
-            Self::User { details, .. } | Self::Invariant { details, .. } => details.as_ref(),
+            Self::User { details, .. } | Self::Invariant { details, .. } => details.as_deref(),
             Self::Io { .. } => None,
         }
     }

@@ -362,7 +362,7 @@ pub(crate) fn replace_block_with_provenance(
                 block_id,
                 expected,
                 &actual,
-                &doc.lines[block.start + 1..block.end - 1].to_vec(),
+                &doc.lines[block.start + 1..block.end - 1],
                 &body,
                 on_modified,
             )?;

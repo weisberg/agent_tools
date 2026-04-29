@@ -141,10 +141,7 @@ pub(crate) fn parse_template(src: &str) -> Result<Vec<TemplateNode>, MdliError> 
     Ok(nodes)
 }
 
-fn parse_nodes<'a>(
-    src: &'a str,
-    inside_block: bool,
-) -> Result<(Vec<TemplateNode>, &'a str), MdliError> {
+fn parse_nodes(src: &str, inside_block: bool) -> Result<(Vec<TemplateNode>, &str), MdliError> {
     let mut nodes = Vec::new();
     let mut rest = src;
     loop {

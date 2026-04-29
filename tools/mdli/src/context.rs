@@ -130,8 +130,7 @@ fn nearest_ancestor<'a>(
 ) -> Option<&'a SectionInfo> {
     sections
         .iter()
-        .filter(|cand| cand.level == level && cand.start < s.start && cand.end >= s.end)
-        .next_back()
+        .rfind(|cand| cand.level == level && cand.start < s.start && cand.end >= s.end)
 }
 
 fn collect_managed_blocks(blocks: &[BlockInfo], section: &SectionInfo) -> Vec<Value> {
@@ -170,22 +169,20 @@ fn byte_range_for_lines(doc: &MarkdownDocument, start: usize, end: usize) -> Val
 /// Approximate `chars / 4` as token count and truncate at a line boundary.
 /// Returns (body, truncated, tokens_estimated).
 pub(crate) fn truncate_to_tokens(body: &str, max_tokens: usize) -> (String, bool, usize) {
-    let tokens = (body.chars().count() + 3) / 4;
+    let tokens = body.chars().count().div_ceil(4);
     if tokens <= max_tokens {
         return (body.to_string(), false, tokens);
     }
     let target_chars = max_tokens.saturating_mul(4);
-    let mut kept = 0usize;
     let mut last_nl: Option<usize> = None;
     let mut idx = 0usize;
-    for (i, c) in body.char_indices() {
+    for (kept, (i, c)) in body.char_indices().enumerate() {
         if kept >= target_chars {
             break;
         }
         if c == '\n' {
             last_nl = Some(i);
         }
-        kept += 1;
         idx = i + c.len_utf8();
     }
     let cut = last_nl.map(|n| n + 1).unwrap_or(idx);
@@ -194,6 +191,6 @@ pub(crate) fn truncate_to_tokens(body: &str, max_tokens: usize) -> (String, bool
         out.push('\n');
     }
     out.push_str("…\n");
-    let tokens_emitted = (out.chars().count() + 3) / 4;
+    let tokens_emitted = out.chars().count().div_ceil(4);
     (out, true, tokens_emitted)
 }
