@@ -16,10 +16,15 @@ and predictable error handling.
 ## Important References
 
 - `README.md`: project overview and current documentation map.
+- `docs/AGENT_TOOLS_PLATFORM_SPEC.md`: architectural contract every `*li`
+  tool should converge toward (envelope, errors, mutation safety,
+  selectors, taxonomy, maturity ladder). Read this before designing or
+  reviewing any tool change.
 - `docs/tooli.md`: concise guide for building Python CLIs with `tooli`.
 - `docs/skills.md`: skill authoring guide and local skills inventory.
 - `docs/tool-roadmap.md`: tool family inventory, standards, and legacy tool
   notes.
+- `docs/error-registry.md`: cross-tool error code registry.
 - `tooli_feedback.md`: actionable feedback for `tooli` and agent-tool
   usability.
 

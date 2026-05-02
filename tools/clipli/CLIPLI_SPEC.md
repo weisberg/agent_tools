@@ -1442,3 +1442,33 @@ pb::write(&[(PbType::Html, rendered.html.as_bytes()), (PbType::PlainText, render
 - [ ] README.md, man page
 - [ ] CI (GitHub Actions, macOS runner)
 - [ ] Homebrew formula
+
+---
+
+## 14. Platform Conformance
+
+`clipli` is at maturity level 5 against
+[`docs/AGENT_TOOLS_PLATFORM_SPEC.md`](../../docs/AGENT_TOOLS_PLATFORM_SPEC.md):
+shipped, with a SKILL.md, but predating envelope harmonization.
+
+Known deviations from the recommended platform envelope (spec §4.4 and
+§4.5):
+
+- The minimal failure form documented in `README.md`
+  (`{"ok": false, "error": "message", "code": "ERROR_CODE"}`) flattens
+  the error object and uses a top-level `code`. Recommendation:
+  graduate to the full `error: { code, category, message, suggestion,
+  is_retryable, details }` shape for v1.1, keeping the current shape
+  emit-compatible during a deprecation window.
+- Error codes lack a `category` family. See
+  [`docs/error-registry.md`](../../docs/error-registry.md) for the
+  shared registry.
+- `clipli` is macOS-only and clipboard-bound; `doctor` is the platform's
+  recommended preflight surface for environment readiness — keep it
+  current as new capabilities ship.
+
+The capture → templatize → render → paste loop is `clipli`'s analog of
+the platform's plan-first mutation model. The clipboard *is* the
+artifact; preimage protection against another app rewriting the
+clipboard between `inspect` and `write` is an open question worth
+tracking once concurrent-app scenarios appear in real workflows.

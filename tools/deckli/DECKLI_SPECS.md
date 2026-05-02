@@ -656,3 +656,34 @@ This gives Claude Code direct tool access without shelling out. The MCP server i
 5. **Zero-config for agents**: `deckli mcp-serve` in Claude Code settings.json, start using immediately
 6. **SKILL.md < 4K tokens**: Primary skill file fits in context without crowding reasoning
 7. **Self-healing > 80%**: Agent recovers from errors without human intervention 4/5 times
+
+---
+
+## Platform Conformance
+
+`deckli` is at maturity level 1 against
+[`docs/AGENT_TOOLS_PLATFORM_SPEC.md`](../../docs/AGENT_TOOLS_PLATFORM_SPEC.md)
+(spec + add-in/bridge prototype).
+
+Known deviations from the recommended platform envelope (spec §4.4 and
+§4.5) that the v1 implementation should reconcile:
+
+- Envelope uses `success` instead of `ok`. Recommendation: rename to
+  `ok` to align with every other `*li` tool before v1 stabilizes — the
+  cost is nil and divergence here will leak into agent prompts.
+- Per-message `command` and `timing_ms` are top-level. Recommendation:
+  keep `command` (useful routing context) but fold `timing_ms` into a
+  `meta` block alongside `tool`, `version`, and `dry_run`.
+- Error `suggestion` is a string. Recommendation: align with the
+  platform's `suggestion` object (`action`, `fix`, `example`) so agents
+  get structured recovery advice. See spec §4.5.
+- A new platform-level error class `E_BRIDGE_DISCONNECTED` covers the
+  current `no_addin` case; adopt the platform code so handlers are
+  shared with `framerli` and any future live-bridge tool. See
+  [`docs/error-registry.md`](../../docs/error-registry.md).
+
+Mutation safety for live documents is special: there is no preimage
+hash because the artifact is a running PowerPoint instance. The
+batch + context.sync model and `render --slide` visual verification
+loop are `deckli`'s equivalents of the platform's
+plan → apply → validate cycle.

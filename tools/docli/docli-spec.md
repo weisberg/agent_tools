@@ -2167,3 +2167,30 @@ docli inspect --help
 ```
 
 No Python. No Node.js. No package managers. One binary, zero runtime dependencies.
+
+---
+
+## Platform Conformance
+
+`docli` is at maturity level 0–1 against
+[`docs/AGENT_TOOLS_PLATFORM_SPEC.md`](../../docs/AGENT_TOOLS_PLATFORM_SPEC.md)
+(spec mature, implementation scaffolded).
+
+Known deviations from the recommended platform envelope (spec §4.4 and
+§4.5) that the implementation should reconcile or document:
+
+- Success envelope uses `data` instead of `result` and a top-level
+  `command` field. Recommendation: keep `command` (it carries useful
+  routing context) but rename `data` → `result` to align with the
+  platform contract before declaring v1 stable.
+- Top-level `elapsed_ms` instead of `meta.duration_ms`. Recommendation:
+  fold into a `meta` block alongside `tool`, `version`, and `dry_run`.
+- Error code uses upper-snake strings without an `E_` prefix
+  (e.g. `INVALID_TARGET`). Recommendation: add the `E_` prefix and a
+  `category` field mapped to the spec's `E1xxx`–`E5xxx` families. See
+  [`docs/error-registry.md`](../../docs/error-registry.md).
+
+The shadow-package atomic commit pipeline, durability modes, hard
+invariants, and the inspect → plan → apply → validate → diff lifecycle
+already align tightly with the platform's mutation safety model
+(spec §6).

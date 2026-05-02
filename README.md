@@ -173,6 +173,18 @@ Useful entry points:
 ## Common Design Language
 
 Across the repo, tools aim to share the same agent-friendly contract:
+JSON-first envelopes, stable error codes with recovery hints, dry-run
+plans before mutation, atomic writes with preimage protection, and stable
+selectors over visible names.
+
+The full contract — success/error envelope shape, shared error families,
+mutation safety lifecycle, selector model, tool taxonomy, and maturity
+ladder — lives in [`docs/AGENT_TOOLS_PLATFORM_SPEC.md`](docs/AGENT_TOOLS_PLATFORM_SPEC.md).
+Read that before designing a new `*li` tool or auditing an existing one.
+
+A short sketch of the shared envelope (see spec §4.4 and §4.5 for the
+authoritative form, including `meta.annotations` and the
+`suggestion`/`is_retryable` error fields):
 
 ```json
 {
@@ -182,19 +194,6 @@ Across the repo, tools aim to share the same agent-friendly contract:
     "tool": "example.command",
     "duration_ms": 12,
     "dry_run": false
-  }
-}
-```
-
-When a command fails, the ideal output is just as parseable:
-
-```json
-{
-  "ok": false,
-  "error": {
-    "code": "VALIDATION_FAILED",
-    "message": "The requested range is invalid.",
-    "suggestion": "Check the sheet name and A1 range."
   }
 }
 ```
@@ -224,6 +223,11 @@ cargo run -- --help
 ## Documentation
 
 - [`AGENTS.md`](AGENTS.md): instructions for agents working in this repo.
+- [`docs/AGENT_TOOLS_PLATFORM_SPEC.md`](docs/AGENT_TOOLS_PLATFORM_SPEC.md):
+  the platform contract — envelope, errors, mutation safety, selectors,
+  tool taxonomy, maturity ladder. Authoritative for cross-tool design.
+- [`docs/error-registry.md`](docs/error-registry.md): cross-tool error
+  code registry.
 - [`docs/tooli.md`](docs/tooli.md): concise guide for building Python CLIs with
   `tooli`.
 - [`docs/skills.md`](docs/skills.md): skill authoring guide and local skills

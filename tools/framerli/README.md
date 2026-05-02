@@ -143,3 +143,24 @@ Error:
   "meta": {}
 }
 ```
+
+## Platform Conformance
+
+`framerli` is at maturity level 4 against
+[`docs/AGENT_TOOLS_PLATFORM_SPEC.md`](../../docs/AGENT_TOOLS_PLATFORM_SPEC.md).
+
+Known deviations from the recommended platform envelope (spec §4.4 and
+§4.5):
+
+- Success envelope uses `data` instead of `result`. Reason: shipped before
+  the platform spec consolidated naming. Harmonization is an open roadmap
+  item; the field name is stable for live integrations.
+- Error envelope uses `hint` and `retryable` instead of the spec's
+  `suggestion` and `is_retryable`. Same reason.
+- Error codes are stable string codes (`E_AUTH_MISSING`,
+  `E_NOT_IMPLEMENTED`, ...) without a numeric `category` family. See
+  [`docs/error-registry.md`](../../docs/error-registry.md) for the
+  registry; agents can map string codes to spec families there.
+
+Mutation safety, dry-run-by-default, audit logging, and approval gates
+follow the platform contract.

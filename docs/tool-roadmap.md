@@ -5,17 +5,51 @@ tool-family notes that lived in `tools/TOOLS.md`.
 
 ## Agent Tool Standards
 
-All tools should be designed for agent consumption:
+The architectural contract for every `*li` tool — envelope shape, error
+taxonomy, mutation safety lifecycle, selector model, schema discovery,
+testing standards, and the new-tool checklist — is defined in
+[`AGENT_TOOLS_PLATFORM_SPEC.md`](AGENT_TOOLS_PLATFORM_SPEC.md). Cross-tool
+error codes are catalogued in [`error-registry.md`](error-registry.md).
 
-- Inputs must be explicit and validated.
-- Outputs should be structured, stable, and documented.
-- Errors should include machine-readable codes and actionable recovery guidance.
-- Mutating commands should support `--dry-run` when possible.
-- Commands should be focused enough to compose with other tools.
-- Human-readable output is welcome, but non-interactive calls should produce JSON
-  or another predictable format.
+In short, every tool should:
+
+- Take explicit, validated inputs.
+- Emit a stable JSON envelope with a `meta` block.
+- Use stable error codes with `category`, `suggestion`, `is_retryable`.
+- Default to safe (dry-run plan) for mutating commands and write atomically.
+- Prefer stable selectors (IDs, A1 ranges, named tables) over names/positions.
+- Compose with other `*li` tools via NDJSON and stdin/stdout.
+
+See the spec for the authoritative form, including envelope deviations
+already in flight.
+
+## Maturity Ladder
+
+The platform spec defines an 8-level maturity ladder (§15). Best-effort
+classifications are reproduced in the tool-family table below; correct in
+place when better evidence exists.
 
 ## Current Tool Families
+
+Quick view (maturity per the platform spec ladder; see each tool's section
+below for detail):
+
+| Tool | Domain | Maturity | Notes |
+|---|---|---:|---|
+| `mdli` | Markdown AST | 7 | PRD Phases 1–8 implemented; cross-tool integration tested via recipes |
+| `xli` | Excel `.xlsx` | 6 | Atomic + fingerprint; `umya-spreadsheet` fallback warnings remain |
+| `vaultli` | File-based knowledge vault | 6 | Rust + Python parity, sidecar model, `INDEX.jsonl` cache |
+| `clipli` | macOS clipboard intelligence | 5 | Capture/templatize/render loop; macOS-only |
+| `jirali` | Jira issues / JQL / sprints | 5 | Live + local-deterministic execution paths |
+| `notionli` | Notion workspace | 4 | MVP shipped; expanding |
+| `framerli` | Framer Server API | 4 | Rust core + Node bridge; mock mode for CI |
+| `barli` | macOS menu bar plugin host | 3 | Hot-reload Python plugins; no test suite |
+| `vizli` | Visualization templates → SVG/PNG/HTML/PDF | 1–2 | Spec stable, implementation in progress |
+| `deckli` | PowerPoint via Office.js bridge | 1 | Spec + add-in/bridge proto |
+| `docli` | Word `.docx` | 0–1 | Spec mature; workspace crates scaffolded |
+| `bashli` | Structured shell execution | 0–1 | Spec; greenfield |
+| `pdfli` | PDF tooling | 0 | Placeholder |
+| `gitli` | GitHub issues, PRs, wiki | 0 | Placeholder |
 
 ### `vaultli`
 
