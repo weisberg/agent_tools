@@ -6,6 +6,8 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+fs2.workspace = true
+lira-core = { path = "../lira-core" }
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml = "0.9"
