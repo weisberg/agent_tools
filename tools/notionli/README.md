@@ -1,7 +1,9 @@
 # notionli
 
 `notionli` is an agent-safe Notion CLI implemented in Rust from the PRD in this
-directory. The current implementation covers the MVP 0 command shape:
+directory. This release marks the v1.0 baseline command surface.
+
+Current implementation highlights:
 
 - JSON envelopes and structured errors with PRD exit codes.
 - Integration-token auth via `NOTION_API_KEY`, `--token-cmd`, or macOS Keychain.
