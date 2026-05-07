@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use clap::Args;
@@ -122,7 +122,7 @@ fn check_temp() -> TempCheck {
     }
 }
 
-fn tempfile_writable(dir: &PathBuf) -> bool {
+fn tempfile_writable(dir: &Path) -> bool {
     let test_path = dir.join(".docli-doctor-check");
     if std::fs::write(&test_path, b"ok").is_ok() {
         let _ = std::fs::remove_file(&test_path);

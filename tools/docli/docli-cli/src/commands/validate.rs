@@ -4,9 +4,7 @@ use clap::Args;
 use serde::Serialize;
 
 use docli_core::{DocliError, EnvelopeBuilder, Package};
-use docli_schema::{
-    check_invariants, validate_redlines, validate_structure, ValidationIssue,
-};
+use docli_schema::{check_invariants, validate_redlines, validate_structure, ValidationIssue};
 
 use crate::envelope::emit;
 
@@ -165,9 +163,8 @@ fn write_repaired_package(package: &Package, output: &PathBuf) -> Result<(), Doc
         zip.write_all(&buf)?;
     }
 
-    zip.finish()
-        .map_err(|e| DocliError::CommitFailed {
-            message: e.to_string(),
-        })?;
+    zip.finish().map_err(|e| DocliError::CommitFailed {
+        message: e.to_string(),
+    })?;
     Ok(())
 }

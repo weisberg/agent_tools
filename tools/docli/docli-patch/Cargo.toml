@@ -6,9 +6,9 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
-docli-core = { path = "../docli-core" }
-docli-query = { path = "../docli-query" }
-docli-schema = { path = "../docli-schema" }
+docli-core = { path = "../docli-core", version = "0.1.0" }
+docli-query = { path = "../docli-query", version = "0.1.0" }
+docli-schema = { path = "../docli-schema", version = "0.1.0" }
 quick-xml.workspace = true
 regex.workspace = true
 serde.workspace = true

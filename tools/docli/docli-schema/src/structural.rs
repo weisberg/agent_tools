@@ -70,18 +70,21 @@ fn collect_content_type_overrides(package: &Package) -> HashSet<String> {
         return HashSet::new();
     };
     let xml = String::from_utf8_lossy(content_types);
-    xml.lines()
-        .filter_map(|line| extract_part_name(line))
+    extract_attributes(&xml, "PartName")
+        .into_iter()
         .map(|part| part.trim_start_matches('/').to_string())
         .collect()
 }
 
-fn extract_part_name(line: &str) -> Option<&str> {
-    let marker = "PartName=\"";
-    let start = line.find(marker)?;
-    let rest = &line[start + marker.len()..];
-    let end = rest.find('"')?;
-    Some(&rest[..end])
+fn extract_attributes<'a>(xml: &'a str, attr: &str) -> Vec<&'a str> {
+    let marker = format!("{attr}=\"");
+    xml.match_indices(&marker)
+        .filter_map(|(start, _)| {
+            let rest = &xml[start + marker.len()..];
+            let end = rest.find('"')?;
+            Some(&rest[..end])
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -90,7 +93,7 @@ mod tests {
 
     use docli_core::Package;
 
-    use super::validate_structure;
+    use super::{extract_attributes, validate_structure};
 
     fn fixture_path() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/minimal.docx")
@@ -105,5 +108,13 @@ mod tests {
             issue.code == "missing-required-part"
                 && issue.part.as_deref() == Some("word/_rels/document.xml.rels")
         }));
+    }
+
+    #[test]
+    fn extracts_all_content_type_overrides_from_single_line_xml() {
+        let xml = r#"<Types><Override PartName="/word/document.xml"/><Override PartName="/word/comments.xml"/></Types>"#;
+        let parts = extract_attributes(xml, "PartName");
+
+        assert_eq!(parts, vec!["/word/document.xml", "/word/comments.xml"]);
     }
 }

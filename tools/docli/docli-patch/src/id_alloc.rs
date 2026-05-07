@@ -38,8 +38,12 @@ impl IdAllocator {
                             used_ids.insert(v);
                         } else {
                             // Extract trailing numeric part (e.g. "rId3" → 3).
-                            let numeric: String =
-                                attr.value().chars().rev().take_while(|c| c.is_ascii_digit()).collect();
+                            let numeric: String = attr
+                                .value()
+                                .chars()
+                                .rev()
+                                .take_while(|c| c.is_ascii_digit())
+                                .collect();
                             if !numeric.is_empty() {
                                 let numeric: String = numeric.chars().rev().collect();
                                 if let Ok(v) = numeric.parse::<u64>() {
@@ -58,6 +62,7 @@ impl IdAllocator {
     }
 
     /// Allocate the next unused ID. Panics if `>= 0x7FFF_FFFF`.
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> u64 {
         assert!(self.next_id < 0x7FFF_FFFF, "ID space exhausted");
         while self.used_ids.contains(&self.next_id) {

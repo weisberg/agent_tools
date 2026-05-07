@@ -6,7 +6,7 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
-docli-core = { path = "../docli-core" }
+docli-core = { path = "../docli-core", version = "0.1.0" }
 hex.workspace = true
 quick-xml.workspace = true
 regex.workspace = true

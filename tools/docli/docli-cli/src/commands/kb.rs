@@ -57,11 +57,10 @@ fn make_resolver(kb_root: &Option<PathBuf>) -> Result<KbResolver, DocliError> {
     let root = match kb_root {
         Some(ref path) => path.clone(),
         None => {
-            let env_root = std::env::var("DOCLI_KB_ROOT").map_err(|_| {
-                DocliError::DependencyMissing {
+            let env_root =
+                std::env::var("DOCLI_KB_ROOT").map_err(|_| DocliError::DependencyMissing {
                     dependency: "DOCLI_KB_ROOT environment variable or --kb-root flag".to_string(),
-                }
-            })?;
+                })?;
             PathBuf::from(env_root)
         }
     };
@@ -88,7 +87,10 @@ fn run_list(args: KbListArgs, format: &str, pretty: bool) -> i32 {
     }
 }
 
-fn execute_list(args: &KbListArgs, _builder: &mut EnvelopeBuilder) -> Result<KbListData, DocliError> {
+fn execute_list(
+    args: &KbListArgs,
+    _builder: &mut EnvelopeBuilder,
+) -> Result<KbListData, DocliError> {
     let resolver = make_resolver(&args.kb_root)?;
     let entries = resolver.list_entries(&args.category)?;
     Ok(KbListData {

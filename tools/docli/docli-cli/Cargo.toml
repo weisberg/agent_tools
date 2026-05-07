@@ -11,13 +11,13 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
-docli-core = { path = "../docli-core" }
-docli-create = { path = "../docli-create" }
-docli-kb = { path = "../docli-kb" }
-docli-patch = { path = "../docli-patch" }
-docli-query = { path = "../docli-query" }
-docli-render = { path = "../docli-render" }
-docli-schema = { path = "../docli-schema" }
+docli-core = { path = "../docli-core", version = "0.1.0" }
+docli-create = { path = "../docli-create", version = "0.1.0" }
+docli-kb = { path = "../docli-kb", version = "0.1.0" }
+docli-patch = { path = "../docli-patch", version = "0.1.0" }
+docli-query = { path = "../docli-query", version = "0.1.0" }
+docli-render = { path = "../docli-render", version = "0.1.0" }
+docli-schema = { path = "../docli-schema", version = "0.1.0" }
 roxmltree.workspace = true
 schemars.workspace = true
 serde.workspace = true

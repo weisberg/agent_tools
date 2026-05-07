@@ -54,18 +54,16 @@ pub fn run(args: ReadArgs, format: &str, pretty: bool) -> i32 {
 fn execute(args: &ReadArgs, _builder: &mut EnvelopeBuilder) -> Result<ReadData, DocliError> {
     let package = Package::open(&args.file)?;
 
-    let doc_xml = package
-        .xml_parts
-        .get("word/document.xml")
-        .ok_or_else(|| DocliError::InvalidDocx {
-            message: "missing word/document.xml".to_string(),
-        })?;
+    let doc_xml =
+        package
+            .xml_parts
+            .get("word/document.xml")
+            .ok_or_else(|| DocliError::InvalidDocx {
+                message: "missing word/document.xml".to_string(),
+            })?;
 
     let rels_xml = package.xml_parts.get("word/_rels/document.xml.rels");
-    let index = DocumentIndex::build_with_relationships(
-        doc_xml,
-        rels_xml.map(|v| v.as_slice()),
-    )?;
+    let index = DocumentIndex::build_with_relationships(doc_xml, rels_xml.map(|v| v.as_slice()))?;
 
     let content = match args.render.as_str() {
         "text" => render_text(&index),

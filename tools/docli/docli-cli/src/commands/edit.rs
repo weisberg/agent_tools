@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{Args, Subcommand, ValueEnum};
 use serde::Serialize;
@@ -140,19 +140,47 @@ pub fn run(cmd: EditCommand, format: &str, pretty: bool) -> i32 {
     match cmd {
         EditCommand::Replace(args) => {
             let (input, output) = (args.input.clone(), args.output.clone());
-            run_job("edit.replace", &input, &output, build_replace(args), format, pretty)
+            run_job(
+                "edit.replace",
+                &input,
+                &output,
+                build_replace(args),
+                format,
+                pretty,
+            )
         }
         EditCommand::Insert(args) => {
             let (input, output) = (args.input.clone(), args.output.clone());
-            run_job("edit.insert", &input, &output, build_insert(args), format, pretty)
+            run_job(
+                "edit.insert",
+                &input,
+                &output,
+                build_insert(args),
+                format,
+                pretty,
+            )
         }
         EditCommand::Delete(args) => {
             let (input, output) = (args.input.clone(), args.output.clone());
-            run_job("edit.delete", &input, &output, build_delete(args), format, pretty)
+            run_job(
+                "edit.delete",
+                &input,
+                &output,
+                build_delete(args),
+                format,
+                pretty,
+            )
         }
         EditCommand::FindReplace(args) => {
             let (input, output) = (args.input.clone(), args.output.clone());
-            run_job("edit.find-replace", &input, &output, build_find_replace(args), format, pretty)
+            run_job(
+                "edit.find-replace",
+                &input,
+                &output,
+                build_find_replace(args),
+                format,
+                pretty,
+            )
         }
     }
 }
@@ -207,8 +235,8 @@ fn build_find_replace(args: FindReplaceArgs) -> Result<Job, String> {
 
 fn run_job(
     label: &str,
-    input: &PathBuf,
-    output: &PathBuf,
+    input: &Path,
+    output: &Path,
     job_result: Result<Job, String>,
     format: &str,
     pretty: bool,
@@ -218,9 +246,8 @@ fn run_job(
     let job = match job_result {
         Ok(j) => j,
         Err(msg) => {
-            let envelope = builder.err::<EditResult>(&docli_core::DocliError::InvalidDocx {
-                message: msg,
-            });
+            let envelope =
+                builder.err::<EditResult>(&docli_core::DocliError::InvalidDocx { message: msg });
             let _ = emit(&envelope, format, pretty);
             return 1;
         }
@@ -233,8 +260,8 @@ fn run_job(
 
     let request = PipelineRequest {
         command: label.to_string(),
-        source: input.clone(),
-        output: output.clone(),
+        source: input.to_path_buf(),
+        output: output.to_path_buf(),
         durability: Durability::Durable,
         revalidate_after_write: false,
     };

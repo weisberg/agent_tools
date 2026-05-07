@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::{Args, Subcommand, ValueEnum};
 use serde::Serialize;
@@ -212,8 +212,8 @@ fn build_track_delete(args: TrackDeleteArgs) -> Result<Job, String> {
 
 fn run_job(
     label: &str,
-    input: &PathBuf,
-    output: &PathBuf,
+    input: &Path,
+    output: &Path,
     job_result: Result<Job, String>,
     format: &str,
     pretty: bool,
@@ -223,9 +223,8 @@ fn run_job(
     let job = match job_result {
         Ok(j) => j,
         Err(msg) => {
-            let envelope = builder.err::<ReviewResult>(&docli_core::DocliError::InvalidDocx {
-                message: msg,
-            });
+            let envelope =
+                builder.err::<ReviewResult>(&docli_core::DocliError::InvalidDocx { message: msg });
             let _ = emit(&envelope, format, pretty);
             return 1;
         }
@@ -236,8 +235,8 @@ fn run_job(
 
     let request = PipelineRequest {
         command: label.to_string(),
-        source: input.clone(),
-        output: output.clone(),
+        source: input.to_path_buf(),
+        output: output.to_path_buf(),
         durability: Durability::Durable,
         revalidate_after_write: false,
     };

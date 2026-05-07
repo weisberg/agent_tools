@@ -3,6 +3,8 @@
 Rust control-plane CLI for the Framer Server API, with a Node bridge for the official
 `framer-api` SDK.
 
+For agent-facing operating guidance, see [`SKILL.md`](SKILL.md).
+
 This milestone makes `framerli` a usable core CLI rather than only a command scaffold:
 
 - Rust owns command parsing, JSON envelopes, dry-run plans, approval gates, profile config,

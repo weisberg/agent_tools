@@ -7,6 +7,7 @@ use crate::part_graph::{PartData, PartGraph};
 /// This replaces the binary data for the image identified by `relationship_id`,
 /// updates the target path in the relationships, and optionally adjusts
 /// the image dimensions in the document XML.
+#[allow(clippy::too_many_arguments)]
 pub fn replace_image(
     graph: &mut PartGraph,
     relationship_id: &str,
@@ -31,10 +32,9 @@ pub fn replace_image(
                 message: format!("part not found: {part_path}"),
             })?;
 
-        let xml_str =
-            std::str::from_utf8(xml).map_err(|e| DocliError::InvalidDocx {
-                message: format!("invalid UTF-8: {e}"),
-            })?;
+        let xml_str = std::str::from_utf8(xml).map_err(|e| DocliError::InvalidDocx {
+            message: format!("invalid UTF-8: {e}"),
+        })?;
 
         if image_byte_end > xml_str.len() {
             return Err(DocliError::InvalidOperation {
@@ -53,8 +53,7 @@ pub fn replace_image(
         // Update the relationship embed reference if needed.
         let updated = update_embed_reference(&updated, relationship_id);
 
-        let mut result =
-            String::with_capacity(xml_str.len() - drawing_xml.len() + updated.len());
+        let mut result = String::with_capacity(xml_str.len() - drawing_xml.len() + updated.len());
         result.push_str(&xml_str[..image_byte_offset]);
         result.push_str(&updated);
         result.push_str(&xml_str[image_byte_end..]);
@@ -69,10 +68,8 @@ pub fn replace_image(
 /// the drawing XML.
 fn update_extent_width(drawing_xml: &str, width_emu: i64) -> Result<String, DocliError> {
     // Match <a:ext cx="NNN" or <wp:extent cx="NNN".
-    let re = regex::Regex::new(r#"(cx=")(\d+)(")"#).map_err(|e| {
-        DocliError::InvalidOperation {
-            message: format!("regex error: {e}"),
-        }
+    let re = regex::Regex::new(r#"(cx=")(\d+)(")"#).map_err(|e| DocliError::InvalidOperation {
+        message: format!("regex error: {e}"),
     })?;
 
     let result = re.replace_all(drawing_xml, |caps: &regex::Captures| {
@@ -106,8 +103,7 @@ mod tests {
     fn replace_image_stores_binary() {
         let xml = r#"<w:body><w:p><w:drawing><a:ext cx="500" cy="300"/><a:blip r:embed="rId1"/></w:drawing></w:p></w:body>"#;
         let drawing_start = xml.find("<w:drawing>").unwrap();
-        let drawing_end =
-            xml.find("</w:drawing>").unwrap() + "</w:drawing>".len();
+        let drawing_end = xml.find("</w:drawing>").unwrap() + "</w:drawing>".len();
 
         let mut graph = make_graph("word/document.xml", xml);
         replace_image(
@@ -129,9 +125,7 @@ mod tests {
         ));
 
         // Check width was updated.
-        let result =
-            std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap())
-                .unwrap();
+        let result = std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap()).unwrap();
         assert!(result.contains("cx=\"1000\""));
     }
 

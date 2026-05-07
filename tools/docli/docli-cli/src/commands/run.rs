@@ -4,9 +4,7 @@ use std::path::PathBuf;
 use clap::Args;
 use serde::Serialize;
 
-use docli_core::{
-    Durability, EnvelopeBuilder, Job, PipelineHooks, PipelineRequest,
-};
+use docli_core::{Durability, EnvelopeBuilder, Job, PipelineHooks, PipelineRequest};
 
 use crate::envelope::emit;
 
@@ -37,9 +35,8 @@ pub fn run(args: RunArgs, format: &str, pretty: bool) -> i32 {
     let job = match load_job(&args.job) {
         Ok(j) => j,
         Err(msg) => {
-            let envelope = builder.err::<RunResult>(&docli_core::DocliError::InvalidDocx {
-                message: msg,
-            });
+            let envelope =
+                builder.err::<RunResult>(&docli_core::DocliError::InvalidDocx { message: msg });
             let _ = emit(&envelope, format, pretty);
             return 1;
         }
@@ -97,10 +94,8 @@ fn load_job(source: &str) -> Result<Job, String> {
 
     // Heuristic: if it starts with '{' or '[', try JSON first; otherwise YAML.
     if trimmed.starts_with('{') || trimmed.starts_with('[') {
-        serde_json::from_str::<Job>(&raw)
-            .map_err(|e| format!("invalid job JSON: {e}"))
+        serde_json::from_str::<Job>(&raw).map_err(|e| format!("invalid job JSON: {e}"))
     } else {
-        serde_yaml::from_str::<Job>(&raw)
-            .map_err(|e| format!("invalid job YAML: {e}"))
+        serde_yaml::from_str::<Job>(&raw).map_err(|e| format!("invalid job YAML: {e}"))
     }
 }

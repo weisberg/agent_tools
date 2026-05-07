@@ -14,7 +14,7 @@ pub fn content_block_to_xml(block: &ContentBlock) -> Result<String, DocliError> 
         ContentBlock::PageBreak { .. } => Ok(page_break_xml()),
         ContentBlock::Table { table } => Ok(table_block_xml(table)),
         _ => Err(DocliError::InvalidOperation {
-            message: format!("unsupported ContentBlock variant for XML serialization"),
+            message: "unsupported ContentBlock variant for XML serialization".to_string(),
         }),
     }
 }
@@ -95,9 +95,7 @@ fn paragraph_to_xml(content: &ParagraphContent) -> Result<String, DocliError> {
             if has_ppr {
                 xml.push_str("<w:pPr>");
                 if let Some(ref style) = block.style {
-                    xml.push_str(&format!(
-                        r#"<w:pStyle w:val="{style}"/>"#
-                    ));
+                    xml.push_str(&format!(r#"<w:pStyle w:val="{style}"/>"#));
                 }
                 if let Some(ref align) = block.align {
                     xml.push_str(&format!(r#"<w:jc w:val="{align}"/>"#));
@@ -109,8 +107,7 @@ fn paragraph_to_xml(content: &ParagraphContent) -> Result<String, DocliError> {
                 match run {
                     docli_core::InlineRun::Text(tr) => {
                         xml.push_str("<w:r>");
-                        let has_rpr =
-                            tr.bold || tr.italic || tr.underline || tr.font.is_some();
+                        let has_rpr = tr.bold || tr.italic || tr.underline || tr.font.is_some();
                         if has_rpr {
                             xml.push_str("<w:rPr>");
                             if tr.bold {
@@ -132,15 +129,12 @@ fn paragraph_to_xml(content: &ParagraphContent) -> Result<String, DocliError> {
                             xml.push_str("</w:rPr>");
                         }
                         let escaped = escape_xml(&tr.text);
-                        let space_attr =
-                            if tr.text.starts_with(' ') || tr.text.ends_with(' ') {
-                                r#" xml:space="preserve""#
-                            } else {
-                                ""
-                            };
-                        xml.push_str(&format!(
-                            "<w:t{space_attr}>{escaped}</w:t>"
-                        ));
+                        let space_attr = if tr.text.starts_with(' ') || tr.text.ends_with(' ') {
+                            r#" xml:space="preserve""#
+                        } else {
+                            ""
+                        };
+                        xml.push_str(&format!("<w:t{space_attr}>{escaped}</w:t>"));
                         xml.push_str("</w:r>");
                     }
                     docli_core::InlineRun::Footnote { .. } => {
@@ -204,13 +198,9 @@ fn page_break_xml() -> String {
 fn table_block_xml(table: &docli_core::TableBlock) -> String {
     let mut xml = String::from("<w:tbl><w:tblPr>");
     if let Some(ref style) = table.style {
-        xml.push_str(&format!(
-            r#"<w:tblStyle w:val="{style}"/>"#
-        ));
+        xml.push_str(&format!(r#"<w:tblStyle w:val="{style}"/>"#));
     }
-    xml.push_str(
-        r#"<w:tblW w:w="0" w:type="auto"/></w:tblPr>"#,
-    );
+    xml.push_str(r#"<w:tblW w:w="0" w:type="auto"/></w:tblPr>"#);
 
     // Headers as first row.
     if !table.headers.is_empty() {
@@ -315,9 +305,7 @@ mod tests {
         )
         .unwrap();
 
-        let result =
-            std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap())
-                .unwrap();
+        let result = std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap()).unwrap();
         let new_pos = result.find("New").unwrap();
         let existing_pos = result.find("Existing").unwrap();
         assert!(new_pos < existing_pos);
@@ -344,9 +332,7 @@ mod tests {
         )
         .unwrap();
 
-        let result =
-            std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap())
-                .unwrap();
+        let result = std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap()).unwrap();
         let existing_pos = result.find("Existing").unwrap();
         let after_pos = result.find("After").unwrap();
         assert!(after_pos > existing_pos);

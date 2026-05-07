@@ -94,9 +94,11 @@ fn make_resolver(kb_root: &Option<PathBuf>) -> Result<KbResolver, DocliError> {
 fn parse_vars(raw: &[String]) -> Result<Map<String, Value>, DocliError> {
     let mut map = Map::new();
     for pair in raw {
-        let (key, value) = pair.split_once('=').ok_or_else(|| DocliError::InvalidSpec {
-            message: format!("invalid --var format (expected key=value): {pair}"),
-        })?;
+        let (key, value) = pair
+            .split_once('=')
+            .ok_or_else(|| DocliError::InvalidSpec {
+                message: format!("invalid --var format (expected key=value): {pair}"),
+            })?;
         map.insert(key.to_string(), Value::String(value.to_string()));
     }
     Ok(map)

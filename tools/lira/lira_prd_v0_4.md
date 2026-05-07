@@ -1,14 +1,35 @@
 # PRD: lira — Local Jira for Agents
 
-**Status:** Draft v0.4
+**Status:** Draft v0.5
 **Author:** Brian Weisberg
-**Last updated:** 2026-05-03
+**Last updated:** 2026-05-06
 **Proposed repo:** `github.com/weisberg/agent_tools/tree/main/lira`
 **Product name:** `lira` — Local Jira
 
 ---
 
-## 0. Changes in v0.4
+## 0. Changes in v0.5
+
+This version keeps the v0.4 local ticket model and updates lira to align with
+the Symphony orchestration spec while preserving lira's local-first boundary:
+lira is the durable local tracker/control-plane substrate, not the long-running
+agent runner.
+
+Reference: OpenAI Symphony service specification,
+`https://github.com/openai/symphony/blob/main/SPEC.md`.
+
+Major changes:
+
+1. **lira now has an explicit Symphony compatibility posture.** It provides a local issue tracker surface that can be polled by an external orchestrator, daemon, script, or agent.
+2. **The local ticket model maps to Symphony's normalized `Issue` model.** lira exposes stable projections with `id`, `identifier`, `title`, `description`, `priority`, `state`, `labels`, blockers, timestamps, URL, and optional branch/workspace hints.
+3. **Claiming is specified as the local dispatch reservation primitive.** `lira claim` is the tracker-side equivalent of Symphony's `claimed` set, and must be atomic, observable, and recoverable.
+4. **Candidate selection now mirrors Symphony scheduling rules.** lira defines active/terminal status sets, priority ordering, blocker gating, and claimed-ticket exclusion for `next` and candidate-list commands.
+5. **Dependencies are promoted from generic links to dispatch inputs.** `blocked_by` must be available in the normalized issue projection so orchestrators can avoid starting blocked work.
+6. **Workflow configuration is split by responsibility.** `workflow.yaml` remains lira's local state-machine contract; repository-owned `WORKFLOW.md` remains the optional agent-runner policy consumed by a Symphony-style daemon.
+7. **Observability is aligned with orchestration.** claims, releases, candidate selection, status movement, task mutation, comments, history, and sync events remain visible through YAML and JSONL logs.
+8. **Optional orchestration helpers are in scope.** lira may validate/export tracker metadata for a Symphony-style runner, but it must not require a daemon for local operation.
+
+## 0.1 Changes in v0.4
 
 This version keeps the v0.3 GitHub-first update and adds stricter local ticket structure for atomic agent execution.
 
@@ -31,7 +52,7 @@ Major changes:
 
 ## 1. Executive Summary
 
-`lira` is a Rust CLI that provides agent-native local ticket management with a Jira-compatible mental model and explicit GitHub Issues synchronization.
+`lira` is a Rust CLI that provides agent-native local ticket management with a Jira-compatible mental model, explicit GitHub Issues synchronization, and a Symphony-compatible local issue-tracker surface.
 
 lira stores canonical ticket data as deterministic YAML files under:
 
@@ -47,12 +68,13 @@ The filesystem itself is part of the product model: a ticket’s status is refle
 
 means `ORION-42` is currently `in-progress`.
 
-lira is local-first. Normal ticket creation, task updates, status movement, comments, labels, search, and agent assignment do not require network access. External systems are explicit bridges:
+lira is local-first. Normal ticket creation, task updates, status movement, comments, labels, search, agent assignment, and orchestration reads do not require network access. External systems are explicit bridges:
 
 | External system | Relationship | Sync behavior | v1 posture |
 |---|---|---|---|
 | Jira | Upward parent reference | Read-only | Context only |
 | GitHub Issues | Peer issue binding | Bidirectional | Explicit sync commands |
+| Symphony-style runner | Local tracker consumer | Read/claim/comment/move through CLI | Optional daemon outside lira |
 
 Each local ticket is a Jira-like issue container. It must include:
 
@@ -60,7 +82,7 @@ Each local ticket is a Jira-like issue container. It must include:
 2. **Tasks**: a required, non-empty list of distinct atomic to-do items. A task is intentionally smaller than a ticket and has only `id`, `title`, `status`, `tags`, `created_on`, and `last_modified`.
 3. **Ticket-level comments and history**: Jira-like comments and append-only activity history that agents can write to and lira automatically maintains.
 
-The product exists for local agents working on a developer’s machine. Agents need durable state between sessions, low-latency local mutations, inspectable files, safe task decomposition, and safe bridges to canonical systems. lira provides that layer.
+The product exists for local agents working on a developer’s machine. Agents need durable state between sessions, low-latency local mutations, inspectable files, safe task decomposition, safe bridges to canonical systems, and a polling-friendly control plane for automated runs. lira provides that layer.
 
 ---
 
@@ -76,6 +98,7 @@ Agents operating on a local developer machine need a reliable task system that i
 6. **Concrete enough for execution.** Every ticket needs acceptance criteria and atomic tasks so agents know what “done” means and what work remains.
 7. **Connected to canonical systems.** Local tickets should be traceable to Jira and synchronized with GitHub Issues.
 8. **Agent-friendly.** Commands must produce stable, structured JSON and predictable error codes.
+9. **Orchestrator-friendly.** A local runner should be able to poll lira, atomically claim eligible work, inspect blockers, append progress, and recover state after restart without a database server.
 
 Existing tools do not fully solve this:
 
@@ -87,7 +110,7 @@ Existing tools do not fully solve this:
 | Markdown TODO lists | No schema, no workflow validation, no sync semantics, no audit history |
 | SQLite-only local trackers | Less inspectable than YAML and harder for agents to patch safely |
 
-lira sits between scratch markdown and canonical issue systems. It is local enough for agent loops, structured enough for reliable automation, and connected enough to synchronize with GitHub and reference Jira.
+lira sits between scratch markdown, remote issue systems, and always-on agent runners. It is local enough for agent loops, structured enough for reliable automation, connected enough to synchronize with GitHub and reference Jira, and explicit enough to serve as the issue-tracker layer for a Symphony-style orchestrator.
 
 ---
 
@@ -120,6 +143,13 @@ lira sits between scratch markdown and canonical issue systems. It is local enou
 | G21 | Support deterministic YAML output for clean diffs. |
 | G22 | Support advisory locks and atomic writes. |
 | G23 | Compose with agent tooling and future MCP/plugin integrations. |
+| G24 | Expose a normalized local `Issue` projection compatible with Symphony's tracker model. |
+| G25 | Support atomic local claims as dispatch reservations for orchestrators and agents. |
+| G26 | Provide candidate-selection commands that honor active statuses, terminal statuses, claims, priority, creation time, and blockers. |
+| G27 | Treat lira links, especially `blocked_by`, as scheduling inputs for local orchestration. |
+| G28 | Keep orchestration state recoverable from local YAML, filesystem layout, and JSONL logs without requiring a persistent scheduler database. |
+| G29 | Support optional validation/export helpers for repository-owned `WORKFLOW.md` and Symphony-style runner configuration without making a daemon mandatory. |
+| G30 | Preserve the boundary that lira stores/tracks work while a separate runner launches Codex sessions and manages per-issue workspaces. |
 
 ### 3.2 Non-Goals for v1
 
@@ -138,6 +168,10 @@ lira sits between scratch markdown and canonical issue systems. It is local enou
 | NG11 | Treating embedded `tasks[]` as independent tickets. Tasks are local to their parent ticket. |
 | NG12 | Giving embedded tasks their own comments, history, assignees, links, descriptions, priorities, estimates, dependencies, or external sync metadata. That level of detail belongs on a ticket. |
 | NG13 | Creating or importing local tickets without acceptance criteria. All creation paths must provide or extract criteria. |
+| NG14 | A required Symphony daemon, scheduler, or long-running process. lira must remain useful as a plain CLI. |
+| NG15 | Launching Codex app-server sessions, managing live turns, tracking token usage, or killing stalled workers inside lira v1. |
+| NG16 | Owning per-issue source-code workspaces. lira may expose workspace hints, but workspace creation and hooks belong to an external runner. |
+| NG17 | Replacing repository-owned `WORKFLOW.md` runner policy. lira may validate or export tracker metadata, but the runner prompt and runtime policy stay with the repository. |
 
 ---
 
@@ -149,6 +183,7 @@ lira sits between scratch markdown and canonical issue systems. It is local enou
 | Local coding agent | Claim work, read acceptance criteria, complete atomic tasks, update progress, move statuses, create child tickets, sync linked GitHub issues. |
 | Scrum-master agent | Create sprint tickets, define acceptance criteria, break work into tasks, assign work, run standups, sync GitHub at boundaries, detect blockers. |
 | Analyst/research agent | Read assigned tickets, add notes, complete task checklists, produce artifacts, close work after validation. |
+| Local orchestrator | Poll lira for eligible work, atomically claim tickets, start external agent runs, reconcile status, and write progress back through lira commands. |
 | Automation scripts | Query, count, import, export, and reconcile tickets through stable JSON. |
 | External tools | Index, embed, render, or transform ticket data without depending on a server. |
 
@@ -362,6 +397,70 @@ agent_metadata:
   effort_points: 3
   scratch_refs: []
 ```
+
+### 5.10 Symphony Compatibility Boundary
+
+Symphony treats an issue tracker as the control plane for agent work: an
+orchestrator polls eligible issues, claims work, launches isolated agent runs,
+and writes progress back through tracker tooling. lira's v1 responsibility is
+the local issue tracker portion of that model.
+
+lira must provide:
+
+1. A durable local ticket source of truth.
+2. A normalized issue projection suitable for polling and prompt rendering.
+3. Atomic claim/release operations for dispatch reservation.
+4. Candidate selection that excludes terminal, claimed, and blocked work.
+5. Structured comments, history, and JSONL logs for operator visibility.
+6. Local recovery from YAML and filesystem state after process restart.
+
+lira must not require:
+
+1. A resident scheduler process.
+2. A database server.
+3. Network access for tracker reads or local claims.
+4. A Codex app-server process.
+5. Per-ticket source-code workspace management.
+
+An external Symphony-style runner may use lira as its issue tracker by calling
+`lira candidates`, `lira claim`, `lira issue show`, `lira comment`,
+`lira history add`, and `lira mv` with `--json`.
+
+### 5.11 Normalized Issue Projection
+
+For orchestration, lira exposes each ticket as a normalized issue object. This
+object is a JSON projection, not a second canonical YAML schema.
+
+| Symphony field | lira source |
+|---|---|
+| `id` | Ticket ID, for example `ORION-42` |
+| `identifier` | Same as ticket ID unless a future external tracker ID is explicitly configured |
+| `title` | `title` |
+| `description` | `description` |
+| `priority` | Numeric projection of lira priority; lower numbers sort earlier |
+| `state` | `status` |
+| `branch_name` | Optional `orchestration.branch_name` or GitHub branch metadata |
+| `url` | Local file path, GitHub issue URL, or parent URL according to command policy |
+| `labels` | Normalized union of local labels and optionally mapped GitHub labels |
+| `blocked_by` | `links.blocked_by[]` resolved to blocker refs where possible |
+| `created_at` | `timestamps.created` |
+| `updated_at` | `timestamps.updated` |
+
+Default priority projection:
+
+| lira priority | Symphony priority |
+|---|---:|
+| `highest` | 1 |
+| `high` | 2 |
+| `medium` | 3 |
+| `low` | 4 |
+| `lowest` | 5 |
+| missing or unknown | null |
+
+Blocker refs should include the blocker ticket's `id`, `identifier`, `state`,
+`created_at`, and `updated_at` when the blocker is local. If the blocker is
+external or missing, lira should still return the best available identifier and
+leave unknown fields null.
 
 ---
 
@@ -629,6 +728,14 @@ agent_metadata:
   effort_points: 3
   embed_hash: null
 
+orchestration:
+  branch_name: brian/orion-42-cuped
+  workspace_hint: null
+  active_for_dispatch: true
+  last_claimed_by: athena-analyst
+  last_claimed_at: 2026-05-02T09:00:00Z
+  last_released_at: null
+
 metadata:
   source: local
   schema_version: 3
@@ -774,6 +881,29 @@ details: map | null
 
 History is append-only. lira automatically creates history for all state-changing commands. Agents may append additional structured history entries using `lira history add`.
 
+### 7.11 Orchestration Metadata Schema
+
+`orchestration` is optional local-only metadata for external runners. It must
+not be required for local ticket operation and must not be synced to Jira.
+GitHub sync should ignore it unless an explicit future field policy opts in.
+
+```yaml
+branch_name: string | null
+workspace_hint: string | null
+active_for_dispatch: boolean | null
+last_claimed_by: string | null
+last_claimed_at: datetime | null
+last_released_at: datetime | null
+```
+
+Rules:
+
+1. `branch_name` is a hint for external runners and may be derived from GitHub or a runner policy.
+2. `workspace_hint` is advisory only. lira does not create or own source-code workspaces in v1.
+3. `active_for_dispatch: false` excludes the ticket from candidate commands even if its status is active. This is a local override for humans.
+4. Claim state remains canonical in the assignment/agent fields and history. `orchestration.last_*` fields are convenience metadata only.
+5. The normalized issue projection must work even when the `orchestration` block is absent.
+
 ---
 
 ## 8. Project, Workflow, and Global Configuration
@@ -847,6 +977,29 @@ github_link:
     done: completed
     cancelled: not_planned
   field_policy: default
+
+orchestration:
+  enabled: true
+  active_statuses:
+    - todo
+    - in-progress
+  terminal_statuses:
+    - done
+    - cancelled
+    - archived
+  handoff_statuses:
+    - in-review
+  candidate_blocked_statuses:
+    - blocked
+  dispatch:
+    exclude_claimed: true
+    todo_requires_unblocked: true
+    priority_order:
+      - highest
+      - high
+      - medium
+      - low
+      - lowest
 ```
 
 ### 8.2 Workflow Schema
@@ -926,6 +1079,24 @@ allowed_transitions:
   cancelled:
     - archived
   archived: []
+
+orchestration:
+  active_statuses:
+    - todo
+    - in-progress
+  terminal_statuses:
+    - done
+    - cancelled
+    - archived
+  handoff_statuses:
+    - in-review
+  dispatcher:
+    exclude_claimed: true
+    exclude_blocked: true
+    stable_sort:
+      - priority
+      - created_at
+      - identifier
 ```
 
 ### 8.3 Global Config Schema
@@ -969,9 +1140,61 @@ jira:
   enabled: true
   cli: jira
   default_base_url: https://vanguard.atlassian.net
+
+symphony:
+  enabled: false
+  workflow_file: ./WORKFLOW.md
+  expose_candidates: true
+  runner_owned_fields:
+    - workspace.root
+    - hooks
+    - codex
 ```
 
-### 8.4 GitHub Field Policies
+### 8.4 Symphony and Runner Configuration Boundary
+
+lira has two local configuration responsibilities for Symphony-style use:
+
+1. **Tracker state-machine config** lives in `~/.lira/projects/<PROJECT>/workflow.yaml`.
+2. **Runner policy** lives in repository-owned `WORKFLOW.md` and is consumed by an external runner.
+
+lira may validate that a `WORKFLOW.md` exists and that its front matter names a
+supported tracker kind, but lira must not require `WORKFLOW.md` for normal local
+ticket operations.
+
+Recommended `WORKFLOW.md` tracker front matter when lira is the tracker:
+
+```yaml
+---
+tracker:
+  kind: lira
+  project: ORION
+  active_states:
+    - todo
+    - in-progress
+  terminal_states:
+    - done
+    - cancelled
+    - archived
+workspace:
+  root: ~/.codex/symphony-workspaces
+agent:
+  max_concurrent_agents: 4
+codex:
+  command: codex app-server
+---
+```
+
+The `tracker.kind: lira` extension is local to this project unless adopted by a
+future upstream Symphony spec. Unknown `WORKFLOW.md` keys must be ignored by lira
+unless the relevant helper command explicitly validates them.
+
+Dynamic reload, polling interval, workspace hooks, Codex process management,
+retry timers, stall detection, token accounting, and per-issue workspace cleanup
+belong to the external runner. lira's obligation is to make each tracker read
+and mutation deterministic, structured, lock-safe, and recoverable.
+
+### 8.5 GitHub Field Policies
 
 Field policies control how each GitHub field syncs.
 
@@ -1467,6 +1690,47 @@ lira count --project ORION --group-by status
 lira board --project ORION
 ```
 
+### 12.11 Symphony and Local Orchestration Commands
+
+These commands expose lira as a local issue tracker for a Symphony-style runner.
+They are pure local operations unless explicitly combined with `gh` or `jira`
+commands.
+
+```bash
+lira candidates --project ORION --json
+lira candidates --project ORION --state todo --limit 10 --json
+lira issue show ORION-42 --json
+lira issue current --ids ORION-42 ORION-50 --json
+lira workflow symphony export --project ORION --json
+lira workflow symphony validate ./WORKFLOW.md --project ORION --json
+```
+
+`lira candidates` returns normalized issue objects sorted by:
+
+1. priority ascending after numeric projection,
+2. `timestamps.created` oldest first,
+3. ticket identifier lexicographically.
+
+A ticket is candidate-eligible only if all are true:
+
+1. It has `id`, `title`, `status`, and `timestamps.created`.
+2. Its status is in the project's `orchestration.active_statuses`.
+3. Its status is not in `orchestration.terminal_statuses`.
+4. It is not claimed when `exclude_claimed` is true.
+5. It does not have `orchestration.active_for_dispatch: false`.
+6. If its status is `todo`, all `links.blocked_by[]` tickets are terminal or absent according to project policy.
+
+`lira issue show` and `lira issue current` return normalized issue projections
+for prompt rendering and reconciliation. They do not mutate tickets.
+
+`lira workflow symphony export` emits a suggested `tracker.kind: lira`
+configuration block for a repository-owned `WORKFLOW.md`. It must not overwrite
+files by default.
+
+`lira workflow symphony validate` checks only the tracker portion lira
+understands. It must ignore runner-owned keys such as `workspace`, `hooks`,
+`agent`, and `codex`.
+
 ---
 
 ## 13. Functional Requirements
@@ -1566,6 +1830,23 @@ lira board --project ORION
 | JIRA-5 | lira can list all local tickets under a Jira parent. | Must |
 | JIRA-6 | lira can cache Jira parent title and URL as non-authoritative metadata. | Should |
 
+### 13.4 Symphony Compatibility Requirements
+
+| ID | Requirement | Priority |
+|---|---|---|
+| SYM-1 | lira exposes a normalized issue projection with `id`, `identifier`, `title`, `description`, `priority`, `state`, `branch_name`, `url`, `labels`, `blocked_by`, `created_at`, and `updated_at`. | Must |
+| SYM-2 | lira projects define active and terminal statuses for orchestration separately from general workflow transitions. | Must |
+| SYM-3 | Candidate commands exclude terminal tickets, claimed tickets, dispatch-disabled tickets, and tickets blocked by non-terminal local blockers. | Must |
+| SYM-4 | Candidate commands sort by priority, creation time, and identifier in a stable order. | Must |
+| SYM-5 | `lira claim` is atomic and fails with `E_CLAIM_HELD` when another agent or runner owns the ticket, unless an explicit human force policy is used. | Must |
+| SYM-6 | Claim, release, status movement, comments, history, and task changes are recoverable from ticket YAML plus JSONL logs after an orchestrator restart. | Must |
+| SYM-7 | lira does not require a daemon, network access, or a scheduler database to list candidates or claim local work. | Must |
+| SYM-8 | lira can return current issue projections for a list of IDs so an external runner can reconcile active runs. | Must |
+| SYM-9 | lira can export or validate the tracker portion of a repository-owned `WORKFLOW.md` using a `tracker.kind: lira` extension. | Should |
+| SYM-10 | lira does not launch Codex app-server, manage agent subprocesses, detect stalls, track token usage, or clean per-issue source-code workspaces in v1. | Must |
+| SYM-11 | lira JSONL logs include enough information for an operator to audit why work was claimed, released, moved, blocked, or completed. | Must |
+| SYM-12 | lira comments and history are suitable for an external runner to write proof-of-work summaries, CI status, PR links, and human-review handoffs. | Should |
+
 ---
 
 ## 14. Non-Functional Requirements
@@ -1588,6 +1869,9 @@ lira board --project ORION
 | NFR-14 | Commands that return collections support bounded output and cursors. |
 | NFR-15 | lira must continue to work offline for local-only commands even when GitHub or Jira tools are unavailable. |
 | NFR-16 | Task operations must remain lightweight and should not require reindexing the whole workspace. |
+| NFR-17 | Orchestrator-facing read commands must be safe to call repeatedly from a polling loop. |
+| NFR-18 | Candidate and issue projection output must be stable enough for an external runner to diff, log, and render prompts without additional parsing heuristics. |
+| NFR-19 | lira must preserve local-first behavior even when used by an always-on runner: the runner is optional, replaceable, and outside canonical storage. |
 
 ---
 
@@ -1606,6 +1890,7 @@ lira/
 │   ├── lira-github/      # GitHub binding and sync through gh CLI
 │   ├── lira-format/      # human, JSON, YAML renderers
 │   ├── lira-agent/       # agent-specific helpers and JSON schemas
+│   ├── lira-symphony/    # normalized issue projection and local orchestration helpers
 │   └── lira-cli/         # clap binary
 └── xtask/
 ```
@@ -1621,6 +1906,7 @@ lira/
 | `lira-github` | GitHub issue view/create/edit/comment/labels, sync, conflicts, user mapping |
 | `lira-format` | Text tables, JSON schemas, YAML output |
 | `lira-agent` | Claim/release, next-ticket selection, agent summaries |
+| `lira-symphony` | Normalized issue projection, candidate eligibility, blocker resolution, `WORKFLOW.md` tracker validation/export |
 | `lira-cli` | CLI parsing, command dispatch, exit codes |
 
 ### 15.2 lira-github Responsibilities
@@ -1850,6 +2136,12 @@ Example:
 | `E_GH_PERMISSION` | GitHub token lacks required permission |
 | `E_GH_CONFLICT` | Sync conflict detected |
 | `E_GH_PR_NOT_ISSUE` | Import target is a PR and PR import was not requested |
+| `E_CLAIM_HELD` | Ticket is already claimed by another agent or runner |
+| `E_NO_CANDIDATES` | No eligible local tickets matched candidate filters |
+| `E_BLOCKED_BY_DEPENDENCY` | Ticket is blocked by a non-terminal dependency |
+| `E_WORKFLOW_FILE_NOT_FOUND` | Requested `WORKFLOW.md` could not be read |
+| `E_WORKFLOW_PARSE` | Requested `WORKFLOW.md` front matter could not be parsed |
+| `E_UNSUPPORTED_TRACKER_KIND` | `WORKFLOW.md` tracker kind is not supported by lira helper commands |
 | `E_FILESYSTEM` | Filesystem error |
 
 ---
@@ -1868,6 +2160,8 @@ Example:
 10. **Conflict safety.** Agents may detect and report conflicts. Destructive conflict resolution should be policy-controlled and may require human approval.
 11. **Atomic task discipline.** Agents should break a ticket into small `tasks[]` and mark tasks complete before moving the ticket to `done`.
 12. **Ticket-level discussion.** Agents add comments and history at the ticket level, not on embedded tasks.
+13. **Poll-loop friendliness.** Repeated read commands must not mutate YAML, advance cursors implicitly, or create noisy logs.
+14. **Runner boundary clarity.** lira outputs tracker state and accepts tracker writes; runner prompts, source workspaces, live Codex sessions, retry timers, and stall handling live outside lira.
 
 Example sync summary:
 
@@ -1954,6 +2248,23 @@ GitHub v1 is ready when:
 18. lira works for local-only commands when `gh` is missing or unauthenticated.
 19. lira reports missing `gh`, missing auth, missing permissions, and rate limits with structured errors.
 
+### 21.3 Symphony Compatibility Acceptance Criteria
+
+The local orchestration surface is ready when:
+
+1. `lira candidates --json` returns only eligible normalized issue objects.
+2. Candidate sorting is deterministic and follows priority, creation time, and identifier.
+3. Claimed tickets are excluded from candidates by default.
+4. Tickets blocked by non-terminal local blockers are excluded from `todo` candidates.
+5. `lira issue show <ID> --json` returns the normalized issue projection without mutating ticket YAML.
+6. `lira issue current --ids ... --json` returns current states for reconciliation.
+7. `lira claim` serializes concurrent dispatch attempts so exactly one runner wins.
+8. Claim and release events are visible in ticket history and JSONL logs.
+9. `lira workflow symphony export` emits a `tracker.kind: lira` block suitable for a repository-owned `WORKFLOW.md`.
+10. `lira workflow symphony validate` checks tracker fields while ignoring runner-owned `workspace`, `hooks`, `agent`, and `codex` fields.
+11. All orchestration helper commands work without network access.
+12. No lira command in this surface launches Codex, creates source-code workspaces, or manages live runner state.
+
 ---
 
 ## 22. Milestones
@@ -1962,12 +2273,13 @@ GitHub v1 is ready when:
 |---|---|---|
 | M1 — Skeleton | `init`, `new`, `ls`, `show`, `mv`, required acceptance criteria, required tasks, status-as-directory, `--json` | Week 1–2 |
 | M2 — Relationships and ticket activity | `link`, `comment`, `history`, `assign`, `label`, `tag`, embedded task commands, `child_tickets`, dependencies | Week 3 |
-| M3 — Index and search | SQLite + FTS5, `search`, `query`, `count`, task filters, `reindex` | Week 4 |
-| M4 — Jira bridge | `lira jira fetch`, parent caching, Jira reverse links | Week 5 |
-| M5 — GitHub bridge: binding and one-way | `gh link`, `gh create`, `gh adopt`, `gh push`, `gh pull`, labels pull/push, body sections for acceptance criteria and tasks | Week 6 |
-| M6 — GitHub bridge: bidirectional sync | `gh sync`, three-way reconciliation, conflicts, `gh resolve`, label and user mapping | Week 7–8 |
-| M7 — Agent integration | Agent command polish, plugin/MCP-ready JSON, bounded pagination, sync summaries | Week 9 |
-| M8 — Distribution | Cross-builds, release packaging, Homebrew tap, shell completions | Week 10 |
+| M3 — Symphony-compatible local tracker | Normalized issue projection, candidates, blocker-aware selection, atomic dispatch claims, `WORKFLOW.md` tracker export/validate | Week 4 |
+| M4 — Index and search | SQLite + FTS5 if needed, `search`, `query`, `count`, task filters, `reindex` | Week 5 |
+| M5 — Jira bridge | `lira jira fetch`, parent caching, Jira reverse links | Week 6 |
+| M6 — GitHub bridge: binding and one-way | `gh link`, `gh create`, `gh adopt`, `gh push`, `gh pull`, labels pull/push, body sections for acceptance criteria and tasks | Week 7 |
+| M7 — GitHub bridge: bidirectional sync | `gh sync`, three-way reconciliation, conflicts, `gh resolve`, label and user mapping | Week 8–9 |
+| M8 — Agent integration | Agent command polish, plugin/MCP-ready JSON, bounded pagination, sync summaries, orchestration logs | Week 10 |
+| M9 — Distribution | Cross-builds, release packaging, Homebrew tap, shell completions | Week 11 |
 
 GitHub spans two milestones because one-way binding/push/pull is useful before bidirectional reconciliation is fully robust.
 
@@ -1994,6 +2306,9 @@ GitHub spans two milestones because one-way binding/push/pull is useful before b
 15. Ticket-level history append logic.
 16. Task mutation updates ticket timestamp and history.
 17. JSON error serialization.
+18. Normalized issue projection maps all required Symphony issue fields.
+19. Candidate eligibility excludes claimed, terminal, dispatch-disabled, and locally blocked tickets.
+20. Candidate sorting is stable across repeated reads.
 
 ### 23.2 Integration Tests
 
@@ -2018,6 +2333,9 @@ GitHub spans two milestones because one-way binding/push/pull is useful before b
 19. GitHub sync conflicts when both changed overlapping fields.
 20. Conflict files are created and resolution updates markers.
 21. Sync logs are written to JSONL.
+22. Concurrent orchestration claims produce exactly one winner and structured failures for losers.
+23. `issue current` returns current states for multiple IDs without mutating YAML.
+24. `workflow symphony validate` accepts a valid `tracker.kind: lira` block and ignores runner-owned keys.
 
 ### 23.3 Golden Tests
 
@@ -2029,6 +2347,8 @@ Golden tests should verify stable output for:
 4. Conflict diffs.
 5. JSONL log events.
 6. GitHub body rendering for description, acceptance criteria, and tasks.
+7. Normalized issue projection output.
+8. Candidate list output with blockers and claims.
 
 ---
 
@@ -2047,6 +2367,9 @@ Golden tests should verify stable output for:
 | Sync conflict rate | Under 2% of `lira gh sync` invocations end in conflict over 30 days. |
 | Round-trip sync latency | Median local → remote → local single-ticket sync under 10 seconds. |
 | Human inspectability | A developer can identify project, status, owner, parent, GitHub link, acceptance criteria, and remaining tasks from the YAML path and file alone. |
+| Orchestrator readiness | A local runner can poll candidates, claim work, reconcile states, and write progress using only lira JSON commands. |
+| Dispatch safety | Zero duplicate claims in concurrency tests and local dogfood runs. |
+| Poll-loop stability | Repeated candidate polling produces no mutations and no noisy YAML diffs. |
 
 ---
 
@@ -2064,6 +2387,10 @@ Golden tests should verify stable output for:
 10. **Git storage.** Should `~/.lira/` optionally initialize as a git repository for local history?
 11. **Task completion policy.** Should a ticket be allowed to move to `done` while any embedded task is not `done` or `cancelled`? Proposed default: warn for humans, fail for agents unless `--force`.
 12. **Acceptance criteria satisfaction.** Should acceptance criteria remain plain strings, or should v2 add per-criterion status? Proposed v1: plain strings only; tasks track execution progress.
+13. **Runner packaging.** Should a future `lira watch` daemon exist as an optional companion, or should Symphony-style orchestration always remain outside lira?
+14. **Tracker extension naming.** Should `tracker.kind: lira` remain local project convention, or should it be proposed upstream as a Symphony tracker adapter?
+15. **Workspace hints.** Should lira store runner workspace paths after a run, or should paths remain entirely runner-owned and appear only in comments/history?
+16. **Claim expiry.** Should long-held claims have optional leases for unattended runners, or should release/force remain manual policy?
 
 ---
 
@@ -2315,6 +2642,8 @@ The MVP of lira is a Rust CLI that lets local users and agents create, track, as
 
 Every local ticket must have acceptance criteria and at least one embedded atomic task. Agents can use lira to add comments and structured history to each local ticket, mirroring the Jira issue comment and activity-history experience while keeping execution state local and inspectable.
 
+The MVP also includes a Symphony-compatible local tracker surface: agents and external runners can list dispatch-eligible candidates, read normalized issue projections, atomically claim work, reconcile current ticket state, and write progress through comments, history, task updates, and status moves without requiring a daemon or network access.
+
 The MVP also includes a first-class GitHub bridge that can bind local tickets to GitHub Issues, push and pull selected fields, synchronize GitHub labels, render acceptance criteria and tasks into GitHub Issue bodies when configured, pull and push append-only comments, and detect conflicts through three-way reconciliation.
 
-The product is successful when an agent can use lira as its local operating task system while a human can still understand the entire state by inspecting files.
+The product is successful when an agent can use lira as its local operating task system, a Symphony-style runner can use it as a local issue tracker, and a human can still understand the entire state by inspecting files.

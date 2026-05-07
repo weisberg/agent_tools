@@ -36,8 +36,8 @@ fn finalize_accept_roundtrip() {
         String::from_utf8_lossy(&finalize_result.stderr)
     );
 
-    let finalize_json: serde_json::Value = serde_json::from_slice(&finalize_result.stdout)
-        .expect("finalize output is not valid JSON");
+    let finalize_json: serde_json::Value =
+        serde_json::from_slice(&finalize_result.stdout).expect("finalize output is not valid JSON");
     assert_eq!(finalize_json["ok"], true);
     assert_eq!(finalize_json["data"]["operations"], 1);
 

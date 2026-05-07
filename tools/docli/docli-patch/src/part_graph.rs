@@ -64,10 +64,14 @@ mod tests {
         let mut graph = PartGraph {
             parts: HashMap::new(),
         };
-        graph
-            .parts
-            .insert("word/document.xml".into(), PartData::Xml(b"<doc/>".to_vec()));
-        assert_eq!(graph.xml_bytes("word/document.xml"), Some(b"<doc/>".as_slice()));
+        graph.parts.insert(
+            "word/document.xml".into(),
+            PartData::Xml(b"<doc/>".to_vec()),
+        );
+        assert_eq!(
+            graph.xml_bytes("word/document.xml"),
+            Some(b"<doc/>".as_slice())
+        );
     }
 
     #[test]
@@ -86,11 +90,15 @@ mod tests {
         let mut graph = PartGraph {
             parts: HashMap::new(),
         };
-        graph
-            .parts
-            .insert("word/document.xml".into(), PartData::Xml(b"<old/>".to_vec()));
+        graph.parts.insert(
+            "word/document.xml".into(),
+            PartData::Xml(b"<old/>".to_vec()),
+        );
         graph.set_xml("word/document.xml", b"<new/>".to_vec());
-        assert_eq!(graph.xml_bytes("word/document.xml"), Some(b"<new/>".as_slice()));
+        assert_eq!(
+            graph.xml_bytes("word/document.xml"),
+            Some(b"<new/>".as_slice())
+        );
     }
 
     #[test]

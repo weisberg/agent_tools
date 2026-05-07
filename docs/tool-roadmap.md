@@ -80,7 +80,12 @@ Start with:
 
 ### `barli`
 
-macOS menubar automation experiments. See `tools/barli/README.md`.
+macOS menubar automation experiments.
+
+Current docs:
+
+- `tools/barli/README.md`
+- `tools/barli/SKILL.md`
 
 ### `deckli`
 
@@ -95,6 +100,7 @@ Presentation/deck tooling. Current useful docs include:
 
 Document tooling. Current docs:
 
+- `tools/docli/SKILL.md`
 - `tools/docli/docli-spec.md`
 - `tools/docli/PYTHON_COMPANION_TO_DOCLI.md`
 
@@ -109,6 +115,7 @@ validation, reconciliation, artifact auditing, and report generation.
 Current docs:
 
 - `tools/xli/README.md`
+- `tools/xli/SKILL.md`
 - `tools/xli/xli-spec.md`
 - `tools/xli/PYTHON_COMPANION_TO_XLI.md`
 - `tools/xli/xli-companion/README.md`
@@ -124,6 +131,7 @@ Current caveats:
 
 Visualization and explainer output tooling. Current docs:
 
+- `tools/vizli/SKILL.md`
 - `tools/vizli/VIZLI_README.md`
 - `tools/vizli/VIZLI_OUTPUT_SPEC.md`
 - `tools/vizli/OUTPUT_SPEC_FINAL.md`
@@ -136,6 +144,7 @@ Visualization and explainer output tooling. Current docs:
 Framer integration tooling. Current docs:
 
 - `tools/framerli/README.md`
+- `tools/framerli/SKILL.md`
 - `tools/framerli/framerli_prd.md`
 - `tools/framerli/framerli_brainstorm_features.md`
 
@@ -144,6 +153,7 @@ Framer integration tooling. Current docs:
 Notion integration tooling. Current docs:
 
 - `tools/notionli/README.md`
+- `tools/notionli/SKILL.md`
 - `tools/notionli/notionli_prd.md`
 - `tools/notionli/notionli_brainstorm_features.md`
 
@@ -151,6 +161,7 @@ Notion integration tooling. Current docs:
 
 Shell workflow tooling. Current docs:
 
+- `tools/bashli/SKILL.md`
 - `tools/bashli/bashli-spec-final.md`
 - `tools/bashli/PLAN.md`
 - `tools/bashli/CLAUDE.md`

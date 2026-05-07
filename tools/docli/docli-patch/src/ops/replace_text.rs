@@ -25,10 +25,9 @@ pub fn replace_text_in_part(
             message: format!("part not found: {part_path}"),
         })?;
 
-    let xml_str =
-        std::str::from_utf8(xml).map_err(|e| DocliError::InvalidDocx {
-            message: format!("invalid UTF-8: {e}"),
-        })?;
+    let xml_str = std::str::from_utf8(xml).map_err(|e| DocliError::InvalidDocx {
+        message: format!("invalid UTF-8: {e}"),
+    })?;
 
     // Find the paragraph element at the given byte offset.
     let para_start = find_paragraph_start(xml_str, paragraph_byte_offset)?;
@@ -37,20 +36,14 @@ pub fn replace_text_in_part(
     let para_xml = &xml_str[para_start..para_end];
 
     // Split runs at the character offsets.
-    let split =
-        split_runs_at_offsets(para_xml.as_bytes(), char_offset, char_end)?;
+    let split = split_runs_at_offsets(para_xml.as_bytes(), char_offset, char_end)?;
 
     // Get formatting from the first target run, or first before run, or None.
     let props = split
         .target_runs
         .first()
         .and_then(|r| r.properties.clone())
-        .or_else(|| {
-            split
-                .before_runs
-                .last()
-                .and_then(|r| r.properties.clone())
-        });
+        .or_else(|| split.before_runs.last().and_then(|r| r.properties.clone()));
 
     // Build replacement run with new text.
     let replacement = RunFragment {
@@ -89,9 +82,8 @@ pub fn replace_text_in_part(
     new_para.push_str("</w:p>");
 
     // Replace the paragraph in the full XML.
-    let mut result = String::with_capacity(
-        xml_str.len() - (para_end - para_start) + new_para.len(),
-    );
+    let mut result =
+        String::with_capacity(xml_str.len() - (para_end - para_start) + new_para.len());
     result.push_str(&xml_str[..para_start]);
     result.push_str(&new_para);
     result.push_str(&xml_str[para_end..]);
@@ -101,10 +93,7 @@ pub fn replace_text_in_part(
 }
 
 /// Find the start of the `<w:p` element at or before the given byte offset.
-fn find_paragraph_start(
-    xml: &str,
-    byte_offset: usize,
-) -> Result<usize, DocliError> {
+fn find_paragraph_start(xml: &str, byte_offset: usize) -> Result<usize, DocliError> {
     // The byte_offset should point at or into a <w:p element.
     // Search backwards from the offset for "<w:p".
     let search_region = &xml[..byte_offset.min(xml.len())];
@@ -112,17 +101,12 @@ fn find_paragraph_start(
         .rfind("<w:p")
         .or_else(|| xml[byte_offset..].find("<w:p").map(|i| i + byte_offset))
         .ok_or_else(|| DocliError::InvalidTarget {
-            message: format!(
-                "no <w:p> found at byte offset {byte_offset}"
-            ),
+            message: format!("no <w:p> found at byte offset {byte_offset}"),
         })
 }
 
 /// Find the end of the `</w:p>` element starting from para_start.
-fn find_paragraph_end(
-    xml: &str,
-    para_start: usize,
-) -> Result<usize, DocliError> {
+fn find_paragraph_end(xml: &str, para_start: usize) -> Result<usize, DocliError> {
     let rest = &xml[para_start..];
 
     // Handle self-closing <w:p/>
@@ -136,9 +120,7 @@ fn find_paragraph_end(
     rest.find("</w:p>")
         .map(|i| para_start + i + "</w:p>".len())
         .ok_or_else(|| DocliError::InvalidDocx {
-            message: format!(
-                "no closing </w:p> found from offset {para_start}"
-            ),
+            message: format!("no closing </w:p> found from offset {para_start}"),
         })
 }
 
@@ -170,25 +152,14 @@ mod tests {
 
     #[test]
     fn basic_replacement() {
-        let body =
-            r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:r><w:t>Hello World</w:t></w:r></w:p>"#;
+        let body = r#"<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:r><w:t>Hello World</w:t></w:r></w:p>"#;
         let xml = doc_xml(body);
         let para_offset = xml.find("<w:p ").unwrap();
 
         let mut graph = make_graph("word/document.xml", &xml);
-        replace_text_in_part(
-            &mut graph,
-            "word/document.xml",
-            para_offset,
-            6,
-            11,
-            "Earth",
-        )
-        .unwrap();
+        replace_text_in_part(&mut graph, "word/document.xml", para_offset, 6, 11, "Earth").unwrap();
 
-        let result =
-            std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap())
-                .unwrap();
+        let result = std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap()).unwrap();
         assert!(result.contains("Hello"));
         assert!(result.contains("Earth"));
         assert!(!result.contains("World"));
@@ -201,19 +172,9 @@ mod tests {
         let para_offset = xml.find("<w:p ").unwrap();
 
         let mut graph = make_graph("word/document.xml", &xml);
-        replace_text_in_part(
-            &mut graph,
-            "word/document.xml",
-            para_offset,
-            5,
-            9,
-            "word",
-        )
-        .unwrap();
+        replace_text_in_part(&mut graph, "word/document.xml", para_offset, 5, 9, "word").unwrap();
 
-        let result =
-            std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap())
-                .unwrap();
+        let result = std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap()).unwrap();
         assert!(result.contains("w:b"));
         assert!(result.contains("word"));
     }
@@ -225,19 +186,9 @@ mod tests {
         let para_offset = xml.find("<w:p ").unwrap();
 
         let mut graph = make_graph("word/document.xml", &xml);
-        replace_text_in_part(
-            &mut graph,
-            "word/document.xml",
-            para_offset,
-            0,
-            3,
-            "New",
-        )
-        .unwrap();
+        replace_text_in_part(&mut graph, "word/document.xml", para_offset, 0, 3, "New").unwrap();
 
-        let result =
-            std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap())
-                .unwrap();
+        let result = std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap()).unwrap();
         assert!(result.contains("New"));
         assert!(!result.contains("Old"));
     }

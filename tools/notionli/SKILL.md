@@ -2,136 +2,193 @@
 name: notionli
 description: |
   Use notionli for agent-safe Notion workspace operations: search, page
-  reads, block edits, database (data source) inspection, row upserts by
-  external key, comments, and user lookups. Writes default to a dry-run
-  plan; pass `--apply` to commit. Trigger on: "update Notion", "search
-  the workspace", "upsert a Notion row", "create a Notion comment",
-  "find the Notion page about X", "Notion database schema", or any task
-  where an agent needs to read or mutate Notion content with auditable,
-  rehearsable commands.
+  reads, block edits, database/data-source inspection, row upserts,
+  comments, users, files, snapshots, sync, and auditable dry-run writes.
+  Trigger on Notion automation, schema discovery, database row edits,
+  page/block mutations, or any task that needs structured Notion access.
 ---
 
 # notionli
 
 `notionli` is a Rust Notion CLI built for autonomous agents first and
 human terminal users second. It provides JSON envelopes, structured
-errors, dry-run-by-default writes, local profile state with aliases
-and audit, and integration-token auth via `NOTION_API_KEY`,
-`--token-cmd`, or the macOS Keychain.
+errors, local profile state, aliases, receipts, audit logs, and
+dry-run-by-default writes.
 
-The full operator-facing reference is
-[`README.md`](./README.md). The platform contract is in
+The full operator-facing reference is [`README.md`](./README.md). The
+platform contract is in
 [`docs/AGENT_TOOLS_PLATFORM_SPEC.md`](../../docs/AGENT_TOOLS_PLATFORM_SPEC.md).
 
 ## When to use notionli
 
-- Search a Notion workspace for pages, databases, or blocks.
-- Inspect a database (data source) schema before writing rows.
-- Upsert rows into a Notion database by an external key (idempotent).
-- Read a page's blocks for an agent context window.
+- Search a Notion workspace for pages, databases, data sources, or blocks.
+- Inspect database/data-source schema before writing rows.
+- Upsert rows by an external key for idempotent automation.
+- Read page blocks for an agent context window.
 - Add or read comments on a page or block.
-- Resolve a known Notion target via aliases instead of long UUIDs.
-- Rehearse a write workflow against a real workspace without touching
-  it (dry-run is the default).
+- Resolve recurring Notion targets through aliases instead of raw IDs.
+- Rehearse write workflows against a real workspace without touching it.
 
-## When **not** to use notionli
+## When not to use notionli
 
-- The task is to bulk-export a workspace — Notion's official export is
-  a better fit.
-- The task is rich-text editing of long-form Notion pages — `notionli`
-  exposes structured operations, not a Notion editor.
-- The task is to drive Markdown documents — use `mdli` and emit Notion
-  rows separately if a Notion sync is also required.
+- Bulk-exporting a whole workspace; Notion's official export is a better fit.
+- Rich text editing of long-form pages; `notionli` exposes structured ops.
+- Driving Markdown documents; use `mdli` and sync to Notion separately.
 
 ## Agent Contract
 
-- stdout in non-TTY mode is the JSON envelope; diagnostics go to
-  stderr.
-- **Writes are dry-run by default.** Pass `--apply` to commit.
-- Mutations append to a local audit log and create operation
-  receipts under `~/.local/share/notionli`.
-- Address content by Notion UUID. Create aliases for ergonomics:
+- stdout in non-TTY mode is the JSON envelope; diagnostics go to stderr.
+- Reads may execute directly.
+- Writes are dry-run plans unless `--apply` is supplied.
+- Mutations append to local audit logs and operation receipts.
+- Use aliases for recurring targets so scripts do not depend on raw IDs.
+- Prefer `schema` and `tools` before relying on an unfamiliar command shape.
+- Use `--jsonl` for stream processing and `--quiet` when piping primary IDs.
+- Keep integration tokens out of command output and committed files.
 
-  ```bash
-  notionli alias set tasks data_source:248104cd477e80afbc30000bd28de8f9
-  ```
+Auth sources include `--token-cmd`, `NOTION_API_KEY`,
+`~/.config/NOTION_API_KEY`, stored OAuth credentials, and macOS Keychain.
 
-- Resolve a default selected target with `notionli use <alias>`; then
-  subsequent commands can address `.` instead of the alias.
-- Auth precedence: `--token-cmd` → `NOTION_API_KEY` → Keychain entry.
+## Safe Default Workflow
 
-## Recommended Workflows
+1. Check auth and command surface:
 
-### 1. First-time setup
+   ```bash
+   notionli auth whoami
+   notionli tools schema --format mcp
+   notionli schema commands
+   ```
 
-```bash
-export NOTION_API_KEY=secret_...
-notionli auth whoami
-notionli alias set tasks data_source:<uuid>
-notionli use tasks
-```
+2. Search or select the target:
 
-### 2. Search the workspace
+   ```bash
+   notionli search "Project Plan"
+   notionli search "Project Plan" --semantic
+   notionli search --recent
+   notionli alias set tasks data_source:248104cd477e80afbc30000bd28de8f9
+   notionli use tasks
+   ```
 
-```bash
-notionli search "Q3 launch plan" --json
-```
+3. Preview writes:
 
-### 3. Inspect a database before writing
+   ```bash
+   notionli row upsert tasks --key ExternalID=gh:123 --set "Status=In Progress"
+   ```
+
+4. Apply only when the user asked for mutation:
+
+   ```bash
+   notionli row upsert tasks \
+     --key ExternalID=gh:123 \
+     --set "Status=In Progress" \
+     --apply
+   ```
+
+5. Use operation receipts to confirm results:
+
+   ```bash
+   notionli op list
+   notionli op show <receipt-id>
+   notionli op undo <receipt-id>
+   ```
+
+6. For multi-step work, prefer batch/workflow files over ad hoc shell loops:
+
+   ```bash
+   notionli batch apply ops.jsonl
+   notionli workflow run launch --set ALIAS=roadmap
+   ```
+
+## Command Map
+
+| Need | Command group |
+|---|---|
+| Authentication | `auth` |
+| Search workspace objects | `search` |
+| Page operations | `page` |
+| Block operations | `block` |
+| Database/data-source operations | `db`, `ds` |
+| Row create/update/upsert/list | `row` |
+| Comments | `comment` |
+| Users | `user` |
+| Files and attachments | `file` |
+| Snapshots and sync | `snapshot`, `sync` |
+| Webhook/watch automation | `webhook create`, `webhook serve`, `watch` |
+| Batch/template/workflow automation | `batch`, `bulk`, `template`, `workflow` |
+| Offline fixtures and mocks | `fixture`, `mock` |
+| Policies | `policy` |
+| MCP bridge | `mcp serve --stdio`, `mcp serve --http --port 8080` |
+| Receipts and audit trail | `op`, `audit` |
+| Schemas and command discovery | `schema`, `tools` |
+
+## High-Value Commands
 
 ```bash
 notionli ds show tasks --json
-notionli schema --command "row upsert"
+notionli ds export tasks --format csv --out tasks.csv
+notionli ds deduplicate tasks --by Name --keep newest
+notionli ds import tasks --jsonl-file tasks.jsonl --upsert-key ExternalID
+notionli ds schema diff tasks desired-schema.json
+notionli ds schema apply tasks desired-schema.json
+notionli page show roadmap --json
+notionli block list roadmap --json
+notionli page duplicate roadmap --to archive
+notionli page edit roadmap --section Notes --append-only
+notionli page worktree checkout roadmap --out ./roadmap-worktree
+notionli page worktree push ./roadmap-worktree
+notionli --apply file upload ./brief.md
+notionli --apply file upload ./large-brief.pdf --multipart
+notionli --apply file attach ./brief.md --page roadmap
+notionli snapshot create --out ./notion-snapshot
+notionli snapshot diff old-snapshot new-snapshot
+notionli sync run --mirror-to vaultli://notion/
+notionli webhook create --events page.content_updated --url https://example.com/hook
+notionli --apply webhook serve --port 8080 --out ./webhook-events.jsonl
+notionli watch --events page.content_updated --all-shared --on-change ./sync.sh --apply
+notionli fixture record --command "schema errors"
+notionli mock serve
+NOTIONLI_API_BASE=http://127.0.0.1:8080/v1 notionli auth whoami
+notionli doctor round-trip roadmap
 ```
 
-Use this to learn the property schema before composing an upsert.
+## Local Release Gates
 
-### 4. Idempotent row upsert by external key
+From `tools/notionli`:
 
 ```bash
-notionli row upsert tasks \
-  --key ExternalID=gh:123 \
-  --set "Status=In Progress" \
-  --set "Title=Fix the dashboard"
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+bash -n scripts/live_smoke.sh
+bash -n scripts/fake_notion_curl.sh
+bash -n scripts/release_audit.sh
+NOTION_API_KEY=secret_fake \
+NOTIONLI_SMOKE_PARENT_PAGE=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+NOTIONLI_CURL="$PWD/scripts/fake_notion_curl.sh" \
+NOTIONLI_HOME="$(mktemp -d)" \
+./scripts/live_smoke.sh
+./scripts/release_audit.sh
+cargo build --release
+cargo package --allow-dirty
 ```
 
-This is a dry-run plan. To commit:
+Live Notion smoke testing requires a token from `NOTION_API_KEY` or
+`~/.config/NOTION_API_KEY` and a disposable shared page/data source. Start with
+`notionli --apply doctor round-trip <page>`.
 
-```bash
-notionli row upsert tasks --key ExternalID=gh:123 --set "Status=Done" --apply
-```
+## Mutation Policy
 
-### 5. Read page context for an agent prompt
-
-```bash
-notionli page show <page-uuid> --json
-notionli block list <page-uuid> --json
-```
-
-### 6. Audit and re-apply a recorded operation
-
-```bash
-notionli op list
-notionli op show <receipt-id>
-```
+- User asks "show", "find", "summarize", "inspect", "list": run reads.
+- User asks "draft", "plan", "preview": omit `--apply`.
+- User asks "update", "create", "delete", "apply", "write": preview first
+  when blast radius is unclear, then rerun with `--apply` when the plan matches.
 
 ## Failure Recovery
 
 | Symptom | What to do |
 |---|---|
-| `E_AUTH_MISSING` | Confirm `NOTION_API_KEY` (or `--token-cmd` / Keychain entry); re-run `notionli auth whoami`. |
-| Property not found on upsert | Run `notionli ds show <alias>` and confirm the property name (case-sensitive). |
-| Rate-limited (429) | Honor the retry-after; back off and re-issue. Treat as retryable. |
-| Plan looks wrong in dry-run | Adjust `--set` flags. Never re-run with `--apply` until the plan reads correctly. |
-| Stale alias | `notionli alias set <name> <uuid>` overwrites; `notionli alias list` to audit. |
-
-## Schema discovery
-
-```bash
-notionli schema
-notionli schema --command "row upsert"
-notionli tools         # implementation status by command group
-```
-
-`notionli tools` is especially useful for an agent that needs to know
-which command surfaces are live versus stubbed.
+| `E_AUTH_MISSING` | Confirm `NOTION_API_KEY`, `~/.config/NOTION_API_KEY`, token command, OAuth credentials, or Keychain profile. |
+| Property not found on upsert | Run `notionli ds show <alias>` and confirm the exact property name. |
+| Rate-limited (429) | Honor retry-after, back off, and re-issue. Treat as retryable. |
+| Plan looks wrong in dry-run | Adjust keys, aliases, or `--set` values. Do not pass `--apply`. |
+| Stale alias | `notionli alias set <name> <uuid>` overwrites; `notionli alias list` audits. |

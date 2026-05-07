@@ -5,6 +5,20 @@ edition = "2021"
 rust-version = "1.75"
 description = "Agent-safe Notion control-plane CLI"
 license = "MIT"
+repository = "https://github.com/weisberg/agent_tools"
+readme = "README.md"
+keywords = ["notion", "cli", "agents", "automation"]
+categories = ["command-line-utilities"]
+include = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "README.md",
+  "CHANGELOG.md",
+  "SKILL.md",
+  "scripts/**/*.sh",
+  "src/**/*.rs",
+  "tests/**/*.rs",
+]
 
 [[bin]]
 name = "notionli"
@@ -16,6 +30,7 @@ clap = { version = "4", features = ["derive"] }
 dirs = "5"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
+serde_yaml = "0.9"
 thiserror = "1"
 
 [dev-dependencies]

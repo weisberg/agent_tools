@@ -91,7 +91,10 @@ impl DocumentIndex {
                     // Skip paragraphs inside table cells — they are not body-level
                     // paragraphs and must not corrupt the paragraph index or
                     // last_paragraph_index used for image/table anchoring.
-                    if node.ancestors().any(|ancestor| ancestor.has_tag_name("tbl")) {
+                    if node
+                        .ancestors()
+                        .any(|ancestor| ancestor.has_tag_name("tbl"))
+                    {
                         continue;
                     }
                     let paragraph = build_paragraph_entry(&node, index.paragraphs.len())?;

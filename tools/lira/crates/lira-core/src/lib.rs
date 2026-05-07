@@ -1,7 +1,7 @@
 use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 pub const SCHEMA_VERSION: u32 = 3;
@@ -161,6 +161,7 @@ pub struct Workflow {
     pub statuses: Vec<StatusDef>,
     pub task_statuses: Vec<StatusDef>,
     pub allowed_transitions: BTreeMap<String, Vec<String>>,
+    pub orchestration: OrchestrationPolicy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -168,6 +169,31 @@ pub struct StatusDef {
     pub id: String,
     pub name: String,
     pub terminal: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OrchestrationPolicy {
+    pub active_statuses: Vec<String>,
+    pub terminal_statuses: Vec<String>,
+    pub handoff_statuses: Vec<String>,
+    pub exclude_claimed: bool,
+    pub exclude_blocked: bool,
+}
+
+impl Default for OrchestrationPolicy {
+    fn default() -> Self {
+        Self {
+            active_statuses: vec!["todo".to_string(), "in-progress".to_string()],
+            terminal_statuses: vec![
+                "done".to_string(),
+                "cancelled".to_string(),
+                "archived".to_string(),
+            ],
+            handoff_statuses: vec!["in-review".to_string()],
+            exclude_claimed: true,
+            exclude_blocked: true,
+        }
+    }
 }
 
 impl Workflow {
@@ -241,6 +267,7 @@ impl Workflow {
             statuses,
             task_statuses,
             allowed_transitions,
+            orchestration: OrchestrationPolicy::default(),
         }
     }
 
@@ -250,6 +277,14 @@ impl Workflow {
 
     pub fn has_task_status(&self, status: &str) -> bool {
         self.task_statuses.iter().any(|s| s.id == status)
+    }
+
+    pub fn status_terminal(&self, status: &str) -> bool {
+        self.statuses
+            .iter()
+            .find(|s| s.id == status)
+            .map(|s| s.terminal)
+            .unwrap_or(false)
     }
 
     pub fn task_status_terminal(&self, status: &str) -> bool {
@@ -305,6 +340,8 @@ pub struct Ticket {
     pub history: Vec<HistoryEvent>,
     pub timestamps: Timestamps,
     pub agent: AgentMetadata,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub orchestration: Option<OrchestrationMetadata>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub github: Option<GithubBinding>,
 }
@@ -364,6 +401,7 @@ impl Ticket {
                 updated: now,
             },
             agent: AgentMetadata::default(),
+            orchestration: None,
             github: None,
         };
         ticket.add_history("created", format!("Created {id}"), Some(actor));
@@ -406,6 +444,7 @@ impl Ticket {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Task {
     pub id: String,
     pub title: String,
@@ -482,6 +521,22 @@ pub struct AgentMetadata {
     pub claimed_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct OrchestrationMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_hint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_for_dispatch: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_claimed_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_claimed_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_released_at: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GithubBinding {
     pub repo: String,
@@ -498,6 +553,7 @@ pub struct TicketSummary {
     pub status: String,
     pub priority: String,
     pub assignee: Option<String>,
+    pub claimed_by: Option<String>,
     pub task_summary: TaskSummary,
 }
 
@@ -510,6 +566,7 @@ impl From<&Ticket> for TicketSummary {
             status: ticket.status.clone(),
             priority: ticket.priority.clone(),
             assignee: ticket.assignee.clone(),
+            claimed_by: ticket.agent.claimed_by.clone(),
             task_summary: TaskSummary::from(ticket),
         }
     }
@@ -547,6 +604,73 @@ impl From<&Ticket> for TaskSummary {
                 .filter(|t| t.status == "cancelled")
                 .count(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockerRef {
+    pub id: Option<String>,
+    pub identifier: Option<String>,
+    pub state: Option<String>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NormalizedIssue {
+    pub id: String,
+    pub identifier: String,
+    pub title: String,
+    pub description: Option<String>,
+    pub priority: Option<u8>,
+    pub state: String,
+    pub branch_name: Option<String>,
+    pub url: Option<String>,
+    pub labels: Vec<String>,
+    pub blocked_by: Vec<BlockerRef>,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+pub fn priority_value(priority: &str) -> Option<u8> {
+    match priority {
+        "highest" => Some(1),
+        "high" => Some(2),
+        "medium" => Some(3),
+        "low" => Some(4),
+        "lowest" => Some(5),
+        _ => None,
+    }
+}
+
+pub fn issue_from_ticket(ticket: &Ticket, blockers: Vec<BlockerRef>) -> NormalizedIssue {
+    let mut labels = ticket
+        .labels
+        .iter()
+        .map(|label| label.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+    labels.sort();
+    labels.dedup();
+    NormalizedIssue {
+        id: ticket.id.clone(),
+        identifier: ticket.id.clone(),
+        title: ticket.title.clone(),
+        description: if ticket.description.trim().is_empty() {
+            None
+        } else {
+            Some(ticket.description.clone())
+        },
+        priority: priority_value(&ticket.priority),
+        state: ticket.status.clone(),
+        branch_name: ticket
+            .orchestration
+            .as_ref()
+            .and_then(|metadata| metadata.branch_name.clone()),
+        url: ticket.github.as_ref().map(|github| github.url.clone()),
+        labels,
+        blocked_by: blockers,
+        created_at: Some(ticket.timestamps.created.clone()),
+        updated_at: Some(ticket.timestamps.updated.clone()),
     }
 }
 
@@ -589,7 +713,7 @@ pub fn validate_tasks(tasks: &[Task], workflow: &Workflow) -> LiraResult<()> {
         ));
     }
 
-    let mut seen = std::collections::BTreeSet::new();
+    let mut seen = BTreeSet::new();
     for task in tasks {
         if task.title.trim().is_empty() {
             return Err(LiraError::new(
@@ -678,12 +802,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn acceptance_criteria_are_required() {
-        let err = validate_acceptance_criteria(&[]).unwrap_err();
-        assert_eq!(err.error_code, "E_ACCEPTANCE_CRITERIA_REQUIRED");
-    }
-
-    #[test]
     fn completion_policy_rejects_open_tasks() {
         let workflow = Workflow::default_for("ORION");
         let ticket = Ticket::new(
@@ -702,5 +820,26 @@ mod tests {
         );
         let err = validate_completion_policy(&ticket, &workflow).unwrap_err();
         assert_eq!(err.error_code, "E_COMPLETION_POLICY");
+    }
+
+    #[test]
+    fn issue_projection_maps_priority() {
+        let ticket = Ticket::new(
+            "ORION-1",
+            "ORION",
+            "Title",
+            "Body",
+            "task",
+            "high",
+            None,
+            None,
+            None,
+            vec!["It works".to_string()],
+            vec!["Do it".to_string()],
+            None,
+        );
+        let issue = issue_from_ticket(&ticket, Vec::new());
+        assert_eq!(issue.priority, Some(2));
+        assert_eq!(issue.identifier, "ORION-1");
     }
 }

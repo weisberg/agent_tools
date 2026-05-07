@@ -29,15 +29,16 @@ pub fn add_relationship(
 
     let new_id = max_id + 1;
     let new_rid = format!("rId{new_id}");
-    let new_element = format!(
-        r#"<Relationship Id="{new_rid}" Type="{rel_type}" Target="{target}"/>"#
-    );
+    let new_element =
+        format!(r#"<Relationship Id="{new_rid}" Type="{rel_type}" Target="{target}"/>"#);
 
     // Insert before the closing </Relationships> tag.
     let closing = "</Relationships>";
-    let insert_pos = xml_str.rfind(closing).ok_or_else(|| DocliError::InvalidDocx {
-        message: "missing </Relationships> tag in .rels".into(),
-    })?;
+    let insert_pos = xml_str
+        .rfind(closing)
+        .ok_or_else(|| DocliError::InvalidDocx {
+            message: "missing </Relationships> tag in .rels".into(),
+        })?;
 
     let mut result = String::with_capacity(xml_str.len() + new_element.len() + 1);
     result.push_str(&xml_str[..insert_pos]);
@@ -53,10 +54,9 @@ pub fn add_content_type(
     part_path: &str,
     content_type: &str,
 ) -> Result<Vec<u8>, DocliError> {
-    let xml_str =
-        std::str::from_utf8(content_types_xml).map_err(|e| DocliError::InvalidDocx {
-            message: format!("invalid UTF-8 in [Content_Types].xml: {e}"),
-        })?;
+    let xml_str = std::str::from_utf8(content_types_xml).map_err(|e| DocliError::InvalidDocx {
+        message: format!("invalid UTF-8 in [Content_Types].xml: {e}"),
+    })?;
 
     // Ensure the part path starts with '/'.
     let part_name = if part_path.starts_with('/') {
@@ -65,14 +65,14 @@ pub fn add_content_type(
         format!("/{part_path}")
     };
 
-    let new_element = format!(
-        r#"<Override PartName="{part_name}" ContentType="{content_type}"/>"#
-    );
+    let new_element = format!(r#"<Override PartName="{part_name}" ContentType="{content_type}"/>"#);
 
     let closing = "</Types>";
-    let insert_pos = xml_str.rfind(closing).ok_or_else(|| DocliError::InvalidDocx {
-        message: "missing </Types> tag in [Content_Types].xml".into(),
-    })?;
+    let insert_pos = xml_str
+        .rfind(closing)
+        .ok_or_else(|| DocliError::InvalidDocx {
+            message: "missing </Types> tag in [Content_Types].xml".into(),
+        })?;
 
     let mut result = String::with_capacity(xml_str.len() + new_element.len() + 1);
     result.push_str(&xml_str[..insert_pos]);

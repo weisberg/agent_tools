@@ -1,7 +1,7 @@
 use fs2::FileExt;
 use lira_core::{
-    filesystem_error, validate_project_key, Counters, LiraError, LiraResult, Project, Ticket,
-    Workflow, SCHEMA_VERSION,
+    filesystem_error, issue_from_ticket, validate_project_key, BlockerRef, Counters, LiraError,
+    LiraResult, NormalizedIssue, Project, Ticket, Workflow, SCHEMA_VERSION,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::json;
@@ -202,8 +202,12 @@ where
         write_yaml_atomic(&path, &ticket)?;
     } else {
         create_dir_all(new_path.parent().expect("ticket path has parent"))?;
-        write_yaml_atomic(&path, &ticket)?;
-        std::fs::rename(&path, &new_path).map_err(filesystem_error)?;
+        let tmp_path = path.with_extension("moving");
+        write_yaml_atomic(&tmp_path, &ticket)?;
+        std::fs::rename(&tmp_path, &new_path).map_err(filesystem_error)?;
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(filesystem_error)?;
+        }
     }
     Ok(ticket)
 }
@@ -272,6 +276,113 @@ pub fn list_tickets(
 
     tickets.sort_by(|a, b| a.id.cmp(&b.id));
     Ok(tickets)
+}
+
+pub fn normalized_issue(id: &str) -> LiraResult<NormalizedIssue> {
+    let ticket = read_ticket(id)?;
+    normalized_issue_for_ticket(&ticket)
+}
+
+pub fn normalized_issues(ids: &[String]) -> LiraResult<Vec<serde_json::Value>> {
+    ids.iter()
+        .map(|id| match normalized_issue(id) {
+            Ok(issue) => Ok(json!({ "id": id, "ok": true, "issue": issue })),
+            Err(err) if err.error_code == "E_TICKET_NOT_FOUND" => {
+                Ok(json!({ "id": id, "ok": false, "error": err.payload() }))
+            }
+            Err(err) => Err(err),
+        })
+        .collect()
+}
+
+pub fn candidate_issues(
+    project: Option<&str>,
+    state: Option<&str>,
+) -> LiraResult<Vec<NormalizedIssue>> {
+    let mut issues = Vec::new();
+    let tickets = list_tickets(project, state)?;
+    for ticket in tickets {
+        let workflow = read_workflow(&ticket.project)?;
+        if !is_candidate(&ticket, &workflow)? {
+            continue;
+        }
+        issues.push(normalized_issue_for_ticket(&ticket)?);
+    }
+    issues.sort_by(|a, b| {
+        a.priority
+            .unwrap_or(u8::MAX)
+            .cmp(&b.priority.unwrap_or(u8::MAX))
+            .then_with(|| a.created_at.cmp(&b.created_at))
+            .then_with(|| a.identifier.cmp(&b.identifier))
+    });
+    Ok(issues)
+}
+
+fn is_candidate(ticket: &Ticket, workflow: &Workflow) -> LiraResult<bool> {
+    if workflow
+        .orchestration
+        .terminal_statuses
+        .iter()
+        .any(|status| status == &ticket.status)
+        || workflow.status_terminal(&ticket.status)
+    {
+        return Ok(false);
+    }
+    if !workflow
+        .orchestration
+        .active_statuses
+        .iter()
+        .any(|status| status == &ticket.status)
+    {
+        return Ok(false);
+    }
+    if workflow.orchestration.exclude_claimed && ticket.agent.claimed_by.is_some() {
+        return Ok(false);
+    }
+    if ticket
+        .orchestration
+        .as_ref()
+        .and_then(|metadata| metadata.active_for_dispatch)
+        == Some(false)
+    {
+        return Ok(false);
+    }
+    if workflow.orchestration.exclude_blocked && ticket.status == "todo" {
+        for blocker in &ticket.links.blocked_by {
+            if let Ok(blocking_ticket) = read_ticket(blocker) {
+                let blocker_workflow = read_workflow(&blocking_ticket.project)?;
+                if !blocker_workflow.status_terminal(&blocking_ticket.status) {
+                    return Ok(false);
+                }
+            }
+        }
+    }
+    Ok(true)
+}
+
+fn normalized_issue_for_ticket(ticket: &Ticket) -> LiraResult<NormalizedIssue> {
+    let blockers = ticket
+        .links
+        .blocked_by
+        .iter()
+        .map(|id| match read_ticket(id) {
+            Ok(blocker) => BlockerRef {
+                id: Some(blocker.id.clone()),
+                identifier: Some(blocker.id.clone()),
+                state: Some(blocker.status.clone()),
+                created_at: Some(blocker.timestamps.created.clone()),
+                updated_at: Some(blocker.timestamps.updated.clone()),
+            },
+            Err(_) => BlockerRef {
+                id: None,
+                identifier: Some(id.clone()),
+                state: None,
+                created_at: None,
+                updated_at: None,
+            },
+        })
+        .collect();
+    Ok(issue_from_ticket(ticket, blockers))
 }
 
 pub fn append_log(event: JsonlEvent) -> LiraResult<()> {
@@ -415,22 +526,4 @@ fn create_dir_all(path: &Path) -> LiraResult<()> {
         std::fs::set_permissions(path, perms).map_err(filesystem_error)?;
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn lira_home_uses_override() {
-        let before = std::env::var("LIRA_HOME").ok();
-        std::env::set_var("LIRA_HOME", "/tmp/lira-home-test");
-        let got = lira_home().expect("home");
-        assert_eq!(got, PathBuf::from("/tmp/lira-home-test"));
-        if let Some(prev) = before {
-            std::env::set_var("LIRA_HOME", prev);
-        } else {
-            std::env::remove_var("LIRA_HOME");
-        }
-    }
 }

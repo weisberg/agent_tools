@@ -17,19 +17,33 @@ fn inspect_simple_returns_valid_json() {
         .output()
         .expect("failed to run docli");
 
-    assert!(output.status.success(), "exit code was not 0: stderr={}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "exit code was not 0: stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let json: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("stdout is not valid JSON");
 
     assert_eq!(json["ok"], true);
     assert_eq!(json["command"], "inspect");
-    assert!(json["data"]["paragraphs"].is_array(), "paragraphs should be an array");
-    assert!(json["elapsed_ms"].is_number(), "elapsed_ms should be a number");
+    assert!(
+        json["data"]["paragraphs"].is_array(),
+        "paragraphs should be an array"
+    );
+    assert!(
+        json["elapsed_ms"].is_number(),
+        "elapsed_ms should be a number"
+    );
 
     // Verify paragraph count: 4 body paragraphs + 4 table-cell paragraphs = 8
     let paragraphs = json["data"]["paragraphs"].as_array().unwrap();
-    assert!(paragraphs.len() >= 4, "expected at least 4 paragraphs, got {}", paragraphs.len());
+    assert!(
+        paragraphs.len() >= 4,
+        "expected at least 4 paragraphs, got {}",
+        paragraphs.len()
+    );
 
     // Verify headings
     let headings = json["data"]["headings"].as_array().unwrap();
@@ -48,7 +62,10 @@ fn inspect_simple_returns_valid_json() {
     // Verify bookmark
     let bookmarks = &json["data"]["bookmarks"];
     assert!(bookmarks.is_object(), "bookmarks should be an object");
-    assert!(bookmarks["important_section"].is_number(), "bookmark 'important_section' should exist");
+    assert!(
+        bookmarks["important_section"].is_number(),
+        "bookmark 'important_section' should exist"
+    );
 }
 
 #[test]
@@ -56,7 +73,12 @@ fn inspect_with_sections_filter() {
     let fixture = helpers::build_simple_docx();
 
     let output = docli()
-        .args(["inspect", fixture.to_str().unwrap(), "--sections", "headings,tables"])
+        .args([
+            "inspect",
+            fixture.to_str().unwrap(),
+            "--sections",
+            "headings,tables",
+        ])
         .output()
         .expect("failed to run docli");
 
@@ -70,9 +92,18 @@ fn inspect_with_sections_filter() {
     assert!(json["data"]["tables"].is_array());
 
     // Non-requested sections should be absent (null in JSON)
-    assert!(json["data"]["paragraphs"].is_null(), "paragraphs should not be present");
-    assert!(json["data"]["images"].is_null(), "images should not be present");
-    assert!(json["data"]["comments"].is_null(), "comments should not be present");
+    assert!(
+        json["data"]["paragraphs"].is_null(),
+        "paragraphs should not be present"
+    );
+    assert!(
+        json["data"]["images"].is_null(),
+        "images should not be present"
+    );
+    assert!(
+        json["data"]["comments"].is_null(),
+        "comments should not be present"
+    );
 }
 
 #[test]
@@ -91,13 +122,25 @@ fn inspect_reviewed_shows_comments_and_tracked_changes() {
 
     // Verify comments detected
     let comments = &json["data"]["comments"];
-    assert!(comments["count"].as_u64().unwrap() >= 1, "expected at least 1 comment");
+    assert!(
+        comments["count"].as_u64().unwrap() >= 1,
+        "expected at least 1 comment"
+    );
 
     // Verify tracked changes detected
     let tc = &json["data"]["tracked_changes"];
-    assert!(tc["count"].as_u64().unwrap() >= 2, "expected at least 2 tracked changes");
-    assert!(tc["insertions"].as_u64().unwrap() >= 1, "expected at least 1 insertion");
-    assert!(tc["deletions"].as_u64().unwrap() >= 1, "expected at least 1 deletion");
+    assert!(
+        tc["count"].as_u64().unwrap() >= 2,
+        "expected at least 2 tracked changes"
+    );
+    assert!(
+        tc["insertions"].as_u64().unwrap() >= 1,
+        "expected at least 1 insertion"
+    );
+    assert!(
+        tc["deletions"].as_u64().unwrap() >= 1,
+        "expected at least 1 deletion"
+    );
 
     // Verify authors
     let authors = tc["authors"].as_array().unwrap();
@@ -121,5 +164,8 @@ fn inspect_missing_file_returns_error_envelope() {
     assert_eq!(json["ok"], false);
     assert_eq!(json["command"], "inspect");
     assert!(json["error"].is_object(), "error field should be present");
-    assert!(json["error"]["message"].is_string(), "error.message should be a string");
+    assert!(
+        json["error"]["message"].is_string(),
+        "error.message should be a string"
+    );
 }

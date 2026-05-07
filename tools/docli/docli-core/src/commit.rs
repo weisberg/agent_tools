@@ -7,10 +7,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::DocliError;
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Durability {
     Fast,
+    #[default]
     Durable,
     Paranoid,
 }
@@ -22,12 +23,6 @@ impl Durability {
             Self::Durable => "durable",
             Self::Paranoid => "paranoid",
         }
-    }
-}
-
-impl Default for Durability {
-    fn default() -> Self {
-        Self::Durable
     }
 }
 

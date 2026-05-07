@@ -23,8 +23,7 @@ pub fn normalize_text_spaces(xml: &[u8]) -> Result<Vec<u8>, DocliError> {
             return caps[0].to_string();
         }
 
-        let needs_preserve =
-            text.starts_with(' ') || text.ends_with(' ') || text.contains("  ");
+        let needs_preserve = text.starts_with(' ') || text.ends_with(' ') || text.contains("  ");
 
         if needs_preserve {
             format!(r#"<w:t xml:space="preserve"{attrs}>{text}</w:t>"#)

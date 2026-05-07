@@ -56,10 +56,11 @@ _HEADING_ITEM_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "index": {"type": "integer", "minimum": 0},
+        "paragraph_index": {"type": "integer", "minimum": 0},
         "level": {"type": "integer", "minimum": 1, "maximum": 9},
         "text": {"type": "string"},
     },
-    "required": ["index", "level", "text"],
+    "required": ["level", "text"],
 }
 
 _TABLE_ITEM_SCHEMA: dict[str, Any] = {
@@ -87,27 +88,29 @@ _IMAGE_ITEM_SCHEMA: dict[str, Any] = {
     "required": ["index"],
 }
 
+_PARAGRAPH_ITEM_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "index": {"type": "integer", "minimum": 0},
+        "style": {"type": ["string", "null"]},
+        "text": {"type": "string"},
+    },
+    "required": ["index", "style", "text"],
+}
+
 _INSPECT_DATA_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
         "file": {"type": "string", "minLength": 1},
+        "source_hash": {"type": "string", "minLength": 1},
+        "entry_count": {"type": "integer", "minimum": 0},
         "file_size_bytes": {"type": "integer", "minimum": 0},
         "page_size": {"type": "string"},
         "orientation": {"type": "string", "enum": ["portrait", "landscape"]},
         "sections": {"type": "integer", "minimum": 0},
         "paragraphs": {
-            "type": "object",
-            "properties": {
-                "count": {"type": "integer", "minimum": 0},
-                "by_style": {
-                    "type": "object",
-                    "additionalProperties": {
-                        "type": "array",
-                        "items": {"type": "integer", "minimum": 0},
-                    },
-                },
-            },
-            "required": ["count"],
+            "type": "array",
+            "items": _PARAGRAPH_ITEM_SCHEMA,
         },
         "headings": {
             "type": "array",
@@ -140,6 +143,7 @@ _INSPECT_DATA_SCHEMA: dict[str, Any] = {
             },
             "required": ["count"],
         },
+        "bookmarks": {"type": "object"},
         "styles": {"type": "array", "items": {"type": "string"}},
         "fonts": {"type": "array", "items": {"type": "string"}},
         "word_count": {"type": "integer", "minimum": 0},
@@ -197,9 +201,29 @@ _SCHEMA_ERROR_SCHEMA: dict[str, Any] = {
     "required": ["type"],
 }
 
+_VALIDATE_ISSUE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "code": {"type": "string", "minLength": 1},
+        "message": {"type": "string"},
+        "severity": {"type": "string", "enum": ["error", "warning"]},
+        "part": {"type": "string"},
+        "path": {"type": "string"},
+    },
+    "required": ["code", "message", "severity"],
+}
+
 _VALIDATE_DATA_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
+        "file": {"type": "string", "minLength": 1},
+        "issues": {
+            "type": "array",
+            "items": _VALIDATE_ISSUE_SCHEMA,
+        },
+        "error_count": {"type": "integer", "minimum": 0},
+        "warning_count": {"type": "integer", "minimum": 0},
+        "repaired": {"type": "boolean"},
         "valid": {"type": "boolean"},
         "repairs": {"type": "integer", "minimum": 0},
         "repairs_detail": {
@@ -215,7 +239,7 @@ _VALIDATE_DATA_SCHEMA: dict[str, Any] = {
             "items": _SCHEMA_ERROR_SCHEMA,
         },
     },
-    "required": ["valid"],
+    "required": ["issues", "error_count", "warning_count", "repaired"],
 }
 
 _VALIDATE_ENVELOPE_SCHEMA: dict[str, Any] = {

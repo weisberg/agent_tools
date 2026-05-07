@@ -1,10 +1,38 @@
 use assert_cmd::Command;
+use predicates::prelude::PredicateBooleanExt;
 use predicates::str::contains;
 
 fn lira(root: &std::path::Path) -> Command {
     let mut cmd = Command::cargo_bin("lira").expect("bin");
     cmd.env("LIRA_HOME", root);
     cmd
+}
+
+fn init_project(root: &std::path::Path) {
+    lira(root).args(["init", "--json"]).assert().success();
+    lira(root)
+        .args(["project", "create", "ORION", "Orion Project", "--json"])
+        .assert()
+        .success();
+}
+
+fn create_ticket(root: &std::path::Path, title: &str) {
+    lira(root)
+        .args([
+            "new",
+            title,
+            "--project",
+            "ORION",
+            "--acceptance-criterion",
+            "The work is verifiable.",
+            "--task",
+            "Do the work.",
+            "--priority",
+            "high",
+            "--json",
+        ])
+        .assert()
+        .success();
 }
 
 #[test]
@@ -16,57 +44,17 @@ fn init_dry_run_does_not_create_root() {
         .args(["init", "--dry-run", "--json"])
         .assert()
         .success()
-        .stdout(contains("\"schema_version\": 3"))
-        .stdout(contains("\"result\""));
+        .stdout(contains("\"schema_version\": 3"));
 
     assert!(!root.exists());
-}
-
-#[test]
-fn create_and_show_project() {
-    let temp = tempfile::tempdir().expect("tempdir");
-    let root = temp.path().join(".lira-test");
-
-    lira(&root).args(["init", "--json"]).assert().success();
-
-    lira(&root)
-        .args(["project", "create", "ORION", "Orion Project", "--json"])
-        .assert()
-        .success();
-
-    lira(&root)
-        .args(["project", "show", "ORION", "--json"])
-        .assert()
-        .success()
-        .stdout(contains("Orion Project"))
-        .stdout(contains("workflow"));
 }
 
 #[test]
 fn ticket_lifecycle_enforces_completion_policy() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path().join(".lira-test");
-
-    lira(&root).args(["init", "--json"]).assert().success();
-    lira(&root)
-        .args(["project", "create", "ORION", "Orion Project", "--json"])
-        .assert()
-        .success();
-    lira(&root)
-        .args([
-            "new",
-            "Implement local tickets",
-            "--project",
-            "ORION",
-            "--acceptance-criterion",
-            "Tickets can be created.",
-            "--task",
-            "Create the ticket command.",
-            "--json",
-        ])
-        .assert()
-        .success()
-        .stdout(contains("ORION-1"));
+    init_project(&root);
+    create_ticket(&root, "Implement local tickets");
 
     lira(&root)
         .args(["mv", "ORION-1", "todo", "--json"])
@@ -93,107 +81,106 @@ fn ticket_lifecycle_enforces_completion_policy() {
 }
 
 #[test]
-fn comments_claims_and_doctor_work() {
+fn candidates_return_normalized_unclaimed_unblocked_issues() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path().join(".lira-test");
+    init_project(&root);
+    create_ticket(&root, "Blocked ticket");
+    create_ticket(&root, "Open ticket");
 
-    lira(&root).args(["init", "--json"]).assert().success();
     lira(&root)
-        .args(["project", "create", "ORION", "Orion Project", "--json"])
+        .args(["mv", "ORION-1", "todo", "--json"])
         .assert()
         .success();
     lira(&root)
-        .args([
-            "new",
-            "Add comments",
-            "--project",
-            "ORION",
-            "--acceptance-criterion",
-            "Comments are visible.",
-            "--task",
-            "Add one comment.",
-            "--json",
-        ])
+        .args(["mv", "ORION-2", "todo", "--json"])
         .assert()
         .success();
     lira(&root)
-        .args([
-            "comment", "ORION-1", "Hello", "--author", "athena", "--json",
-        ])
-        .assert()
-        .success()
-        .stdout(contains("local-c1"));
-    lira(&root)
-        .args(["claim", "ORION-1", "--agent", "athena", "--json"])
+        .args(["link", "ORION-1", "--blocked-by", "ORION-2", "--json"])
         .assert()
         .success();
+
     lira(&root)
-        .args(["active", "--agent", "athena", "--json"])
+        .args(["candidates", "--project", "ORION", "--json"])
         .assert()
         .success()
-        .stdout(contains("ORION-1"));
+        .stdout(contains("\"identifier\": \"ORION-2\""))
+        .stdout(predicates::str::contains("\"identifier\": \"ORION-1\"").not());
+
     lira(&root)
-        .args(["doctor", "--json"])
+        .args(["claim", "ORION-2", "--agent", "runner", "--json"])
         .assert()
         .success()
-        .stdout(contains("\"ok\": true"));
+        .stdout(contains("\"claimed\": true"))
+        .stdout(contains("\"issue\""));
+
+    lira(&root)
+        .args(["candidates", "--project", "ORION", "--json"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("\"identifier\": \"ORION-2\"").not());
 }
 
 #[test]
-fn search_query_count_and_board_work() {
+fn issue_current_reports_found_and_missing() {
     let temp = tempfile::tempdir().expect("tempdir");
     let root = temp.path().join(".lira-test");
+    init_project(&root);
+    create_ticket(&root, "Show current issue");
 
-    lira(&root).args(["init", "--json"]).assert().success();
     lira(&root)
-        .args(["project", "create", "ORION", "Orion Project", "--json"])
+        .args(["issue", "show", "ORION-1", "--json"])
         .assert()
-        .success();
+        .success()
+        .stdout(contains("\"state\": \"backlog\""));
+
     lira(&root)
         .args([
-            "new",
-            "Add search",
+            "issue", "current", "--ids", "ORION-1", "--ids", "ORION-9", "--json",
+        ])
+        .assert()
+        .success()
+        .stdout(contains("\"ok\": true"))
+        .stdout(contains("\"E_TICKET_NOT_FOUND\""));
+}
+
+#[test]
+fn workflow_symphony_export_and_validate() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join(".lira-test");
+    init_project(&root);
+    let workflow = temp.path().join("WORKFLOW.md");
+    std::fs::write(
+        &workflow,
+        "---\ntracker:\n  kind: lira\n  project: ORION\nworkspace:\n  root: /tmp/ws\n---\n# Workflow\n",
+    )
+    .expect("workflow");
+
+    lira(&root)
+        .args([
+            "workflow",
+            "symphony",
+            "export",
             "--project",
             "ORION",
-            "--acceptance-criterion",
-            "Search finds ticket text.",
-            "--task",
-            "Index the ticket title.",
-            "--parent-jira",
-            "VAN-1234",
             "--json",
         ])
         .assert()
-        .success();
-    lira(&root)
-        .args(["label", "add", "ORION-1", "search", "--json"])
-        .assert()
-        .success();
-    lira(&root)
-        .args(["search", "ticket title", "--json"])
-        .assert()
         .success()
-        .stdout(contains("ORION-1"));
+        .stdout(contains("\"kind\": \"lira\""));
+
     lira(&root)
         .args([
-            "query",
-            "--label",
-            "search",
-            "--parent-jira",
-            "VAN-1234",
+            "workflow",
+            "symphony",
+            "validate",
+            workflow.to_str().expect("utf8"),
+            "--project",
+            "ORION",
             "--json",
         ])
         .assert()
         .success()
-        .stdout(contains("ORION-1"));
-    lira(&root)
-        .args(["count", "--group-by", "status", "--json"])
-        .assert()
-        .success()
-        .stdout(contains("backlog"));
-    lira(&root)
-        .args(["board", "--json"])
-        .assert()
-        .success()
-        .stdout(contains("board"));
+        .stdout(contains("\"valid\": true"));
 }

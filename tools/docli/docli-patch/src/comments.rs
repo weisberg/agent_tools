@@ -20,8 +20,7 @@ fn escape_xml(s: &str) -> String {
 }
 
 const COMMENTS_PART: &str = "word/comments.xml";
-const COMMENTS_NS: &str =
-    "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+const COMMENTS_NS: &str = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
 /// Build the XML for a single `<w:comment>` element.
 fn comment_element(
@@ -66,6 +65,7 @@ fn ensure_comments_part(graph: &mut PartGraph) {
 /// Updates both the document part (range markers + reference) and comments.xml
 /// (the comment element itself). The byte offsets identify the paragraph span to
 /// which the comment is anchored.
+#[allow(clippy::too_many_arguments)]
 pub fn add_comment(
     graph: &mut PartGraph,
     part_path: &str,
@@ -99,8 +99,9 @@ pub fn add_comment(
     let (range_start, range_end, reference) = comment_markers(comment_id);
 
     // Insert: rangeStart before paragraph, rangeEnd + reference after paragraph.
-    let mut result =
-        String::with_capacity(xml_str.len() + range_start.len() + range_end.len() + reference.len());
+    let mut result = String::with_capacity(
+        xml_str.len() + range_start.len() + range_end.len() + reference.len(),
+    );
     result.push_str(&xml_str[..para_byte_offset]);
     result.push_str(&range_start);
     result.push_str(&xml_str[para_byte_offset..para_byte_end]);
@@ -113,10 +114,9 @@ pub fn add_comment(
     // --- 2. Add comment element to comments.xml ---
     ensure_comments_part(graph);
     let comments_xml = graph.xml_bytes(COMMENTS_PART).unwrap();
-    let comments_str =
-        std::str::from_utf8(comments_xml).map_err(|e| DocliError::InvalidDocx {
-            message: format!("invalid UTF-8 in comments.xml: {e}"),
-        })?;
+    let comments_str = std::str::from_utf8(comments_xml).map_err(|e| DocliError::InvalidDocx {
+        message: format!("invalid UTF-8 in comments.xml: {e}"),
+    })?;
 
     let element = comment_element(comment_id, author, date, text, None);
 
@@ -156,10 +156,9 @@ pub fn add_comment_reply(
     ensure_comments_part(graph);
 
     let comments_xml = graph.xml_bytes(COMMENTS_PART).unwrap();
-    let comments_str =
-        std::str::from_utf8(comments_xml).map_err(|e| DocliError::InvalidDocx {
-            message: format!("invalid UTF-8 in comments.xml: {e}"),
-        })?;
+    let comments_str = std::str::from_utf8(comments_xml).map_err(|e| DocliError::InvalidDocx {
+        message: format!("invalid UTF-8 in comments.xml: {e}"),
+    })?;
 
     // Verify parent exists.
     let parent_marker = format!(r#"w:id="{parent_id}""#);
@@ -192,21 +191,16 @@ pub fn add_comment_reply(
 /// Resolve a comment (set `w:done="1"` on the comment element).
 ///
 /// Locates the `<w:comment w:id="N"` element and adds the `w:done="1"` attribute.
-pub fn resolve_comment(
-    graph: &mut PartGraph,
-    comment_id: u64,
-) -> Result<(), DocliError> {
-    let comments_xml =
-        graph
-            .xml_bytes(COMMENTS_PART)
-            .ok_or_else(|| DocliError::InvalidDocx {
-                message: "comments.xml not found".into(),
-            })?;
-
-    let comments_str =
-        std::str::from_utf8(comments_xml).map_err(|e| DocliError::InvalidDocx {
-            message: format!("invalid UTF-8 in comments.xml: {e}"),
+pub fn resolve_comment(graph: &mut PartGraph, comment_id: u64) -> Result<(), DocliError> {
+    let comments_xml = graph
+        .xml_bytes(COMMENTS_PART)
+        .ok_or_else(|| DocliError::InvalidDocx {
+            message: "comments.xml not found".into(),
         })?;
+
+    let comments_str = std::str::from_utf8(comments_xml).map_err(|e| DocliError::InvalidDocx {
+        message: format!("invalid UTF-8 in comments.xml: {e}"),
+    })?;
 
     let needle = format!(r#"<w:comment w:id="{comment_id}""#);
     let pos = comments_str
@@ -276,14 +270,12 @@ mod tests {
         )
         .unwrap();
 
-        let result =
-            std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap()).unwrap();
+        let result = std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap()).unwrap();
         assert!(result.contains(r#"<w:commentRangeStart w:id="100"/>"#));
         assert!(result.contains(r#"<w:commentRangeEnd w:id="100"/>"#));
         assert!(result.contains(r#"<w:commentReference w:id="100"/>"#));
 
-        let comments =
-            std::str::from_utf8(graph.xml_bytes(COMMENTS_PART).unwrap()).unwrap();
+        let comments = std::str::from_utf8(graph.xml_bytes(COMMENTS_PART).unwrap()).unwrap();
         assert!(comments.contains(r#"w:id="100""#));
         assert!(comments.contains("Good point"));
     }
@@ -333,18 +325,9 @@ mod tests {
         let comments = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:comment w:id="1" w:author="Alice" w:date="2025-01-01T00:00:00Z"><w:p><w:r><w:t>Original</w:t></w:r></w:p></w:comment></w:comments>"#;
         let mut graph = make_graph_with_comments(doc, comments);
 
-        add_comment_reply(
-            &mut graph,
-            1,
-            2,
-            "Bob",
-            "2025-01-02T00:00:00Z",
-            "I agree",
-        )
-        .unwrap();
+        add_comment_reply(&mut graph, 1, 2, "Bob", "2025-01-02T00:00:00Z", "I agree").unwrap();
 
-        let result =
-            std::str::from_utf8(graph.xml_bytes(COMMENTS_PART).unwrap()).unwrap();
+        let result = std::str::from_utf8(graph.xml_bytes(COMMENTS_PART).unwrap()).unwrap();
         assert!(result.contains(r#"w:id="2""#));
         assert!(result.contains("@reply:1 I agree"));
     }
@@ -355,14 +338,7 @@ mod tests {
         let comments = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"></w:comments>"#;
         let mut graph = make_graph_with_comments(doc, comments);
 
-        let result = add_comment_reply(
-            &mut graph,
-            999,
-            2,
-            "Bob",
-            "2025-01-02T00:00:00Z",
-            "reply",
-        );
+        let result = add_comment_reply(&mut graph, 999, 2, "Bob", "2025-01-02T00:00:00Z", "reply");
         assert!(result.is_err());
     }
 
@@ -374,8 +350,7 @@ mod tests {
 
         resolve_comment(&mut graph, 5).unwrap();
 
-        let result =
-            std::str::from_utf8(graph.xml_bytes(COMMENTS_PART).unwrap()).unwrap();
+        let result = std::str::from_utf8(graph.xml_bytes(COMMENTS_PART).unwrap()).unwrap();
         assert!(result.contains(r#"w:done="1""#));
     }
 

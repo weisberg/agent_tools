@@ -1,8 +1,14 @@
 # lira
 
-Local Jira for agents: a Rust CLI for local-first ticket management with
-canonical YAML under `~/.lira/`, structured JSON output, atomic task lists,
-comments, history, and agent claiming.
+Local-first issue tracking for agents: a Rust CLI for durable YAML tickets under
+`~/.lira/`, structured JSON output, required acceptance criteria, atomic task
+lists, comments, history, links, and agent claiming.
+
+lira is designed to be the local tracker/control-plane layer for agent work. It
+can reference read-only Jira parents, sync peer GitHub Issues, and expose
+Symphony-compatible normalized issue projections for an external runner. It does
+not require a daemon, database server, network access, or Codex app-server for
+local ticket operations.
 
 ## Current status
 
@@ -22,9 +28,14 @@ Implemented local MVP foundation:
 - `LIRA_HOME` override support via `lira-store`.
 - JSONL mutation logging under `~/.lira/logs/`.
 
-Still pending for full PRD v1.0:
+Planned by the updated v0.5 PRD/dev plan:
 
-- SQLite/FTS index and search/query/board.
+- Symphony-compatible local tracker helpers:
+  `lira candidates`, `lira issue show`, `lira issue current`, and
+  `lira workflow symphony export|validate`.
+- Normalized issue projections with blockers, active/terminal status policy,
+  and deterministic candidate sorting.
+- SQLite/FTS index and search/query/board if filesystem search needs help.
 - Read-only Jira bridge.
 - GitHub binding, push/pull, three-way sync, and conflict resolution.
 - Generated JSON schemas, release packaging, and docs generation.
@@ -46,3 +57,18 @@ cargo run -p lira-cli -- task done ORION-1 T1 --json
 cargo run -p lira-cli -- mv ORION-1 done --json
 cargo run -p lira-cli -- doctor --json
 ```
+
+## Symphony Boundary
+
+lira can support a Symphony-style runner by serving as the issue tracker:
+
+```bash
+lira candidates --project ORION --json
+lira claim ORION-42 --agent symphony-runner --json
+lira issue current --ids ORION-42 --json
+lira comment ORION-42 "Runner posted proof of work." --json
+lira mv ORION-42 in-review --json
+```
+
+The runner remains responsible for polling cadence, Codex app-server sessions,
+workspaces, retries, stall detection, token accounting, and CI/PR shepherding.

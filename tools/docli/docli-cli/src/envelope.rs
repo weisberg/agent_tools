@@ -2,7 +2,11 @@ use docli_core::Envelope;
 use serde::Serialize;
 
 /// Emit an envelope in the requested format to stdout.
-pub fn emit<T: Serialize>(envelope: &Envelope<T>, format: &str, pretty: bool) -> Result<(), String> {
+pub fn emit<T: Serialize>(
+    envelope: &Envelope<T>,
+    format: &str,
+    pretty: bool,
+) -> Result<(), String> {
     let output = match format {
         "yaml" => serde_yaml::to_string(envelope).map_err(|e| e.to_string())?,
         "text" => {

@@ -108,7 +108,10 @@ fn run_unpack(args: UnpackArgs, format: &str, pretty: bool) -> i32 {
     }
 }
 
-fn execute_unpack(args: &UnpackArgs, _builder: &mut EnvelopeBuilder) -> Result<UnpackData, DocliError> {
+fn execute_unpack(
+    args: &UnpackArgs,
+    _builder: &mut EnvelopeBuilder,
+) -> Result<UnpackData, DocliError> {
     let package = Package::open(&args.file)?;
 
     fs::create_dir_all(&args.dir)?;
@@ -139,9 +142,11 @@ fn execute_unpack(args: &UnpackArgs, _builder: &mut EnvelopeBuilder) -> Result<U
                 message: e.to_string(),
             })?;
         let mut buf = Vec::new();
-        entry.read_to_end(&mut buf).map_err(|e| DocliError::CommitFailed {
-            message: e.to_string(),
-        })?;
+        entry
+            .read_to_end(&mut buf)
+            .map_err(|e| DocliError::CommitFailed {
+                message: e.to_string(),
+            })?;
         fs::write(&dest, buf)?;
         count += 1;
     }
@@ -280,12 +285,13 @@ fn run_query(args: QueryArgs, format: &str, pretty: bool) -> i32 {
 fn execute_query(args: &QueryArgs) -> Result<QueryData, DocliError> {
     let package = Package::open(&args.file)?;
 
-    let doc_xml = package
-        .xml_parts
-        .get("word/document.xml")
-        .ok_or_else(|| DocliError::InvalidDocx {
-            message: "missing word/document.xml".to_string(),
-        })?;
+    let doc_xml =
+        package
+            .xml_parts
+            .get("word/document.xml")
+            .ok_or_else(|| DocliError::InvalidDocx {
+                message: "missing word/document.xml".to_string(),
+            })?;
 
     let xml = std::str::from_utf8(doc_xml).map_err(|e| DocliError::InvalidDocx {
         message: e.to_string(),
@@ -299,10 +305,7 @@ fn execute_query(args: &QueryArgs) -> Result<QueryData, DocliError> {
         .descendants()
         .filter(|node| node.is_element() && node.tag_name().name() == tag_name)
         .map(|node| {
-            let text_content: String = node
-                .descendants()
-                .filter_map(|d| d.text())
-                .collect();
+            let text_content: String = node.descendants().filter_map(|d| d.text()).collect();
             MatchInfo {
                 tag: node.tag_name().name().to_string(),
                 text: if text_content.is_empty() {
@@ -401,10 +404,9 @@ fn execute_pack(args: &PackArgs) -> Result<PackData, DocliError> {
         count += 1;
     }
 
-    zip.finish()
-        .map_err(|e| DocliError::CommitFailed {
-            message: e.to_string(),
-        })?;
+    zip.finish().map_err(|e| DocliError::CommitFailed {
+        message: e.to_string(),
+    })?;
 
     Ok(PackData {
         source_dir: args.dir.display().to_string(),

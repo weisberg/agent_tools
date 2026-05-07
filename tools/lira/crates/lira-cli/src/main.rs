@@ -8,9 +8,14 @@ use lira_store::JsonlEvent;
 use serde::Serialize;
 use serde_json::json;
 use std::io::Read;
+use std::path::Path;
 
 #[derive(Parser, Debug)]
-#[command(name = "lira", version, about = "Local Jira for agents")]
+#[command(
+    name = "lira",
+    version,
+    about = "Local-first issue tracking for agents"
+)]
 struct Cli {
     #[arg(long, global = true)]
     json: bool,
@@ -85,6 +90,8 @@ enum Commands {
         agent: String,
         #[arg(long)]
         force: bool,
+        #[arg(long)]
+        reason: Option<String>,
     },
     Release {
         id: String,
@@ -100,6 +107,22 @@ enum Commands {
         project: Option<String>,
         #[arg(long)]
         agent: Option<String>,
+    },
+    Candidates {
+        #[arg(long)]
+        project: Option<String>,
+        #[arg(long = "state")]
+        state: Option<String>,
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    Issue {
+        #[command(subcommand)]
+        command: IssueCommands,
+    },
+    Workflow {
+        #[command(subcommand)]
+        command: WorkflowCommands,
     },
     Label {
         #[command(subcommand)]
@@ -217,6 +240,38 @@ enum HistoryCommands {
 }
 
 #[derive(Subcommand, Debug)]
+enum IssueCommands {
+    Show {
+        id: String,
+    },
+    Current {
+        #[arg(long = "ids", required = true)]
+        ids: Vec<String>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum WorkflowCommands {
+    Symphony {
+        #[command(subcommand)]
+        command: SymphonyWorkflowCommands,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum SymphonyWorkflowCommands {
+    Export {
+        #[arg(long)]
+        project: String,
+    },
+    Validate {
+        path: String,
+        #[arg(long)]
+        project: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum LabelCommands {
     Add { id: String, label: String },
     Remove { id: String, label: String },
@@ -269,12 +324,24 @@ fn run(cli: Cli) -> LiraResult<()> {
             author,
         }) => cmd_comment(cli.json, &id, body, stdin, author),
         Some(Commands::History { command }) => cmd_history(cli.json, command),
-        Some(Commands::Claim { id, agent, force }) => cmd_claim(cli.json, &id, &agent, force),
+        Some(Commands::Claim {
+            id,
+            agent,
+            force,
+            reason,
+        }) => cmd_claim(cli.json, &id, &agent, force, reason),
         Some(Commands::Release { id, agent }) => cmd_release(cli.json, &id, agent),
         Some(Commands::Active { agent }) => cmd_active(cli.json, &agent),
         Some(Commands::Next { project, agent }) => {
             cmd_next(cli.json, project.as_deref(), agent.as_deref())
         }
+        Some(Commands::Candidates {
+            project,
+            state,
+            limit,
+        }) => cmd_candidates(cli.json, project.as_deref(), state.as_deref(), limit),
+        Some(Commands::Issue { command }) => cmd_issue(cli.json, command),
+        Some(Commands::Workflow { command }) => cmd_workflow(cli.json, command),
         Some(Commands::Label { command }) => cmd_label(cli.json, command),
         Some(Commands::Link {
             id,
@@ -308,15 +375,7 @@ fn cmd_version(json: bool) -> LiraResult<()> {
 
 fn cmd_init(json: bool, dry_run: bool) -> LiraResult<()> {
     let report = lira_store::init_workspace(dry_run)?;
-    output(
-        json,
-        report,
-        if dry_run {
-            "would initialize workspace".to_string()
-        } else {
-            "initialized workspace".to_string()
-        },
-    )
+    output(json, report, "initialized workspace".to_string())
 }
 
 fn cmd_doctor(json: bool) -> LiraResult<()> {
@@ -364,9 +423,6 @@ fn cmd_new(json: bool, args: NewArgs) -> LiraResult<()> {
     } else {
         args.description
     };
-    let acceptance_criteria = normalize_nonempty(args.acceptance_criteria);
-    let task_titles = normalize_nonempty(args.task);
-    let parent = args.parent_jira.map(ParentRef::jira);
     let ticket = Ticket::new(
         id.clone(),
         args.project.clone(),
@@ -376,9 +432,9 @@ fn cmd_new(json: bool, args: NewArgs) -> LiraResult<()> {
         args.priority,
         args.assignee,
         args.reporter,
-        parent,
-        acceptance_criteria,
-        task_titles,
+        args.parent_jira.map(ParentRef::jira),
+        normalize_nonempty(args.acceptance_criteria),
+        normalize_nonempty(args.task),
         args.actor,
     );
     lira_store::write_ticket(&ticket)?;
@@ -400,15 +456,7 @@ fn cmd_show(json: bool, id: &str) -> LiraResult<()> {
 fn cmd_ls(json: bool, project: Option<&str>, status: Option<&str>) -> LiraResult<()> {
     let tickets = lira_store::list_tickets(project, status)?;
     let summaries: Vec<TicketSummary> = tickets.iter().map(TicketSummary::from).collect();
-    output(
-        json,
-        json!({ "tickets": summaries }),
-        summaries
-            .iter()
-            .map(|summary| summary.id.as_str())
-            .collect::<Vec<_>>()
-            .join("\n"),
-    )
+    output(json, json!({ "tickets": summaries }), "tickets".to_string())
 }
 
 fn cmd_search(json: bool, query: &str, project: Option<&str>) -> LiraResult<()> {
@@ -453,11 +501,11 @@ fn cmd_query(json: bool, args: QueryArgs) -> LiraResult<()> {
                 })
             })
             .filter(|ticket| {
-                args.parent_jira.as_ref().is_none_or(|key| {
+                args.parent_jira.as_ref().is_none_or(|jira| {
                     ticket
                         .parent
                         .as_ref()
-                        .is_some_and(|parent| parent.parent_type == "jira" && parent.id == *key)
+                        .is_some_and(|parent| parent.parent_type == "jira" && parent.id == *jira)
                 })
             })
             .map(TicketSummary::from)
@@ -470,42 +518,30 @@ fn cmd_query(json: bool, args: QueryArgs) -> LiraResult<()> {
 }
 
 fn cmd_count(json: bool, group_by: &str, project: Option<&str>) -> LiraResult<()> {
-    let mut counts = std::collections::BTreeMap::<String, usize>::new();
+    let mut counts = std::collections::BTreeMap::new();
     for ticket in lira_store::list_tickets(project, None)? {
-        match group_by {
-            "status" => *counts.entry(ticket.status).or_default() += 1,
-            "priority" => *counts.entry(ticket.priority).or_default() += 1,
-            "assignee" => {
-                *counts
-                    .entry(ticket.assignee.unwrap_or_else(|| "unassigned".to_string()))
-                    .or_default() += 1;
-            }
-            "label" => {
-                if ticket.labels.is_empty() {
-                    *counts.entry("unlabeled".to_string()).or_default() += 1;
-                } else {
-                    for label in ticket.labels {
-                        *counts.entry(label).or_default() += 1;
-                    }
-                }
-            }
-            _ => {
+        let key = match group_by {
+            "status" => ticket.status,
+            "priority" => ticket.priority,
+            other => {
                 return Err(LiraError::new(
                     "E_INVALID_GROUP_BY",
-                    "group-by must be one of status, priority, assignee, or label.",
+                    format!("Unsupported group-by '{other}'."),
                 ));
             }
-        }
+        };
+        *counts.entry(key).or_insert(0usize) += 1;
     }
     output(
         json,
         json!({ "group_by": group_by, "counts": counts }),
-        format!("count by {group_by}"),
+        "counts".to_string(),
     )
 }
 
 fn cmd_board(json: bool, project: Option<&str>) -> LiraResult<()> {
-    let mut board = std::collections::BTreeMap::<String, Vec<TicketSummary>>::new();
+    let mut board: std::collections::BTreeMap<String, Vec<TicketSummary>> =
+        std::collections::BTreeMap::new();
     for ticket in lira_store::list_tickets(project, None)? {
         board
             .entry(ticket.status.clone())
@@ -526,7 +562,7 @@ fn cmd_mv(json: bool, id: &str, status: &str, force: bool) -> LiraResult<()> {
         ticket.status = status.to_string();
         ticket.touch();
         ticket.add_history(
-            "status_changed",
+            "ticket_moved",
             format!("Moved from {previous} to {status}"),
             None,
         );
@@ -554,14 +590,13 @@ fn cmd_task(json: bool, command: TaskCommands) -> LiraResult<()> {
         }
         TaskCommands::Add { id, title, tag } => {
             let updated = lira_store::update_ticket(&id, |ticket| {
-                let now = now_string();
                 let task = Task {
                     id: ticket.next_task_id(),
                     title: title.clone(),
                     status: "todo".to_string(),
                     tags: tag.clone(),
-                    created_on: now.clone(),
-                    last_modified: now,
+                    created_on: now_string(),
+                    last_modified: now_string(),
                 };
                 ticket.tasks.push(task.clone());
                 ticket.touch();
@@ -624,28 +659,28 @@ fn cmd_comment(
     json: bool,
     id: &str,
     body: Option<String>,
-    from_stdin: bool,
+    stdin: bool,
     author: Option<String>,
 ) -> LiraResult<()> {
-    let body = if from_stdin {
+    let body = if stdin {
         read_stdin()?
     } else {
         body.ok_or_else(|| LiraError::new("E_COMMENT_REQUIRED", "Comment body is required."))?
     };
     let updated = lira_store::update_ticket(id, |ticket| {
-        let comment_id = ticket.next_comment_id();
-        ticket.comments.push(Comment {
-            id: comment_id.clone(),
+        let comment = Comment {
+            id: ticket.next_comment_id(),
             body: body.clone(),
             author: author.clone(),
             created_on: now_string(),
             sync_github: false,
             github_id: None,
-        });
+        };
+        ticket.comments.push(comment.clone());
         ticket.touch();
         ticket.add_history(
             "comment_added",
-            format!("Added comment {comment_id}"),
+            format!("Added comment {}", comment.id),
             author.clone(),
         );
         Ok(())
@@ -700,7 +735,13 @@ fn cmd_history(json: bool, command: HistoryCommands) -> LiraResult<()> {
     }
 }
 
-fn cmd_claim(json: bool, id: &str, agent: &str, force: bool) -> LiraResult<()> {
+fn cmd_claim(
+    json: bool,
+    id: &str,
+    agent: &str,
+    force: bool,
+    reason: Option<String>,
+) -> LiraResult<()> {
     let updated = lira_store::update_ticket(id, |ticket| {
         if ticket
             .agent
@@ -716,6 +757,10 @@ fn cmd_claim(json: bool, id: &str, agent: &str, force: bool) -> LiraResult<()> {
                     ticket.agent.claimed_by.clone().unwrap()
                 ),
             )
+            .details(json!({
+                "owner": ticket.agent.claimed_by,
+                "claimed_at": ticket.agent.claimed_at,
+            }))
             .suggestion(
                 format!(
                     "lira active --agent {} --json",
@@ -724,16 +769,25 @@ fn cmd_claim(json: bool, id: &str, agent: &str, force: bool) -> LiraResult<()> {
                 "inspect current owner",
             ));
         }
+        let now = now_string();
         ticket.agent.claimed_by = Some(agent.to_string());
-        ticket.agent.claimed_at = Some(now_string());
+        ticket.agent.claimed_at = Some(now.clone());
+        let metadata = ticket.orchestration.get_or_insert_with(Default::default);
+        metadata.last_claimed_by = Some(agent.to_string());
+        metadata.last_claimed_at = Some(now);
         ticket.touch();
+        let reason_suffix = reason
+            .as_ref()
+            .map(|reason| format!(": {reason}"))
+            .unwrap_or_default();
         ticket.add_history(
             "claimed",
-            format!("Claimed by {agent}"),
+            format!("Claimed by {agent}{reason_suffix}"),
             Some(agent.to_string()),
         );
         Ok(())
     })?;
+    let issue = lira_store::normalized_issue(id)?;
     log_event(
         "claimed",
         Some(id),
@@ -741,7 +795,11 @@ fn cmd_claim(json: bool, id: &str, agent: &str, force: bool) -> LiraResult<()> {
         "ok",
         json!({ "agent": agent }),
     )?;
-    output(json, updated, format!("claimed {id}"))
+    output(
+        json,
+        json!({ "claimed": true, "previous_owner": null, "ticket": updated, "issue": issue }),
+        format!("claimed {id}"),
+    )
 }
 
 fn cmd_release(json: bool, id: &str, agent: Option<String>) -> LiraResult<()> {
@@ -756,6 +814,9 @@ fn cmd_release(json: bool, id: &str, agent: Option<String>) -> LiraResult<()> {
         }
         let previous = ticket.agent.claimed_by.take();
         ticket.agent.claimed_at = None;
+        if let Some(metadata) = &mut ticket.orchestration {
+            metadata.last_released_at = Some(now_string());
+        }
         ticket.touch();
         ticket.add_history(
             "released",
@@ -788,20 +849,121 @@ fn cmd_active(json: bool, agent: &str) -> LiraResult<()> {
 }
 
 fn cmd_next(json: bool, project: Option<&str>, _agent: Option<&str>) -> LiraResult<()> {
-    let mut tickets: Vec<Ticket> = lira_store::list_tickets(project, None)?
+    let ticket = lira_store::candidate_issues(project, None)?
         .into_iter()
-        .filter(|ticket| {
-            ticket.agent.claimed_by.is_none()
-                && !matches!(ticket.status.as_str(), "done" | "cancelled" | "archived")
-        })
-        .collect();
-    tickets.sort_by(|a, b| {
-        priority_rank(&b.priority)
-            .cmp(&priority_rank(&a.priority))
-            .then_with(|| a.timestamps.created.cmp(&b.timestamps.created))
-    });
-    let ticket = tickets.first().map(TicketSummary::from);
+        .next();
     output(json, json!({ "ticket": ticket }), "next ticket".to_string())
+}
+
+fn cmd_candidates(
+    json: bool,
+    project: Option<&str>,
+    state: Option<&str>,
+    limit: Option<usize>,
+) -> LiraResult<()> {
+    let mut issues = lira_store::candidate_issues(project, state)?;
+    if let Some(limit) = limit {
+        issues.truncate(limit);
+    }
+    output(
+        json,
+        json!({ "issues": issues }),
+        "candidate issues".to_string(),
+    )
+}
+
+fn cmd_issue(json: bool, command: IssueCommands) -> LiraResult<()> {
+    match command {
+        IssueCommands::Show { id } => {
+            let issue = lira_store::normalized_issue(&id)?;
+            output(json, json!({ "issue": issue }), format!("issue {id}"))
+        }
+        IssueCommands::Current { ids } => {
+            let issues = lira_store::normalized_issues(&ids)?;
+            output(
+                json,
+                json!({ "issues": issues }),
+                "current issues".to_string(),
+            )
+        }
+    }
+}
+
+fn cmd_workflow(json: bool, command: WorkflowCommands) -> LiraResult<()> {
+    match command {
+        WorkflowCommands::Symphony { command } => match command {
+            SymphonyWorkflowCommands::Export { project } => {
+                lira_store::read_project(&project)?;
+                let workflow = lira_store::read_workflow(&project)?;
+                let front_matter = json!({
+                    "tracker": {
+                        "kind": "lira",
+                        "project": project,
+                        "active_states": workflow.orchestration.active_statuses,
+                        "terminal_states": workflow.orchestration.terminal_statuses,
+                    }
+                });
+                output(json, front_matter, "workflow tracker export".to_string())
+            }
+            SymphonyWorkflowCommands::Validate { path, project } => {
+                lira_store::read_project(&project)?;
+                let body = std::fs::read_to_string(&path).map_err(|err| {
+                    LiraError::new(
+                        "E_WORKFLOW_FILE_NOT_FOUND",
+                        format!("Could not read {}.", Path::new(&path).display()),
+                    )
+                    .details(json!({ "error": err.to_string() }))
+                })?;
+                validate_workflow_front_matter(&body, &project)?;
+                output(
+                    json,
+                    json!({ "valid": true, "project": project, "path": path }),
+                    "workflow valid".to_string(),
+                )
+            }
+        },
+    }
+}
+
+fn validate_workflow_front_matter(body: &str, project: &str) -> LiraResult<()> {
+    let Some(rest) = body.strip_prefix("---") else {
+        return Err(LiraError::new(
+            "E_WORKFLOW_PARSE",
+            "WORKFLOW.md must start with YAML front matter.",
+        ));
+    };
+    let Some((front_matter, _markdown)) = rest.split_once("---") else {
+        return Err(LiraError::new(
+            "E_WORKFLOW_PARSE",
+            "WORKFLOW.md front matter is not closed.",
+        ));
+    };
+    let value: serde_yaml::Value = serde_yaml::from_str(front_matter).map_err(|err| {
+        LiraError::new(
+            "E_WORKFLOW_PARSE",
+            "Could not parse WORKFLOW.md front matter.",
+        )
+        .details(json!({ "error": err.to_string() }))
+    })?;
+    let tracker = value
+        .get("tracker")
+        .ok_or_else(|| LiraError::new("E_WORKFLOW_PARSE", "Missing tracker block."))?;
+    let kind = tracker.get("kind").and_then(|value| value.as_str());
+    if kind != Some("lira") {
+        return Err(LiraError::new(
+            "E_UNSUPPORTED_TRACKER_KIND",
+            "Only tracker.kind: lira is supported.",
+        ));
+    }
+    if let Some(configured_project) = tracker.get("project").and_then(|value| value.as_str()) {
+        if configured_project != project {
+            return Err(LiraError::new(
+                "E_WORKFLOW_PARSE",
+                format!("WORKFLOW.md project '{configured_project}' does not match '{project}'."),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn cmd_label(json: bool, command: LabelCommands) -> LiraResult<()> {
@@ -922,17 +1084,6 @@ fn log_event(
     })
 }
 
-fn priority_rank(priority: &str) -> u8 {
-    match priority {
-        "highest" => 5,
-        "high" => 4,
-        "medium" => 3,
-        "low" => 2,
-        "lowest" => 1,
-        _ => 0,
-    }
-}
-
 fn extend_unique(target: &mut Vec<String>, values: &[String]) {
     for value in values {
         if !target.contains(value) {
@@ -961,10 +1112,6 @@ fn ticket_matches_search(ticket: &Ticket, needle: &str) -> bool {
         haystack.push_str(&task.title.to_ascii_lowercase());
         haystack.push('\n');
         haystack.push_str(&task.tags.join(" ").to_ascii_lowercase());
-    }
-    for comment in &ticket.comments {
-        haystack.push('\n');
-        haystack.push_str(&comment.body.to_ascii_lowercase());
     }
     haystack.contains(needle)
 }

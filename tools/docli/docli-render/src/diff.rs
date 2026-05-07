@@ -1,6 +1,6 @@
-use similar::{ChangeTag, TextDiff};
 use docli_query::DocumentIndex;
 use serde::Serialize;
+use similar::{ChangeTag, TextDiff};
 
 #[derive(Debug, Serialize)]
 pub struct DiffResult {

@@ -2,6 +2,8 @@
 
 `xli` is a Rust CLI for deterministic, JSON-first Excel workbook operations. It is the fast core in this directory; `xli-companion` is the Python sidecar for heavier validation, reconciliation, and report generation.
 
+For agent-facing operating guidance, see [`SKILL.md`](SKILL.md).
+
 ## Current Status
 
 Implemented today:

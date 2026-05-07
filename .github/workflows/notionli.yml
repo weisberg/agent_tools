@@ -1,0 +1,39 @@
+name: notionli
+
+on:
+  push:
+    paths:
+      - ".github/workflows/notionli.yml"
+      - "tools/notionli/**"
+  pull_request:
+    paths:
+      - ".github/workflows/notionli.yml"
+      - "tools/notionli/**"
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: Verify notionli
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/notionli
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/notionli
+
+      - name: Release audit
+        run: ./scripts/release_audit.sh
+
+      - name: Package
+        run: cargo package

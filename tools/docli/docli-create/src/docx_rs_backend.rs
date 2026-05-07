@@ -51,8 +51,7 @@ fn append_block(mut docx: Docx, block: &ContentBlock) -> Docx {
         }
         ContentBlock::Paragraph { paragraph } => match paragraph {
             ParagraphContent::Text(text) => {
-                docx = docx
-                    .add_paragraph(Paragraph::new().add_run(Run::new().add_text(text)));
+                docx = docx.add_paragraph(Paragraph::new().add_run(Run::new().add_text(text)));
             }
             ParagraphContent::Block(block) => {
                 let mut para = Paragraph::new();
@@ -60,18 +59,15 @@ fn append_block(mut docx: Docx, block: &ContentBlock) -> Docx {
                     para = para.style(style);
                 }
                 for run in &block.runs {
-                    match run {
-                        docli_core::InlineRun::Text(text_run) => {
-                            let mut r = Run::new().add_text(&text_run.text);
-                            if text_run.bold {
-                                r = r.bold();
-                            }
-                            if text_run.italic {
-                                r = r.italic();
-                            }
-                            para = para.add_run(r);
+                    if let docli_core::InlineRun::Text(text_run) = run {
+                        let mut r = Run::new().add_text(&text_run.text);
+                        if text_run.bold {
+                            r = r.bold();
                         }
-                        _ => {} // footnote, link — skip for now
+                        if text_run.italic {
+                            r = r.italic();
+                        }
+                        para = para.add_run(r);
                     }
                 }
                 docx = docx.add_paragraph(para);
@@ -121,9 +117,8 @@ fn append_block(mut docx: Docx, block: &ContentBlock) -> Docx {
             docx = docx.add_table(Table::new(rows));
         }
         ContentBlock::PageBreak { page_break: true } => {
-            docx = docx.add_paragraph(
-                Paragraph::new().add_run(Run::new().add_break(BreakType::Page)),
-            );
+            docx =
+                docx.add_paragraph(Paragraph::new().add_run(Run::new().add_break(BreakType::Page)));
         }
         _ => {} // Image, Toc, Columns, Ref, PageBreak(false) — skip or stub
     }

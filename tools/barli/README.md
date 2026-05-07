@@ -2,6 +2,8 @@
 
 A macOS menu bar app that discovers Python functions via decorators, hot-reloads on file changes, and builds its menu from `config.yaml`.
 
+For agent-facing operating guidance, see [`SKILL.md`](SKILL.md).
+
 ## Quick Start
 
 ```bash

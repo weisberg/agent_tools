@@ -111,19 +111,11 @@ mod tests {
         let xml = doc_with_text(&["Hello World", "Hello Again"]);
         let mut graph = make_graph("word/document.xml", &xml);
 
-        let count = find_and_replace(
-            &mut graph,
-            "word/document.xml",
-            "Hello",
-            "Hi",
-            &Scope::All,
-        )
-        .unwrap();
+        let count =
+            find_and_replace(&mut graph, "word/document.xml", "Hello", "Hi", &Scope::All).unwrap();
 
         assert_eq!(count, 2);
-        let result =
-            std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap())
-                .unwrap();
+        let result = std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap()).unwrap();
         assert!(!result.contains("Hello"));
         assert!(result.contains("Hi World"));
         assert!(result.contains("Hi Again"));
@@ -144,9 +136,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(count, 1);
-        let result =
-            std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap())
-                .unwrap();
+        let result = std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap()).unwrap();
         assert!(result.contains("Hi World"));
         assert!(result.contains("Hello Again"));
     }
@@ -172,8 +162,7 @@ mod tests {
     fn empty_find_returns_error() {
         let xml = doc_with_text(&["Hello"]);
         let mut graph = make_graph("word/document.xml", &xml);
-        let result =
-            find_and_replace(&mut graph, "word/document.xml", "", "x", &Scope::All);
+        let result = find_and_replace(&mut graph, "word/document.xml", "", "x", &Scope::All);
         assert!(result.is_err());
     }
 }

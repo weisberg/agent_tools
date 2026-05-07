@@ -6,8 +6,8 @@ rust-version.workspace = true
 version.workspace = true
 
 [dependencies]
-docli-core = { path = "../docli-core" }
-docli-query = { path = "../docli-query" }
+docli-core = { path = "../docli-core", version = "0.1.0" }
+docli-query = { path = "../docli-query", version = "0.1.0" }
 ooxmlsdk.workspace = true
 quick-xml.workspace = true
 roxmltree.workspace = true

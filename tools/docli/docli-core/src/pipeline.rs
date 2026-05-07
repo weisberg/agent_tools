@@ -28,12 +28,16 @@ pub struct PipelineContext {
     pub warnings: Vec<String>,
 }
 
+pub type ApplyOpsHook<'a> = &'a dyn Fn(&mut PipelineContext) -> Result<(), DocliError>;
+pub type ValidateHook<'a> = &'a dyn Fn(&PipelineContext) -> Result<(), DocliError>;
+pub type RenderCheckHook<'a> = &'a dyn Fn(&Path) -> Result<(), DocliError>;
+
 #[derive(Default)]
 pub struct PipelineHooks<'a> {
-    pub apply_ops: Option<&'a dyn Fn(&mut PipelineContext) -> Result<(), DocliError>>,
-    pub validate: Option<&'a dyn Fn(&PipelineContext) -> Result<(), DocliError>>,
-    pub serialize_touched_parts: Option<&'a dyn Fn(&mut PipelineContext) -> Result<(), DocliError>>,
-    pub render_check: Option<&'a dyn Fn(&Path) -> Result<(), DocliError>>,
+    pub apply_ops: Option<ApplyOpsHook<'a>>,
+    pub validate: Option<ValidateHook<'a>>,
+    pub serialize_touched_parts: Option<ApplyOpsHook<'a>>,
+    pub render_check: Option<RenderCheckHook<'a>>,
 }
 
 #[derive(Clone, Debug)]

@@ -26,19 +26,17 @@ VALID_INSPECT_PAYLOAD: dict = {
     "command": "inspect",
     "data": {
         "file": "report.docx",
+        "source_hash": "acd218fb7fd144d8694e8f06cb083b64b7092658f3368f62786d19eabfeba389",
+        "entry_count": 9,
         "file_size_bytes": 48230,
         "page_size": "letter",
         "orientation": "portrait",
         "sections": 3,
-        "paragraphs": {
-            "count": 47,
-            "by_style": {
-                "Heading1": [0, 12, 28],
-                "Heading2": [1, 5, 13, 19, 29, 35],
-                "Normal": [2, 3, 4, 6, 7],
-                "ListParagraph": [8, 9, 10, 11],
-            },
-        },
+        "paragraphs": [
+            {"index": 0, "style": "Heading1", "text": "Executive Summary"},
+            {"index": 1, "style": "Heading2", "text": "Key Findings"},
+            {"index": 2, "style": None, "text": "Revenue increased by 12%."},
+        ],
         "headings": [
             {"index": 0, "level": 1, "text": "Executive Summary"},
             {"index": 1, "level": 2, "text": "Key Findings"},
@@ -72,6 +70,7 @@ VALID_INSPECT_PAYLOAD: dict = {
             "deletions": 3,
             "authors": ["Claude"],
         },
+        "bookmarks": {},
         "styles": ["Heading1", "Heading2", "Normal", "ListParagraph", "Caption"],
         "fonts": ["Arial", "Calibri"],
         "word_count": 2847,
@@ -84,7 +83,11 @@ VALID_VALIDATE_PAYLOAD: dict = {
     "ok": True,
     "command": "validate",
     "data": {
-        "valid": True,
+        "file": "report.docx",
+        "issues": [],
+        "error_count": 0,
+        "warning_count": 1,
+        "repaired": False,
         "repairs": 2,
         "repairs_detail": [
             {
@@ -210,6 +213,12 @@ class TestValidateInspectOutput:
         with pytest.raises(SchemaValidationError):
             validate_inspect_output(payload)
 
+    def test_inspect_invalid_paragraph_item(self) -> None:
+        payload = copy.deepcopy(VALID_INSPECT_PAYLOAD)
+        del payload["data"]["paragraphs"][0]["text"]
+        with pytest.raises(SchemaValidationError):
+            validate_inspect_output(payload)
+
     def test_inspect_minimal_data(self) -> None:
         """Only the required fields in data — should still pass."""
         payload = {
@@ -217,7 +226,7 @@ class TestValidateInspectOutput:
             "command": "inspect",
             "data": {
                 "file": "test.docx",
-                "paragraphs": {"count": 0},
+                "paragraphs": [],
             },
         }
         validate_inspect_output(payload)
@@ -234,9 +243,9 @@ class TestValidateValidateOutput:
     def test_valid_validate_output(self) -> None:
         validate_validate_output(VALID_VALIDATE_PAYLOAD)
 
-    def test_validate_missing_valid_field(self) -> None:
+    def test_validate_missing_error_count(self) -> None:
         payload = copy.deepcopy(VALID_VALIDATE_PAYLOAD)
-        del payload["data"]["valid"]
+        del payload["data"]["error_count"]
         with pytest.raises(SchemaValidationError):
             validate_validate_output(payload)
 
@@ -250,7 +259,19 @@ class TestValidateValidateOutput:
         payload = {
             "ok": True,
             "command": "validate",
-            "data": {"valid": False},
+            "data": {
+                "issues": [
+                    {
+                        "code": "missing-required-part",
+                        "message": "required package part is missing",
+                        "severity": "error",
+                        "part": "word/document.xml",
+                    }
+                ],
+                "error_count": 1,
+                "warning_count": 0,
+                "repaired": False,
+            },
         }
         validate_validate_output(payload)
 
@@ -266,7 +287,7 @@ class TestCheckDocliCompatibility:
     def test_compatible_payload(self) -> None:
         issues = check_docli_compatibility(
             VALID_INSPECT_PAYLOAD,
-            required_fields=["paragraphs.count", "headings", "file"],
+            required_fields=["paragraphs", "headings", "file"],
         )
         assert issues == []
 
@@ -285,7 +306,7 @@ class TestCheckDocliCompatibility:
     def test_missing_nested_field(self) -> None:
         issues = check_docli_compatibility(
             VALID_INSPECT_PAYLOAD,
-            required_fields=["paragraphs.count", "nonexistent_field"],
+            required_fields=["paragraphs", "nonexistent_field"],
         )
         assert len(issues) == 1
         assert "nonexistent_field" in issues[0]
@@ -293,7 +314,7 @@ class TestCheckDocliCompatibility:
     def test_error_payload_skips_data_checks(self) -> None:
         issues = check_docli_compatibility(
             ERROR_PAYLOAD,
-            required_fields=["paragraphs.count"],
+            required_fields=["paragraphs"],
         )
         assert issues == []
 

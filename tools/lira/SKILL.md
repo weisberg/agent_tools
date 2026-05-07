@@ -2,29 +2,31 @@
 name: lira
 description: >-
   Operate the lira CLI, a local agent-native task system where local tickets are
-  sub-tickets of canonical Jira parents and are decomposed into acceptance
-  criteria plus atomic tasks. Use when the user wants to break down a Jira
-  ticket into agent work; create, claim, work, comment on, sync, query, or close
-  local tickets; manage acceptance criteria and atomic tasks; resolve GitHub
-  sync conflicts; or coordinate local task assignment through ~/.lira/.
+  local-first issue records decomposed into acceptance criteria plus atomic
+  tasks. Use when the user wants to break down Jira/GitHub/local work into agent
+  tickets; create, claim, work, comment on, sync, query, or close local tickets;
+  manage acceptance criteria and atomic tasks; resolve GitHub sync conflicts; or
+  expose local candidates and normalized issue projections for a Symphony-style
+  runner through ~/.lira/.
 ---
 
 # lira - Local Jira for Agents
 
-`lira` is a Rust CLI that gives agents a durable, inspectable, local workspace
-for decomposing Jira tickets into agent-executable subtickets. A local lira
-ticket is normally a child of a canonical Jira ticket: Jira holds the work item
-the team agreed on; lira holds the agent's local breakdown into acceptance
-criteria and atomic tasks the agent can execute, comment on, and complete
-without touching Jira directly.
+`lira` is a Rust CLI that gives agents a durable, inspectable, local tracker for
+decomposing work into agent-executable tickets. A local lira ticket can be a
+child of a canonical Jira ticket, a peer of a GitHub Issue, or a purely local
+agent ticket. lira holds the agent's local breakdown into acceptance criteria
+and atomic tasks the agent can execute, comment on, and complete.
 
 Tickets live as YAML under `~/.lira/`, can optionally bind to a peer GitHub
 Issue for outside visibility, and never write back to Jira in v1. Jira is
-read-only context.
+read-only context. lira can also expose normalized issue projections and
+candidate lists for a Symphony-style orchestrator, but the runner/daemon remains
+outside lira.
 
 ## Mental Model
 
-The expected hierarchy has three layers:
+The expected planning hierarchy usually has three layers:
 
 1. Jira ticket, such as `VAN-1234`: the canonical, team-visible work item.
    Read-only from lira's perspective. Holds the high-level "what" and "why."
@@ -52,6 +54,12 @@ A lira ticket without a Jira parent is allowed but should be the exception, such
 as agent-internal infrastructure work with no team-level counterpart. If the
 user gives work without a Jira reference, ask whether one exists before creating
 a parentless ticket.
+
+For Symphony-style orchestration, treat lira as the local issue tracker/control
+plane. A runner may poll candidates, claim one ticket, launch Codex elsewhere,
+and write progress back through lira comments, history, task updates, and status
+moves. lira does not launch Codex app-server, own source-code workspaces, manage
+retry timers, or perform stall detection.
 
 ## Preflight
 
@@ -100,6 +108,10 @@ These are operational requirements, not style preferences:
 10. YAML is canonical. SQLite at `~/.lira/index/tickets.sqlite` and
     `~/.lira/gh-cache/` are caches. If they look wrong, run `lira reindex`; do
     not hand-edit.
+11. Orchestration reads are pure. `lira candidates`, `lira issue show`, and
+    `lira issue current` must not mutate tickets or create noisy logs.
+12. lira is the tracker, not the runner. Do not expect it to start Codex,
+    create per-issue workspaces, retry failed runs, or kill stalled sessions.
 
 ## Create From Jira
 
@@ -166,6 +178,32 @@ arbitrarily.
 
 Use `lira active --agent <name> --json` at the start of a session to recover
 state for an agent that already owns work.
+
+## Symphony-Style Candidate Reads
+
+For a local orchestrator or scripted runner, prefer the normalized issue surface:
+
+```bash
+lira candidates --project ORION --json
+lira issue show ORION-48 --json
+lira issue current --ids ORION-48 ORION-50 --json
+lira workflow symphony export --project ORION --json
+lira workflow symphony validate ./WORKFLOW.md --project ORION --json
+```
+
+`lira candidates` returns dispatch-eligible local tickets as normalized issues.
+It excludes terminal tickets, claimed tickets, tickets disabled for dispatch,
+and `todo` tickets blocked by non-terminal local blockers. Sort order is
+priority, then creation time, then identifier.
+
+After reading candidates, claim before starting work:
+
+```bash
+lira claim ORION-48 --agent symphony-runner --json
+```
+
+If claim fails with `E_CLAIM_HELD`, do not start a duplicate run. Re-read
+candidates or inspect the current owner with `lira active`.
 
 ## Work Tasks
 
@@ -406,6 +444,11 @@ Check `error.error_code` on JSON failures.
 | `E_INVALID_TRANSITION` | Run `lira project show <P> --json` to see allowed transitions for the current status. |
 | `E_INVALID_TASK_STATUS` / `E_INVALID_TASK_SCHEMA` | Re-read the task schema rules. Tasks have only six fields. |
 | `E_LOCK_UNAVAILABLE` | Another process holds the lock; wait briefly and retry, or run `lira doctor` if stale. |
+| `E_CLAIM_HELD` | Someone else owns the ticket. Do not start duplicate work unless the user approves a force claim. |
+| `E_NO_CANDIDATES` | No eligible local work matched the filters. Report that directly. |
+| `E_BLOCKED_BY_DEPENDENCY` | A non-terminal blocker prevents dispatch. Inspect `links.blocked_by`. |
+| `E_WORKFLOW_FILE_NOT_FOUND` / `E_WORKFLOW_PARSE` | The requested `WORKFLOW.md` helper could not read or parse runner config. |
+| `E_UNSUPPORTED_TRACKER_KIND` | The workflow helper only understands `tracker.kind: lira`. |
 | `E_GH_NOT_INSTALLED` / `E_GH_AUTH` | Local-only ops still work. Tell the user to install `gh` or run `gh auth login`. |
 | `E_GH_CONFLICT` | Three-way conflict; read the diff and ask the user before resolving. |
 | `E_GH_RATE_LIMIT` | Back off and retry later. Do not hammer. |
@@ -423,6 +466,8 @@ Avoid:
   `lira archive <ID>`.
 - Treating embedded tasks as separate tickets.
 - Skipping `--json`.
+- Treating `lira candidates` as a claim. It is only a read; always claim before
+  launching work.
 - Forcing past the completion guard.
 - Adding comments or assignees to tasks.
 - Hand-editing `~/.lira/gh-cache/`.
@@ -434,3 +479,5 @@ Avoid:
   only pull.
 - Cramming a multi-scope Jira ticket into one lira ticket. Create siblings
   sharing the same `--parent-jira` instead.
+- Expecting lira to run Codex, manage workspaces, or implement Symphony retry
+  loops. Use an external runner for that.

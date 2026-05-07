@@ -9,10 +9,7 @@ use crate::part_graph::PartGraph;
 /// remove `<w:del>` elements entirely (including content).
 ///
 /// Returns the number of changes accepted.
-pub fn accept_all(
-    graph: &mut PartGraph,
-    part_path: &str,
-) -> Result<usize, DocliError> {
+pub fn accept_all(graph: &mut PartGraph, part_path: &str) -> Result<usize, DocliError> {
     let xml = graph
         .xml_bytes(part_path)
         .ok_or_else(|| DocliError::InvalidDocx {
@@ -27,26 +24,23 @@ pub fn accept_all(
     let mut count = 0;
 
     // Remove <w:del ...>...</w:del> entirely (accept = discard deleted text).
-    let del_re = Regex::new(r"<w:del\b[^>]*>.*?</w:del>").map_err(|e| {
-        DocliError::InvalidOperation {
+    let del_re =
+        Regex::new(r"<w:del\b[^>]*>.*?</w:del>").map_err(|e| DocliError::InvalidOperation {
             message: format!("regex error: {e}"),
-        }
-    })?;
+        })?;
     count += del_re.find_iter(&result).count();
     result = del_re.replace_all(&result, "").to_string();
 
     // Remove <w:ins ...> wrappers but keep inner content (accept = keep inserted text).
-    let ins_open_re =
-        Regex::new(r"<w:ins\b[^>]*>").map_err(|e| DocliError::InvalidOperation {
-            message: format!("regex error: {e}"),
-        })?;
+    let ins_open_re = Regex::new(r"<w:ins\b[^>]*>").map_err(|e| DocliError::InvalidOperation {
+        message: format!("regex error: {e}"),
+    })?;
     count += ins_open_re.find_iter(&result).count();
     result = ins_open_re.replace_all(&result, "").to_string();
 
-    let ins_close_re =
-        Regex::new(r"</w:ins>").map_err(|e| DocliError::InvalidOperation {
-            message: format!("regex error: {e}"),
-        })?;
+    let ins_close_re = Regex::new(r"</w:ins>").map_err(|e| DocliError::InvalidOperation {
+        message: format!("regex error: {e}"),
+    })?;
     result = ins_close_re.replace_all(&result, "").to_string();
 
     graph.set_xml(part_path, result.into_bytes());
@@ -58,10 +52,7 @@ pub fn accept_all(
 /// deleted text, converting `<w:delText>` back to `<w:t>`).
 ///
 /// Returns the number of changes rejected.
-pub fn reject_all(
-    graph: &mut PartGraph,
-    part_path: &str,
-) -> Result<usize, DocliError> {
+pub fn reject_all(graph: &mut PartGraph, part_path: &str) -> Result<usize, DocliError> {
     let xml = graph
         .xml_bytes(part_path)
         .ok_or_else(|| DocliError::InvalidDocx {
@@ -76,26 +67,23 @@ pub fn reject_all(
     let mut count = 0;
 
     // Remove <w:ins ...>...</w:ins> entirely (reject = discard inserted text).
-    let ins_re = Regex::new(r"<w:ins\b[^>]*>.*?</w:ins>").map_err(|e| {
-        DocliError::InvalidOperation {
+    let ins_re =
+        Regex::new(r"<w:ins\b[^>]*>.*?</w:ins>").map_err(|e| DocliError::InvalidOperation {
             message: format!("regex error: {e}"),
-        }
-    })?;
+        })?;
     count += ins_re.find_iter(&result).count();
     result = ins_re.replace_all(&result, "").to_string();
 
     // Remove <w:del ...> wrappers but keep content (reject = restore deleted text).
-    let del_open_re =
-        Regex::new(r"<w:del\b[^>]*>").map_err(|e| DocliError::InvalidOperation {
-            message: format!("regex error: {e}"),
-        })?;
+    let del_open_re = Regex::new(r"<w:del\b[^>]*>").map_err(|e| DocliError::InvalidOperation {
+        message: format!("regex error: {e}"),
+    })?;
     count += del_open_re.find_iter(&result).count();
     result = del_open_re.replace_all(&result, "").to_string();
 
-    let del_close_re =
-        Regex::new(r"</w:del>").map_err(|e| DocliError::InvalidOperation {
-            message: format!("regex error: {e}"),
-        })?;
+    let del_close_re = Regex::new(r"</w:del>").map_err(|e| DocliError::InvalidOperation {
+        message: format!("regex error: {e}"),
+    })?;
     result = del_close_re.replace_all(&result, "").to_string();
 
     // Convert <w:delText> back to <w:t>.
@@ -112,10 +100,7 @@ pub fn reject_all(
 /// comment range markers, comment references, and clears comments.xml.
 ///
 /// Returns the total number of items stripped.
-pub fn strip_all(
-    graph: &mut PartGraph,
-    part_path: &str,
-) -> Result<usize, DocliError> {
+pub fn strip_all(graph: &mut PartGraph, part_path: &str) -> Result<usize, DocliError> {
     // First accept all tracked changes.
     let tc_count = accept_all(graph, part_path)?;
 
@@ -134,20 +119,21 @@ pub fn strip_all(
     let mut comment_count = 0;
 
     // Remove commentRangeStart / commentRangeEnd.
-    let range_re = Regex::new(r"<w:commentRange(Start|End)\b[^/]*/\s*>").map_err(
-        |e| DocliError::InvalidOperation {
+    let range_re = Regex::new(r"<w:commentRange(Start|End)\b[^/]*/\s*>").map_err(|e| {
+        DocliError::InvalidOperation {
             message: format!("regex error: {e}"),
-        },
-    )?;
+        }
+    })?;
     comment_count += range_re.find_iter(&result).count();
     result = range_re.replace_all(&result, "").to_string();
 
     // Remove comment reference runs.
-    let ref_re =
-        Regex::new(r"<w:r>\s*<w:rPr>\s*<w:rStyle[^/]*/>\s*</w:rPr>\s*<w:commentReference[^/]*/>\s*</w:r>")
-            .map_err(|e| DocliError::InvalidOperation {
-                message: format!("regex error: {e}"),
-            })?;
+    let ref_re = Regex::new(
+        r"<w:r>\s*<w:rPr>\s*<w:rStyle[^/]*/>\s*</w:rPr>\s*<w:commentReference[^/]*/>\s*</w:r>",
+    )
+    .map_err(|e| DocliError::InvalidOperation {
+        message: format!("regex error: {e}"),
+    })?;
     comment_count += ref_re.find_iter(&result).count();
     result = ref_re.replace_all(&result, "").to_string();
 
@@ -180,13 +166,10 @@ mod tests {
         let xml = r#"<w:body><w:p><w:ins w:id="1" w:author="A" w:date="2025-01-01"><w:r><w:t>new</w:t></w:r></w:ins><w:del w:id="2" w:author="A" w:date="2025-01-01"><w:r><w:delText>old</w:delText></w:r></w:del></w:p></w:body>"#;
         let mut graph = make_graph("word/document.xml", xml);
 
-        let count =
-            accept_all(&mut graph, "word/document.xml").unwrap();
+        let count = accept_all(&mut graph, "word/document.xml").unwrap();
         assert!(count >= 2);
 
-        let result =
-            std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap())
-                .unwrap();
+        let result = std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap()).unwrap();
         assert!(result.contains("<w:t>new</w:t>"));
         assert!(!result.contains("old"));
         assert!(!result.contains("<w:ins"));
@@ -198,13 +181,10 @@ mod tests {
         let xml = r#"<w:body><w:p><w:ins w:id="1" w:author="A" w:date="2025-01-01"><w:r><w:t>new</w:t></w:r></w:ins><w:del w:id="2" w:author="A" w:date="2025-01-01"><w:r><w:delText>old</w:delText></w:r></w:del></w:p></w:body>"#;
         let mut graph = make_graph("word/document.xml", xml);
 
-        let count =
-            reject_all(&mut graph, "word/document.xml").unwrap();
+        let count = reject_all(&mut graph, "word/document.xml").unwrap();
         assert!(count >= 2);
 
-        let result =
-            std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap())
-                .unwrap();
+        let result = std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap()).unwrap();
         assert!(!result.contains("new"));
         assert!(result.contains("<w:t>old</w:t>"));
         assert!(!result.contains("<w:ins"));
@@ -245,16 +225,13 @@ mod tests {
         let count = strip_all(&mut graph, "word/document.xml").unwrap();
         assert!(count >= 1);
 
-        let result =
-            std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap())
-                .unwrap();
+        let result = std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap()).unwrap();
         assert!(result.contains("<w:t>new</w:t>"));
         assert!(!result.contains("commentRange"));
         assert!(!result.contains("commentReference"));
 
         let comments_result =
-            std::str::from_utf8(graph.xml_bytes("word/comments.xml").unwrap())
-                .unwrap();
+            std::str::from_utf8(graph.xml_bytes("word/comments.xml").unwrap()).unwrap();
         assert!(!comments_result.contains(r#"w:id="10""#));
     }
 

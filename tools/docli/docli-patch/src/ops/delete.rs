@@ -17,17 +17,12 @@ pub fn delete_content(
 
     if byte_offset > byte_end {
         return Err(DocliError::InvalidOperation {
-            message: format!(
-                "byte_offset ({byte_offset}) > byte_end ({byte_end})"
-            ),
+            message: format!("byte_offset ({byte_offset}) > byte_end ({byte_end})"),
         });
     }
     if byte_end > xml.len() {
         return Err(DocliError::InvalidOperation {
-            message: format!(
-                "byte_end ({byte_end}) exceeds part length ({})",
-                xml.len()
-            ),
+            message: format!("byte_end ({byte_end}) exceeds part length ({})", xml.len()),
         });
     }
 
@@ -56,16 +51,12 @@ mod tests {
     fn delete_paragraph_from_body() {
         let xml = r#"<w:body><w:p><w:r><w:t>Keep</w:t></w:r></w:p><w:p><w:r><w:t>Delete</w:t></w:r></w:p></w:body>"#;
         let para_start = xml.find("<w:p><w:r><w:t>Delete").unwrap();
-        let para_end = para_start
-            + "<w:p><w:r><w:t>Delete</w:t></w:r></w:p>".len();
+        let para_end = para_start + "<w:p><w:r><w:t>Delete</w:t></w:r></w:p>".len();
 
         let mut graph = make_graph("word/document.xml", xml);
-        delete_content(&mut graph, "word/document.xml", para_start, para_end)
-            .unwrap();
+        delete_content(&mut graph, "word/document.xml", para_start, para_end).unwrap();
 
-        let result =
-            std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap())
-                .unwrap();
+        let result = std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap()).unwrap();
         assert!(result.contains("Keep"));
         assert!(!result.contains("Delete"));
     }
@@ -79,9 +70,7 @@ mod tests {
         let mut graph = make_graph("word/document.xml", xml);
         delete_content(&mut graph, "word/document.xml", start, end).unwrap();
 
-        let result =
-            std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap())
-                .unwrap();
+        let result = std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap()).unwrap();
         assert_eq!(result, "<w:body></w:body>");
     }
 

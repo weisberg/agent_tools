@@ -45,18 +45,14 @@ pub fn check_redline(package: &Package) -> Vec<ValidationIssue> {
                                 if !seen_ids.insert(id) {
                                     issues.push(ValidationIssue::error(
                                         "redline-duplicate-id",
-                                        format!(
-                                            "duplicate tracked-change id {id} in w:{tag}"
-                                        ),
+                                        format!("duplicate tracked-change id {id} in w:{tag}"),
                                         Some(part_path),
                                     ));
                                 }
                             } else {
                                 issues.push(ValidationIssue::error(
                                     "redline-invalid-id",
-                                    format!(
-                                        "w:{tag} has non-numeric w:id: {val}"
-                                    ),
+                                    format!("w:{tag} has non-numeric w:id: {val}"),
                                     Some(part_path),
                                 ));
                             }
@@ -64,9 +60,7 @@ pub fn check_redline(package: &Package) -> Vec<ValidationIssue> {
                     }
 
                     // Check for required w:author.
-                    let has_author = node
-                        .attributes()
-                        .any(|a| a.name() == "author");
+                    let has_author = node.attributes().any(|a| a.name() == "author");
                     if !has_author {
                         issues.push(ValidationIssue::warning(
                             "redline-missing-author",
@@ -76,34 +70,27 @@ pub fn check_redline(package: &Package) -> Vec<ValidationIssue> {
                     }
 
                     // Check nesting: ins/del should not be nested inside another ins/del.
-                    let nested = node
-                        .ancestors()
-                        .skip(1)
-                        .any(|a| {
-                            a.is_element()
-                                && (a.tag_name().name() == "ins"
-                                    || a.tag_name().name() == "del")
-                        });
+                    let nested = node.ancestors().skip(1).any(|a| {
+                        a.is_element()
+                            && (a.tag_name().name() == "ins" || a.tag_name().name() == "del")
+                    });
                     if nested {
                         issues.push(ValidationIssue::error(
                             "redline-nested",
-                            format!(
-                                "w:{tag} is nested inside another tracked change"
-                            ),
+                            format!("w:{tag} is nested inside another tracked change"),
                             Some(part_path),
                         ));
                     }
 
                     // Check that del contains delText, not regular t.
                     if tag == "del" {
-                        let has_del_text = node.descendants().any(|d| {
-                            d.is_element() && d.tag_name().name() == "delText"
-                        });
+                        let has_del_text = node
+                            .descendants()
+                            .any(|d| d.is_element() && d.tag_name().name() == "delText");
                         let has_regular_t = node.descendants().any(|d| {
                             d.is_element()
                                 && d.tag_name().name() == "t"
-                                && d.parent()
-                                    .is_some_and(|p| p.tag_name().name() == "r")
+                                && d.parent().is_some_and(|p| p.tag_name().name() == "r")
                         });
                         if has_regular_t && !has_del_text {
                             issues.push(ValidationIssue::warning(

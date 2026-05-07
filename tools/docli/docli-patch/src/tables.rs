@@ -41,20 +41,14 @@ pub fn update_cell(
 
     if row >= rows.len() {
         return Err(DocliError::InvalidTarget {
-            message: format!(
-                "row {row} out of range (table has {} rows)",
-                rows.len()
-            ),
+            message: format!("row {row} out of range (table has {} rows)", rows.len()),
         });
     }
 
     let cells = find_row_cells(&rows[row].content);
     if col >= cells.len() {
         return Err(DocliError::InvalidTarget {
-            message: format!(
-                "col {col} out of range (row has {} cells)",
-                cells.len()
-            ),
+            message: format!("col {col} out of range (row has {} cells)", cells.len()),
         });
     }
 
@@ -62,9 +56,7 @@ pub fn update_cell(
 
     // Build a new cell with the same structure but new text content.
     let escaped = escape_xml(content);
-    let new_cell = format!(
-        "<w:tc><w:p><w:r><w:t>{escaped}</w:t></w:r></w:p></w:tc>"
-    );
+    let new_cell = format!("<w:tc><w:p><w:r><w:t>{escaped}</w:t></w:r></w:p></w:tc>");
 
     // Calculate absolute positions.
     let cell_abs_start = table_byte_offset + rows[row].offset + cell.offset;
@@ -120,11 +112,11 @@ pub fn append_row(
 
     // Insert before the closing </w:tbl> tag.
     let close_tag = "</w:tbl>";
-    let insert_rel = table_xml.rfind(close_tag).ok_or_else(|| {
-        DocliError::InvalidDocx {
+    let insert_rel = table_xml
+        .rfind(close_tag)
+        .ok_or_else(|| DocliError::InvalidDocx {
             message: "missing </w:tbl> closing tag".into(),
-        }
-    })?;
+        })?;
     let insert_abs = table_byte_offset + insert_rel;
 
     let mut result = String::with_capacity(xml_str.len() + row_xml.len());
@@ -233,9 +225,7 @@ mod tests {
         )
         .unwrap();
 
-        let result =
-            std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap())
-                .unwrap();
+        let result = std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap()).unwrap();
         assert!(result.contains("Updated"));
         assert!(result.contains("A1")); // Other cells unchanged.
         assert!(result.contains("B1"));
@@ -277,9 +267,7 @@ mod tests {
         )
         .unwrap();
 
-        let result =
-            std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap())
-                .unwrap();
+        let result = std::str::from_utf8(graph.xml_bytes("word/document.xml").unwrap()).unwrap();
         assert!(result.contains("A3"));
         assert!(result.contains("B3"));
         // Verify the new row is before </w:tbl>.

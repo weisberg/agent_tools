@@ -130,7 +130,9 @@ pub fn split_runs_at_offsets(
         // After portion: [max(run_start, char_end) .. run_end)
         let after_start = char_end.max(run_start);
         if run_end > after_start {
-            let slice: String = run_chars[(after_start - run_start)..run_len].iter().collect();
+            let slice: String = run_chars[(after_start - run_start)..run_len]
+                .iter()
+                .collect();
             after_runs.push(RunFragment {
                 properties: run.properties.clone(),
                 text: slice,
@@ -225,9 +227,7 @@ mod tests {
     }
 
     fn run_with_props(text: &str, props: &str) -> String {
-        format!(
-            r#"<w:r><w:rPr>{props}</w:rPr><w:t xml:space="preserve">{text}</w:t></w:r>"#
-        )
+        format!(r#"<w:r><w:rPr>{props}</w:rPr><w:t xml:space="preserve">{text}</w:t></w:r>"#)
     }
 
     fn target_text(result: &SplitResult) -> String {
@@ -454,8 +454,7 @@ mod tests {
     // 23. Run with mixed tab and text
     #[test]
     fn run_mixed_tab_and_text() {
-        let xml =
-            para(r#"<w:r><w:t>A</w:t><w:tab/><w:t>B</w:t><w:br/><w:t>C</w:t></w:r>"#);
+        let xml = para(r#"<w:r><w:t>A</w:t><w:tab/><w:t>B</w:t><w:br/><w:t>C</w:t></w:r>"#);
         let r = split_runs_at_offsets(&xml, 1, 4).unwrap();
         assert_eq!(target_text(&r), "\tB\n");
     }

@@ -57,9 +57,11 @@ pub fn run(args: CreateArgs, format: &str, pretty: bool) -> i32 {
 fn parse_vars(raw: &[String]) -> Result<Map<String, Value>, DocliError> {
     let mut map = Map::new();
     for pair in raw {
-        let (key, value) = pair.split_once('=').ok_or_else(|| DocliError::InvalidSpec {
-            message: format!("invalid --var format (expected key=value): {pair}"),
-        })?;
+        let (key, value) = pair
+            .split_once('=')
+            .ok_or_else(|| DocliError::InvalidSpec {
+                message: format!("invalid --var format (expected key=value): {pair}"),
+            })?;
         map.insert(key.to_string(), Value::String(value.to_string()));
     }
     Ok(map)
@@ -105,9 +107,10 @@ fn execute(args: &CreateArgs) -> Result<CreateData, DocliError> {
     };
 
     // Resolve $refs via KbResolver (only if there are refs or kb_root is provided)
-    let has_refs = spec.content.iter().any(|b| {
-        matches!(b, docli_core::ContentBlock::Ref { .. })
-    });
+    let has_refs = spec
+        .content
+        .iter()
+        .any(|b| matches!(b, docli_core::ContentBlock::Ref { .. }));
     if has_refs {
         let resolver = make_resolver(&args.kb_root)?;
         spec.resolve_refs(&resolver)?;

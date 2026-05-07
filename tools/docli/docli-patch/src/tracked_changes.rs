@@ -104,13 +104,7 @@ mod tests {
 
     #[test]
     fn insertion_escapes_author() {
-        let xml = build_tracked_insertion(
-            "text",
-            None,
-            1,
-            "O'Brien & Co",
-            "2025-01-01T00:00:00Z",
-        );
+        let xml = build_tracked_insertion("text", None, 1, "O'Brien & Co", "2025-01-01T00:00:00Z");
         assert!(xml.contains("O&apos;Brien &amp; Co") || xml.contains("O'Brien &amp; Co"));
     }
 
@@ -122,8 +116,7 @@ mod tests {
 
     #[test]
     fn deletion_basic() {
-        let xml =
-            build_tracked_deletion("removed", None, 5, "Carol", "2025-03-01T09:00:00Z");
+        let xml = build_tracked_deletion("removed", None, 5, "Carol", "2025-03-01T09:00:00Z");
         assert!(xml.contains(r#"<w:del w:id="5""#));
         assert!(xml.contains(r#"w:author="Carol""#));
         assert!(xml.contains("<w:delText>removed</w:delText>"));
@@ -145,8 +138,7 @@ mod tests {
 
     #[test]
     fn deletion_escapes_text() {
-        let xml =
-            build_tracked_deletion("a < b & c", None, 1, "E", "2025-01-01T00:00:00Z");
+        let xml = build_tracked_deletion("a < b & c", None, 1, "E", "2025-01-01T00:00:00Z");
         assert!(xml.contains("a &lt; b &amp; c"));
     }
 }

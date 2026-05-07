@@ -22,17 +22,29 @@ fn validate_simple_returns_valid_envelope() {
         serde_json::from_slice(&output.stdout).expect("stdout is not valid JSON");
 
     assert_eq!(json["command"], "validate");
-    assert!(json["data"]["issues"].is_array(), "issues should be an array");
-    assert!(json["data"]["error_count"].is_number(), "error_count should be a number");
-    assert!(json["data"]["warning_count"].is_number(), "warning_count should be a number");
-    assert!(json["elapsed_ms"].is_number(), "elapsed_ms should be present");
+    assert!(
+        json["data"]["issues"].is_array(),
+        "issues should be an array"
+    );
+    assert!(
+        json["data"]["error_count"].is_number(),
+        "error_count should be a number"
+    );
+    assert!(
+        json["data"]["warning_count"].is_number(),
+        "warning_count should be a number"
+    );
+    assert!(
+        json["elapsed_ms"].is_number(),
+        "elapsed_ms should be present"
+    );
 }
 
 #[test]
 fn validate_minimal_reports_issues() {
     // minimal.docx is in the workspace tests/fixtures directory
-    let fixture = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../tests/fixtures/minimal.docx");
+    let fixture =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../tests/fixtures/minimal.docx");
 
     if !fixture.exists() {
         eprintln!("skipping: minimal.docx not found at {:?}", fixture);

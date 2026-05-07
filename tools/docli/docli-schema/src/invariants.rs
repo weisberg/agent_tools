@@ -113,13 +113,11 @@ fn declared_content_types(package: &Package) -> HashSet<String> {
     };
     let xml = String::from_utf8_lossy(content_types);
     let mut entries = HashSet::new();
-    for line in xml.lines() {
-        if let Some(part_name) = extract_attribute(line, "PartName") {
-            entries.insert(part_name.trim_start_matches('/').to_string());
-        }
-        if let Some(extension) = extract_attribute(line, "Extension") {
-            entries.insert(format!("*.{extension}"));
-        }
+    for part_name in extract_attributes(&xml, "PartName") {
+        entries.insert(part_name.trim_start_matches('/').to_string());
+    }
+    for extension in extract_attributes(&xml, "Extension") {
+        entries.insert(format!("*.{extension}"));
     }
     entries
 }
@@ -134,12 +132,15 @@ fn parse_relationship_targets(bytes: &[u8]) -> Result<Vec<String>, roxmltree::Er
         .collect())
 }
 
-fn extract_attribute<'a>(line: &'a str, attr: &str) -> Option<&'a str> {
+fn extract_attributes<'a>(xml: &'a str, attr: &str) -> Vec<&'a str> {
     let marker = format!("{attr}=\"");
-    let start = line.find(&marker)?;
-    let rest = &line[start + marker.len()..];
-    let end = rest.find('"')?;
-    Some(&rest[..end])
+    xml.match_indices(&marker)
+        .filter_map(|(start, _)| {
+            let rest = &xml[start + marker.len()..];
+            let end = rest.find('"')?;
+            Some(&rest[..end])
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -150,7 +151,7 @@ mod tests {
     use tempfile::NamedTempFile;
     use zip::{write::SimpleFileOptions, ZipWriter};
 
-    use super::check_invariants;
+    use super::{check_invariants, extract_attributes};
 
     fn build_docx(document_xml: &str, rels_xml: &str, content_types: &str) -> PathBuf {
         let temp = NamedTempFile::new().unwrap();
@@ -209,5 +210,16 @@ mod tests {
         assert!(issues
             .iter()
             .any(|issue| issue.code == "invalid-tracked-change-nesting"));
+    }
+
+    #[test]
+    fn extracts_all_content_type_attrs_from_single_line_xml() {
+        let xml = r#"<Types><Default Extension="rels"/><Default Extension="xml"/><Override PartName="/word/document.xml"/><Override PartName="/word/comments.xml"/></Types>"#;
+
+        let extensions = extract_attributes(xml, "Extension");
+        let parts = extract_attributes(xml, "PartName");
+
+        assert_eq!(extensions, vec!["rels", "xml"]);
+        assert_eq!(parts, vec!["/word/document.xml", "/word/comments.xml"]);
     }
 }

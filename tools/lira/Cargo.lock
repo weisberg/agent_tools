@@ -453,12 +453,13 @@ version = "0.1.0"
 name = "lira-store"
 version = "0.1.0"
 dependencies = [
- "anyhow",
+ "chrono",
  "fs2",
  "lira-core",
  "serde",
  "serde_json",
  "serde_yaml",
+ "tempfile",
 ]
 
 [[package]]

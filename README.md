@@ -44,6 +44,8 @@ Highlights:
 
 Start here: [`tools/xli/README.md`](tools/xli/README.md)
 
+Agent guide: [`tools/xli/SKILL.md`](tools/xli/SKILL.md)
+
 ### `jirali` — Agent-Safe Jira CLI
 
 A Jira CLI designed for autonomous agents first and terminal users second.
@@ -132,6 +134,8 @@ Highlights:
 
 Start here: [`tools/framerli/README.md`](tools/framerli/README.md)
 
+Agent guide: [`tools/framerli/SKILL.md`](tools/framerli/SKILL.md)
+
 ### `notionli` — Agent-Safe Notion CLI
 
 A Rust Notion CLI that wraps common Notion operations in predictable, auditable
@@ -144,10 +148,14 @@ Highlights:
   Keychain.
 - Local profile state, aliases, selected targets, receipts, audit logs, and
   dry-run-by-default writes.
-- MVP command groups for search, pages, blocks, databases, data sources, rows,
-  comments, users, schemas, and tools.
+- Cache-backed search, snapshots, schema review, exports, templates, workflows,
+  batch operations, shell completions, and MCP stdio bridge support.
+- Dry-run/apply command groups for pages, blocks, databases, data sources, rows,
+  comments, users, files, sync, policy, and operation undo.
 
 Start here: [`tools/notionli/README.md`](tools/notionli/README.md)
+
+Agent guide: [`tools/notionli/SKILL.md`](tools/notionli/SKILL.md)
 
 ## The Lab
 
@@ -161,14 +169,20 @@ agent-native philosophy into more surfaces.
 | `vizli` | Template-driven visualizations and explainers with sidecar discovery and verifiable rendering. |
 | `bashli` | Structured shell execution that replaces raw bash strings with JSON/YAML task specs and structured results. |
 | `barli` | A macOS menu bar app that discovers Python actions and hot-reloads menu workflows. |
+| `slackli` | A Rust foundation for an agent-safe Slack CLI with JSON-first command envelopes. |
 
 Useful entry points:
 
 - [`tools/deckli/DECKLI_SPECS.md`](tools/deckli/DECKLI_SPECS.md)
 - [`tools/docli/docli-spec.md`](tools/docli/docli-spec.md)
+- [`tools/docli/SKILL.md`](tools/docli/SKILL.md)
 - [`tools/vizli/VIZLI_README.md`](tools/vizli/VIZLI_README.md)
+- [`tools/vizli/SKILL.md`](tools/vizli/SKILL.md)
 - [`tools/bashli/bashli-spec-final.md`](tools/bashli/bashli-spec-final.md)
+- [`tools/bashli/SKILL.md`](tools/bashli/SKILL.md)
 - [`tools/barli/README.md`](tools/barli/README.md)
+- [`tools/barli/SKILL.md`](tools/barli/SKILL.md)
+- [`tools/slackli/README.md`](tools/slackli/README.md)
 
 ## Common Design Language
 
