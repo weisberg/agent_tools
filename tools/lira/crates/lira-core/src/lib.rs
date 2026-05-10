@@ -161,6 +161,7 @@ pub struct Workflow {
     pub statuses: Vec<StatusDef>,
     pub task_statuses: Vec<StatusDef>,
     pub allowed_transitions: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
     pub orchestration: OrchestrationPolicy,
 }
 

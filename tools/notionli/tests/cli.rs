@@ -1330,6 +1330,9 @@ done
 printf '%s %s %s\n' "$method" "$url" "$data" >> "$(dirname "$0")/curl-log"
 id="${url##*/}"
 case "$method $url" in
+  GET*\ */data_sources/*)
+    printf '{"object":"data_source","id":"248104cd-477e-80af-bc30-000bd28de8f9","properties":{"Name":{"type":"title","title":{}},"Status":{"type":"select","select":{"options":[{"name":"Todo"},{"name":"Done"}]}}}}\n200'
+    ;;
   POST*\ */data_sources/*/query)
     printf '{"object":"list","results":[{"object":"page","id":"dddddddd-dddd-dddd-dddd-dddddddddddd","url":"https://notion.so/row","properties":{"Name":{"type":"title","title":[{"plain_text":"Existing row"}]}}}]}\n200'
     ;;
@@ -2233,6 +2236,167 @@ fn ds_schema_diff_validate_and_lint_use_cached_schema() {
     assert!(lint.status.success());
     let value: serde_json::Value = serde_json::from_slice(&lint.stdout).unwrap();
     assert_eq!(value["valid"], true);
+}
+
+#[cfg(unix)]
+#[test]
+fn typed_property_setters_use_data_source_schema() {
+    let home = temp_dir();
+    let fake_curl = format!("{home}/fake-typed-properties-curl.sh");
+    fs::write(
+        &fake_curl,
+        r#"#!/bin/sh
+method="GET"
+url=""
+data=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -X)
+      shift
+      method="$1"
+      ;;
+    --data)
+      shift
+      data="$1"
+      ;;
+    http*)
+      url="$1"
+      ;;
+  esac
+  shift
+done
+printf '%s %s %s\n' "$method" "$url" "$data" >> "$(dirname "$0")/curl-log"
+id="${url##*/}"
+case "$method $url" in
+  GET*\ */data_sources/*)
+    printf '{"object":"data_source","id":"248104cd-477e-80af-bc30-000bd28de8f9","properties":{"Project name":{"type":"title","title":{}},"Prompt":{"type":"rich_text","rich_text":{}},"Status":{"type":"status","status":{"options":[{"name":"Not started"},{"name":"In progress"},{"name":"Done"}]}},"Priority":{"type":"select","select":{"options":[{"name":"High"},{"name":"Low"}]}},"Project Type":{"type":"multi_select","multi_select":{"options":[{"name":"Agent Tool"},{"name":"Programming"}]}},"Github Repo":{"type":"url","url":{}},"Budget":{"type":"number","number":{}},"Done":{"type":"checkbox","checkbox":{}},"Due":{"type":"date","date":{}},"Parent item":{"type":"relation","relation":{}}}}\n200'
+    ;;
+  "POST https://api.notion.com/v1/pages")
+    printf '{"object":"page","id":"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee","url":"https://notion.so/typed","parent":{"type":"data_source_id","data_source_id":"248104cd-477e-80af-bc30-000bd28de8f9"},"properties":{"Project name":{"type":"title","title":[{"plain_text":"Typed Create"}]}}}\n200'
+    ;;
+  GET*\ */pages/*)
+    printf '{"object":"page","id":"%s","url":"https://notion.so/typed","parent":{"type":"data_source_id","data_source_id":"248104cd-477e-80af-bc30-000bd28de8f9"},"properties":{"Project name":{"type":"title","title":[{"plain_text":"Typed Create"}]}}}\n200' "$id"
+    ;;
+  PATCH*\ */pages/*)
+    printf '{"object":"page","id":"%s","url":"https://notion.so/typed","parent":{"type":"data_source_id","data_source_id":"248104cd-477e-80af-bc30-000bd28de8f9"},"properties":{"Project name":{"type":"title","title":[{"plain_text":"Typed Create"}]}}}\n200' "$id"
+    ;;
+  *)
+    printf '{"message":"unexpected request","method":"%s","url":"%s"}\n500' "$method" "$url"
+    ;;
+esac
+"#,
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&fake_curl).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&fake_curl, permissions).unwrap();
+
+    let ds_id = "248104cd-477e-80af-bc30-000bd28de8f9";
+    let page_id = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
+    let create = Command::new(env!("CARGO_BIN_EXE_notionli"))
+        .args([
+            "--home",
+            home,
+            "--apply",
+            "page",
+            "create",
+            "--parent",
+            &format!("data_source:{ds_id}"),
+            "--title",
+            "Typed Create",
+            "--set",
+            "Status=In progress",
+            "--set",
+            "Priority=High",
+            "--set",
+            "Project Type=Agent Tool,Programming",
+            "--set",
+            "Github Repo=https://example.com/repo",
+            "--set",
+            "Budget=12",
+            "--set",
+            "Done=true",
+            "--set",
+            "Due=2026-05-10",
+            "--set",
+            "Prompt=typed create",
+        ])
+        .env("NOTION_API_KEY", "secret_test")
+        .env("NOTIONLI_CURL", &fake_curl)
+        .output()
+        .expect("typed page create");
+    assert!(
+        create.status.success(),
+        "{}",
+        String::from_utf8_lossy(&create.stderr)
+    );
+
+    let update = Command::new(env!("CARGO_BIN_EXE_notionli"))
+        .args([
+            "--home",
+            home,
+            "--apply",
+            "row",
+            "update",
+            &format!("page:{page_id}"),
+            "--set",
+            "Status=Done",
+            "--set",
+            "Priority=Low",
+            "--set",
+            "Project Type=Programming",
+            "--set",
+            "Parent item=page:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        ])
+        .env("NOTION_API_KEY", "secret_test")
+        .env("NOTIONLI_CURL", &fake_curl)
+        .output()
+        .expect("typed row update");
+    assert!(
+        update.status.success(),
+        "{}",
+        String::from_utf8_lossy(&update.stderr)
+    );
+
+    let invalid = Command::new(env!("CARGO_BIN_EXE_notionli"))
+        .args([
+            "--home",
+            home,
+            "--apply",
+            "row",
+            "update",
+            &format!("page:{page_id}"),
+            "--set",
+            "Status=Imaginary",
+        ])
+        .env("NOTION_API_KEY", "secret_test")
+        .env("NOTIONLI_CURL", &fake_curl)
+        .output()
+        .expect("invalid typed row update");
+    assert!(!invalid.status.success());
+    let invalid_output = format!(
+        "{}{}",
+        String::from_utf8_lossy(&invalid.stdout),
+        String::from_utf8_lossy(&invalid.stderr)
+    );
+    assert!(invalid_output.contains("Available options"));
+
+    let log = fs::read_to_string(format!("{home}/curl-log")).unwrap();
+    assert!(log.contains("\"Project name\":{\"title\""));
+    assert!(!log.contains("\"Name\":{\"title\""));
+    assert!(log.contains("\"Status\":{\"status\":{\"name\":\"In progress\"}}"));
+    assert!(log.contains("\"Priority\":{\"select\":{\"name\":\"High\"}}"));
+    assert!(log.contains(
+        "\"Project Type\":{\"multi_select\":[{\"name\":\"Agent Tool\"},{\"name\":\"Programming\"}]}"
+    ));
+    assert!(log.contains("\"Github Repo\":{\"url\":\"https://example.com/repo\"}"));
+    assert!(log.contains("\"Budget\":{\"number\":12.0}"));
+    assert!(log.contains("\"Done\":{\"checkbox\":true}"));
+    assert!(log.contains("\"Due\":{\"date\":{\"start\":\"2026-05-10\"}}"));
+    assert!(log.contains("\"Status\":{\"status\":{\"name\":\"Done\"}}"));
+    assert!(log.contains(
+        "\"Parent item\":{\"relation\":[{\"id\":\"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\"}]}"
+    ));
 }
 
 #[test]

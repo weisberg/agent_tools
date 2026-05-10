@@ -4,7 +4,7 @@ use lira_core::{
     validate_transition, Comment, HistoryEvent, JsonEnvelope, LiraError, LiraResult, ParentRef,
     Task, Ticket, TicketSummary, SCHEMA_VERSION,
 };
-use lira_store::JsonlEvent;
+use lira_store::{JsonlEvent, TicketQuery};
 use serde::Serialize;
 use serde_json::json;
 use std::io::Read;
@@ -31,6 +31,7 @@ enum Commands {
     },
     Doctor,
     Validate,
+    Reindex,
     Project {
         #[command(subcommand)]
         command: ProjectCommands,
@@ -50,6 +51,8 @@ enum Commands {
         query: String,
         #[arg(long)]
         project: Option<String>,
+        #[arg(long = "no-index")]
+        no_index: bool,
     },
     Query(QueryArgs),
     Count {
@@ -57,10 +60,14 @@ enum Commands {
         group_by: String,
         #[arg(long)]
         project: Option<String>,
+        #[arg(long = "no-index")]
+        no_index: bool,
     },
     Board {
         #[arg(long)]
         project: Option<String>,
+        #[arg(long = "no-index")]
+        no_index: bool,
     },
     Mv {
         id: String,
@@ -188,6 +195,8 @@ struct QueryArgs {
     task_tag: Option<String>,
     #[arg(long = "parent-jira")]
     parent_jira: Option<String>,
+    #[arg(long = "no-index")]
+    no_index: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -297,6 +306,7 @@ fn run(cli: Cli) -> LiraResult<()> {
     match cli.command {
         Some(Commands::Init { dry_run }) => cmd_init(cli.json, dry_run),
         Some(Commands::Doctor) | Some(Commands::Validate) => cmd_doctor(cli.json),
+        Some(Commands::Reindex) => cmd_reindex(cli.json),
         Some(Commands::Project { command }) => match command {
             ProjectCommands::List => cmd_project_list(cli.json),
             ProjectCommands::Create { key, name } => cmd_project_create(cli.json, &key, &name),
@@ -307,14 +317,20 @@ fn run(cli: Cli) -> LiraResult<()> {
         Some(Commands::Ls { project, status }) => {
             cmd_ls(cli.json, project.as_deref(), status.as_deref())
         }
-        Some(Commands::Search { query, project }) => {
-            cmd_search(cli.json, &query, project.as_deref())
-        }
+        Some(Commands::Search {
+            query,
+            project,
+            no_index,
+        }) => cmd_search(cli.json, &query, project.as_deref(), no_index),
         Some(Commands::Query(args)) => cmd_query(cli.json, args),
-        Some(Commands::Count { group_by, project }) => {
-            cmd_count(cli.json, &group_by, project.as_deref())
+        Some(Commands::Count {
+            group_by,
+            project,
+            no_index,
+        }) => cmd_count(cli.json, &group_by, project.as_deref(), no_index),
+        Some(Commands::Board { project, no_index }) => {
+            cmd_board(cli.json, project.as_deref(), no_index)
         }
-        Some(Commands::Board { project }) => cmd_board(cli.json, project.as_deref()),
         Some(Commands::Mv { id, status, force }) => cmd_mv(cli.json, &id, &status, force),
         Some(Commands::Task { command }) => cmd_task(cli.json, command),
         Some(Commands::Comment {
@@ -381,6 +397,15 @@ fn cmd_init(json: bool, dry_run: bool) -> LiraResult<()> {
 fn cmd_doctor(json: bool) -> LiraResult<()> {
     let report = lira_store::doctor()?;
     output(json, report.clone(), format!("doctor ok: {}", report.ok))
+}
+
+fn cmd_reindex(json: bool) -> LiraResult<()> {
+    let report = lira_store::reindex()?;
+    output(
+        json,
+        report.clone(),
+        format!("indexed {} tickets", report.tickets_indexed),
+    )
 }
 
 fn cmd_project_list(json: bool) -> LiraResult<()> {
@@ -459,13 +484,12 @@ fn cmd_ls(json: bool, project: Option<&str>, status: Option<&str>) -> LiraResult
     output(json, json!({ "tickets": summaries }), "tickets".to_string())
 }
 
-fn cmd_search(json: bool, query: &str, project: Option<&str>) -> LiraResult<()> {
-    let needle = query.to_ascii_lowercase();
-    let tickets: Vec<TicketSummary> = lira_store::list_tickets(project, None)?
-        .iter()
-        .filter(|ticket| ticket_matches_search(ticket, &needle))
-        .map(TicketSummary::from)
-        .collect();
+fn cmd_search(json: bool, query: &str, project: Option<&str>, no_index: bool) -> LiraResult<()> {
+    let tickets = if no_index {
+        lira_store::search_tickets_no_index(query, project)?
+    } else {
+        lira_store::search_tickets(query, project)?
+    };
     output(
         json,
         json!({ "tickets": tickets }),
@@ -474,42 +498,20 @@ fn cmd_search(json: bool, query: &str, project: Option<&str>) -> LiraResult<()> 
 }
 
 fn cmd_query(json: bool, args: QueryArgs) -> LiraResult<()> {
-    let tickets: Vec<TicketSummary> =
-        lira_store::list_tickets(args.project.as_deref(), args.status.as_deref())?
-            .iter()
-            .filter(|ticket| {
-                args.label
-                    .as_ref()
-                    .is_none_or(|label| ticket.labels.iter().any(|value| value == label))
-            })
-            .filter(|ticket| {
-                args.assignee
-                    .as_ref()
-                    .is_none_or(|assignee| ticket.assignee.as_ref() == Some(assignee))
-            })
-            .filter(|ticket| {
-                args.task_status
-                    .as_ref()
-                    .is_none_or(|status| ticket.tasks.iter().any(|task| &task.status == status))
-            })
-            .filter(|ticket| {
-                args.task_tag.as_ref().is_none_or(|tag| {
-                    ticket
-                        .tasks
-                        .iter()
-                        .any(|task| task.tags.iter().any(|value| value == tag))
-                })
-            })
-            .filter(|ticket| {
-                args.parent_jira.as_ref().is_none_or(|jira| {
-                    ticket
-                        .parent
-                        .as_ref()
-                        .is_some_and(|parent| parent.parent_type == "jira" && parent.id == *jira)
-                })
-            })
-            .map(TicketSummary::from)
-            .collect();
+    let query = TicketQuery {
+        project: args.project.as_deref(),
+        status: args.status.as_deref(),
+        label: args.label.as_deref(),
+        assignee: args.assignee.as_deref(),
+        task_status: args.task_status.as_deref(),
+        task_tag: args.task_tag.as_deref(),
+        parent_jira: args.parent_jira.as_deref(),
+    };
+    let tickets = if args.no_index {
+        lira_store::query_tickets_no_index(query)?
+    } else {
+        lira_store::query_tickets(query)?
+    };
     output(
         json,
         json!({ "tickets": tickets }),
@@ -517,21 +519,12 @@ fn cmd_query(json: bool, args: QueryArgs) -> LiraResult<()> {
     )
 }
 
-fn cmd_count(json: bool, group_by: &str, project: Option<&str>) -> LiraResult<()> {
-    let mut counts = std::collections::BTreeMap::new();
-    for ticket in lira_store::list_tickets(project, None)? {
-        let key = match group_by {
-            "status" => ticket.status,
-            "priority" => ticket.priority,
-            other => {
-                return Err(LiraError::new(
-                    "E_INVALID_GROUP_BY",
-                    format!("Unsupported group-by '{other}'."),
-                ));
-            }
-        };
-        *counts.entry(key).or_insert(0usize) += 1;
-    }
+fn cmd_count(json: bool, group_by: &str, project: Option<&str>, no_index: bool) -> LiraResult<()> {
+    let counts = if no_index {
+        lira_store::count_tickets_no_index(group_by, project)?
+    } else {
+        lira_store::count_tickets(group_by, project)?
+    };
     output(
         json,
         json!({ "group_by": group_by, "counts": counts }),
@@ -539,15 +532,12 @@ fn cmd_count(json: bool, group_by: &str, project: Option<&str>) -> LiraResult<()
     )
 }
 
-fn cmd_board(json: bool, project: Option<&str>) -> LiraResult<()> {
-    let mut board: std::collections::BTreeMap<String, Vec<TicketSummary>> =
-        std::collections::BTreeMap::new();
-    for ticket in lira_store::list_tickets(project, None)? {
-        board
-            .entry(ticket.status.clone())
-            .or_default()
-            .push(TicketSummary::from(&ticket));
-    }
+fn cmd_board(json: bool, project: Option<&str>, no_index: bool) -> LiraResult<()> {
+    let board = if no_index {
+        lira_store::board_tickets_no_index(project)?
+    } else {
+        lira_store::board_tickets(project)?
+    };
     output(json, json!({ "board": board }), "board".to_string())
 }
 
@@ -1091,27 +1081,4 @@ fn extend_unique(target: &mut Vec<String>, values: &[String]) {
         }
     }
     target.sort();
-}
-
-fn ticket_matches_search(ticket: &Ticket, needle: &str) -> bool {
-    let mut haystack = [
-        ticket.id.as_str(),
-        ticket.title.as_str(),
-        ticket.description.as_str(),
-        ticket.status.as_str(),
-        ticket.priority.as_str(),
-    ]
-    .join("\n")
-    .to_ascii_lowercase();
-    for criterion in &ticket.acceptance_criteria {
-        haystack.push('\n');
-        haystack.push_str(&criterion.to_ascii_lowercase());
-    }
-    for task in &ticket.tasks {
-        haystack.push('\n');
-        haystack.push_str(&task.title.to_ascii_lowercase());
-        haystack.push('\n');
-        haystack.push_str(&task.tags.join(" ").to_ascii_lowercase());
-    }
-    haystack.contains(needle)
 }

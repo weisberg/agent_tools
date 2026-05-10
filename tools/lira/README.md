@@ -24,18 +24,20 @@ Implemented local MVP foundation:
 - Completion guard for `lira mv <ID> done`.
 - Task operations: list, add, status, done, cancel.
 - Ticket comments, history entries, labels, links, claim/release/active/next.
-- `lira doctor` / `lira validate` for workspace and ticket validation.
-- `LIRA_HOME` override support via `lira-store`.
-- JSONL mutation logging under `~/.lira/logs/`.
-
-Planned by the updated v0.5 PRD/dev plan:
-
 - Symphony-compatible local tracker helpers:
   `lira candidates`, `lira issue show`, `lira issue current`, and
   `lira workflow symphony export|validate`.
 - Normalized issue projections with blockers, active/terminal status policy,
   and deterministic candidate sorting.
-- SQLite/FTS index and search/query/board if filesystem search needs help.
+- `lira doctor` / `lira validate` for workspace and ticket validation.
+- Rebuildable SQLite/FTS cache under `~/.lira/index/tickets.sqlite` with
+  `lira reindex`, indexed `search`, `query`, `count`, and `board`, source
+  drift detection, stale-index markers, and `--no-index` diagnostics.
+- `LIRA_HOME` override support via `lira-store`.
+- JSONL mutation logging under `~/.lira/logs/`.
+
+Planned by the updated v0.5 PRD/dev plan:
+
 - Read-only Jira bridge.
 - GitHub binding, push/pull, three-way sync, and conflict resolution.
 - Generated JSON schemas, release packaging, and docs generation.
@@ -56,6 +58,17 @@ cargo run -p lira-cli -- new "Add local tickets" \
 cargo run -p lira-cli -- task done ORION-1 T1 --json
 cargo run -p lira-cli -- mv ORION-1 done --json
 cargo run -p lira-cli -- doctor --json
+```
+
+## Kanban TUI
+
+lira includes a Python/Textual companion board that reads canonical YAML under
+`LIRA_HOME` or `~/.lira`, displays each project as workflow columns, and
+refreshes automatically:
+
+```bash
+uv run --with textual --with pyyaml python tui/lira_kanban.py
+uv run --with textual --with pyyaml python tui/lira_kanban.py --project LIRA --interval 2
 ```
 
 ## Symphony Boundary

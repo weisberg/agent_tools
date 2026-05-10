@@ -530,13 +530,14 @@ pub(crate) fn run_doctor(command: DoctorCommand, ctx: &Context) -> Result<Value,
                 }));
             }
             let title = format!("notionli round-trip {}", operation_id());
+            let schema = data_source_schema_for_parent(ctx, &resolved, true)?;
             let created = notion_request(
                 ctx,
                 "POST",
                 "/pages",
                 Some(json!({
                     "parent": parent_payload(&resolved),
-                    "properties": page_create_properties(&title, json!({}), &resolved)?,
+                    "properties": page_create_properties(&title, json!({}), &resolved, schema.as_ref())?,
                     "children": markdown_to_blocks("notionli round-trip verification."),
                 })),
             )?;
@@ -966,7 +967,8 @@ pub(crate) fn run_page(command: PageCommand, ctx: &Context) -> Result<Value, Not
                 .clone()
                 .or_else(|| h1_title(&body_text))
                 .unwrap_or_else(|| "Untitled".into());
-            let properties = properties_from_sets(args.set)?;
+            let schema = data_source_schema_for_parent(ctx, &parent, !ctx.dry_run)?;
+            let properties = properties_from_sets_with_schema(args.set, schema.as_ref())?;
             let changes = vec![json!({ "type": "page.create", "title": title, "parent": parent })];
             if ctx.dry_run {
                 return make_receipt(
@@ -980,7 +982,7 @@ pub(crate) fn run_page(command: PageCommand, ctx: &Context) -> Result<Value, Not
             }
             let mut payload = json!({
                 "parent": parent_payload(&parent),
-                "properties": page_create_properties(&title, properties, &parent)?,
+                "properties": page_create_properties(&title, properties, &parent, schema.as_ref())?,
             });
             if !body_text.trim().is_empty() {
                 payload["children"] = json!(markdown_to_blocks(&body_text));
@@ -1145,9 +1147,10 @@ fn duplicate_page(ctx: &Context, args: PageDuplicateArgs) -> Result<Value, Notio
         .or(source.title.clone())
         .map(|title| format!("Copy of {title}"))
         .unwrap_or_else(|| "Copy of Untitled".into());
+    let schema = data_source_schema_for_parent(ctx, &parent, !ctx.dry_run)?;
     let mut payload = json!({
         "parent": parent_payload(&parent),
-        "properties": page_create_properties(&title, json!({}), &parent)?,
+        "properties": page_create_properties(&title, json!({}), &parent, schema.as_ref())?,
     });
     if !markdown.trim().is_empty() {
         payload["children"] = json!(markdown_to_blocks(&markdown));
@@ -1855,7 +1858,8 @@ fn cached_data_source_rows(
 
 fn bulk_update_data_source(ctx: &Context, args: DsBulkUpdateArgs) -> Result<Value, NotionliError> {
     let resolved = resolve_target(ctx, &args.target)?;
-    let properties = properties_from_sets(args.set)?;
+    let schema = data_source_schema(ctx, &resolved.id, !ctx.dry_run)?;
+    let properties = properties_from_sets_with_schema(args.set, schema.as_ref())?;
     let max_write = args.max_write.unwrap_or(25).min(100);
     let changes = vec![json!({
         "type": "ds.bulk-update",
@@ -2580,7 +2584,8 @@ pub(crate) fn run_row(command: RowCommand, ctx: &Context) -> Result<Value, Notio
         RowCommand::Get { target } => run_page(PageCommand::Get { target }, ctx),
         RowCommand::Create(args) => {
             let ds = resolve_target(ctx, &args.ds)?;
-            let properties = properties_from_sets(args.set)?;
+            let schema = data_source_schema(ctx, &ds.id, !ctx.dry_run)?;
+            let properties = properties_from_sets_with_schema(args.set, schema.as_ref())?;
             let payload =
                 json!({ "parent": { "data_source_id": ds.id }, "properties": properties });
             if ctx.dry_run {
@@ -2630,6 +2635,7 @@ pub(crate) fn run_row(command: RowCommand, ctx: &Context) -> Result<Value, Notio
                 let id = object_id(&row).ok_or_else(|| NotionliError::NotFound {
                     message: "Matched row had no id.".into(),
                 })?;
+                cache_object(ctx, &row)?;
                 update_page(ctx, &id, None, args.set, None)
             } else {
                 let mut sets = args.set;
@@ -4880,9 +4886,10 @@ pub(crate) fn run_template(
                     None,
                 );
             }
+            let schema = data_source_schema_for_parent(ctx, &resolved_parent, true)?;
             let mut payload = json!({
                 "parent": parent_payload(&resolved_parent),
-                "properties": page_create_properties(&title, json!({}), &resolved_parent)?,
+                "properties": page_create_properties(&title, json!({}), &resolved_parent, schema.as_ref())?,
             });
             if !markdown.trim().is_empty() {
                 payload["children"] = json!(markdown_to_blocks(&markdown));

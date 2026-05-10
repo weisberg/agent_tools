@@ -184,3 +184,66 @@ fn workflow_symphony_export_and_validate() {
         .success()
         .stdout(contains("\"valid\": true"));
 }
+
+#[test]
+fn reindex_search_query_count_and_board_use_sqlite_cache() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join(".lira-test");
+    init_project(&root);
+    create_ticket(&root, "Alpha indexed ticket");
+    create_ticket(&root, "Beta indexed ticket");
+
+    lira(&root)
+        .args(["label", "add", "ORION-1", "search", "--json"])
+        .assert()
+        .success();
+    lira(&root)
+        .args([
+            "task",
+            "add",
+            "ORION-1",
+            "Write SQL-backed search.",
+            "--tag",
+            "sql",
+            "--json",
+        ])
+        .assert()
+        .success();
+
+    lira(&root)
+        .args(["reindex", "--json"])
+        .assert()
+        .success()
+        .stdout(contains("\"tickets_indexed\": 2"));
+    assert!(root.join("index/tickets.sqlite").exists());
+
+    lira(&root)
+        .args(["search", "Alpha", "--json"])
+        .assert()
+        .success()
+        .stdout(contains("ORION-1"))
+        .stdout(predicates::str::contains("ORION-2").not());
+    lira(&root)
+        .args(["query", "--label", "search", "--task-tag", "sql", "--json"])
+        .assert()
+        .success()
+        .stdout(contains("ORION-1"));
+    lira(&root)
+        .args(["count", "--group-by", "status", "--json"])
+        .assert()
+        .success()
+        .stdout(contains("\"backlog\": 2"));
+    lira(&root)
+        .args(["board", "--json"])
+        .assert()
+        .success()
+        .stdout(contains("\"board\""));
+
+    std::fs::remove_file(root.join("index/tickets.sqlite")).expect("remove index");
+    lira(&root)
+        .args(["search", "Alpha", "--json"])
+        .assert()
+        .success()
+        .stdout(contains("ORION-1"));
+    assert!(root.join("index/tickets.sqlite").exists());
+}

@@ -44,6 +44,9 @@ For release notes, see [`CHANGELOG.md`](CHANGELOG.md).
   creation, and optional `--upsert-key` matching.
 - Data-source parent moves through `ds move DATA_SOURCE NEW_DATABASE`.
 - Row relation updates through `row relate TARGET RELATION_PROP RELATED`.
+- Schema-aware typed property setters for data-source page/row writes,
+  including title, rich text, number, checkbox, date, select, status,
+  multi-select, relation, people, URL, email, and phone properties.
 - Cache-first `ds schema`, `ds schema diff`, `ds schema validate`, and
   `ds schema apply`, plus `ds lint --rules`, for local data-source schema
   review and live schema changes on `--apply`.

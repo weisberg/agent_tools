@@ -8,26 +8,50 @@ use crate::context::Context;
 use crate::error::NotionliError;
 use crate::notion::run_block_children;
 use crate::resolve::ResolvedTarget;
-use crate::util::{looks_like_date, split_assignment};
+use crate::util::{looks_like_date, normalize_uuidish, split_assignment};
 
-pub(crate) fn properties_from_sets(sets: Vec<String>) -> Result<Value, NotionliError> {
+pub(crate) fn properties_from_sets_with_schema(
+    sets: Vec<String>,
+    schema: Option<&Value>,
+) -> Result<Value, NotionliError> {
     let mut map = Map::new();
     for assignment in sets {
         let (name, value) = split_assignment(&assignment)?;
-        map.insert(name.clone(), property_value(&value));
+        let property_schema = schema
+            .and_then(Value::as_object)
+            .and_then(|properties| properties.get(&name));
+        map.insert(
+            name.clone(),
+            typed_property_value(&name, &value, property_schema)?,
+        );
     }
     Ok(Value::Object(map))
 }
 
-pub(crate) fn title_properties(title: &str, mut properties: Value) -> Value {
+pub(crate) fn title_properties(title: &str, properties: Value) -> Value {
+    title_properties_with_schema(title, properties, None)
+}
+
+pub(crate) fn title_properties_with_schema(
+    title: &str,
+    mut properties: Value,
+    schema: Option<&Value>,
+) -> Value {
     let map = properties
         .as_object_mut()
         .expect("properties_from_sets returns object");
-    if !map.contains_key("Name") && !map.contains_key("Title") {
-        map.insert(
-            "Name".into(),
-            json!({ "title": [{ "type": "text", "text": { "content": title } }] }),
-        );
+    if !map.values().any(|property| property.get("title").is_some()) {
+        if let Some(title_name) = title_property_name(schema) {
+            map.insert(
+                title_name,
+                json!({ "title": [{ "type": "text", "text": { "content": title } }] }),
+            );
+        } else if !map.contains_key("Name") && !map.contains_key("Title") {
+            map.insert(
+                "Name".into(),
+                json!({ "title": [{ "type": "text", "text": { "content": title } }] }),
+            );
+        }
     }
     properties
 }
@@ -36,6 +60,7 @@ pub(crate) fn page_create_properties(
     title: &str,
     properties: Value,
     parent: &ResolvedTarget,
+    schema: Option<&Value>,
 ) -> Result<Value, NotionliError> {
     if parent.object_type == "page" {
         if !properties.as_object().map(Map::is_empty).unwrap_or(true) {
@@ -45,13 +70,14 @@ pub(crate) fn page_create_properties(
         }
         return Ok(page_title_property(title));
     }
-    Ok(title_properties(title, properties))
+    Ok(title_properties_with_schema(title, properties, schema))
 }
 
 pub(crate) fn page_update_title_properties(
     title: &str,
     page: Option<&Value>,
     properties: Value,
+    schema: Option<&Value>,
 ) -> Value {
     let is_plain_page = page
         .and_then(|page| page.get("parent"))
@@ -63,7 +89,7 @@ pub(crate) fn page_update_title_properties(
         map.insert("title".into(), page_title_value(title));
         return Value::Object(map);
     }
-    title_properties(title, properties)
+    title_properties_with_schema(title, properties, schema)
 }
 
 fn page_title_property(title: &str) -> Value {
@@ -90,6 +116,186 @@ pub(crate) fn property_value(value: &str) -> Value {
         return json!({ "date": { "start": date } });
     }
     json!({ "rich_text": [{ "type": "text", "text": { "content": value } }] })
+}
+
+pub(crate) fn title_property_name(schema: Option<&Value>) -> Option<String> {
+    schema.and_then(Value::as_object).and_then(|properties| {
+        properties.iter().find_map(|(name, property)| {
+            (property.get("type").and_then(Value::as_str) == Some("title")).then(|| name.clone())
+        })
+    })
+}
+
+fn typed_property_value(
+    name: &str,
+    value: &str,
+    property_schema: Option<&Value>,
+) -> Result<Value, NotionliError> {
+    let Some(property_schema) = property_schema else {
+        return Ok(property_value(value));
+    };
+    match property_schema
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+    {
+        "title" => Ok(json!({ "title": rich_text(value) })),
+        "rich_text" => Ok(json!({ "rich_text": rich_text(value) })),
+        "number" => Ok(json!({ "number": parse_optional_number(name, value)? })),
+        "checkbox" => Ok(json!({ "checkbox": parse_bool(name, value)? })),
+        "date" => Ok(json!({ "date": parse_date_value(value) })),
+        "select" => {
+            if value.is_empty() {
+                Ok(json!({ "select": null }))
+            } else {
+                validate_option_name(name, value, property_schema, "select")?;
+                Ok(json!({ "select": { "name": value } }))
+            }
+        }
+        "status" => {
+            if value.is_empty() {
+                Ok(json!({ "status": null }))
+            } else {
+                validate_option_name(name, value, property_schema, "status")?;
+                Ok(json!({ "status": { "name": value } }))
+            }
+        }
+        "multi_select" => {
+            let values = split_list(value);
+            validate_option_names(name, &values, property_schema, "multi_select")?;
+            Ok(json!({
+                "multi_select": values
+                    .into_iter()
+                    .map(|item| json!({ "name": item }))
+                    .collect::<Vec<_>>()
+            }))
+        }
+        "relation" => Ok(json!({
+            "relation": split_list(value)
+                .into_iter()
+                .map(|item| json!({ "id": normalize_relation_id(&item) }))
+                .collect::<Vec<_>>()
+        })),
+        "people" => Ok(json!({
+            "people": split_list(value)
+                .into_iter()
+                .map(|item| json!({ "id": normalize_relation_id(&item) }))
+                .collect::<Vec<_>>()
+        })),
+        "url" => Ok(json!({ "url": optional_string(value) })),
+        "email" => Ok(json!({ "email": optional_string(value) })),
+        "phone_number" => Ok(json!({ "phone_number": optional_string(value) })),
+        "files" => Err(NotionliError::Validation {
+            message: format!(
+                "Property `{name}` has type files; use `notionli file attach` instead of --set."
+            ),
+        }),
+        "formula" | "rollup" | "created_time" | "created_by" | "last_edited_time"
+        | "last_edited_by" | "unique_id" => Err(NotionliError::Validation {
+            message: format!("Property `{name}` is read-only and cannot be set."),
+        }),
+        _ => Ok(property_value(value)),
+    }
+}
+
+fn parse_optional_number(name: &str, value: &str) -> Result<Value, NotionliError> {
+    if value.is_empty() {
+        return Ok(Value::Null);
+    }
+    let number = value
+        .parse::<f64>()
+        .map_err(|_| NotionliError::Validation {
+            message: format!("Property `{name}` expects a number, got `{value}`."),
+        })?;
+    Ok(json!(number))
+}
+
+fn parse_bool(name: &str, value: &str) -> Result<bool, NotionliError> {
+    match value.to_ascii_lowercase().as_str() {
+        "true" | "yes" | "y" | "1" => Ok(true),
+        "false" | "no" | "n" | "0" => Ok(false),
+        _ => Err(NotionliError::Validation {
+            message: format!("Property `{name}` expects a boolean, got `{value}`."),
+        }),
+    }
+}
+
+fn parse_date_value(value: &str) -> Value {
+    if value.is_empty() {
+        return Value::Null;
+    }
+    let start = if value == "today" {
+        Utc::now().date_naive().to_string()
+    } else {
+        value.to_string()
+    };
+    json!({ "start": start })
+}
+
+fn optional_string(value: &str) -> Value {
+    if value.is_empty() {
+        Value::Null
+    } else {
+        Value::String(value.to_string())
+    }
+}
+
+fn split_list(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn validate_option_names(
+    property_name: &str,
+    values: &[String],
+    property_schema: &Value,
+    schema_key: &str,
+) -> Result<(), NotionliError> {
+    for value in values {
+        validate_option_name(property_name, value, property_schema, schema_key)?;
+    }
+    Ok(())
+}
+
+fn validate_option_name(
+    property_name: &str,
+    value: &str,
+    property_schema: &Value,
+    schema_key: &str,
+) -> Result<(), NotionliError> {
+    let options = option_names(property_schema, schema_key);
+    if options.is_empty() || options.iter().any(|option| option == value) {
+        return Ok(());
+    }
+    Err(NotionliError::Validation {
+        message: format!(
+            "Property `{property_name}` option `{value}` is not available. Available options: {}.",
+            options.join(", ")
+        ),
+    })
+}
+
+fn option_names(property_schema: &Value, schema_key: &str) -> Vec<String> {
+    property_schema
+        .get(schema_key)
+        .and_then(|typed| typed.get("options"))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.get("name").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn normalize_relation_id(value: &str) -> String {
+    normalize_uuidish(value.split_once(':').map(|(_, id)| id).unwrap_or(value))
 }
 
 pub(crate) fn parent_payload(parent: &ResolvedTarget) -> Value {

@@ -11,13 +11,13 @@ use serde_json::{json, Value};
 use crate::cli::{PageFetchArgs, PagePatchArgs};
 use crate::content::{
     apply_markdown_budget, block_update_payload, blocks_to_markdown, markdown_to_blocks,
-    page_update_title_properties, properties_from_sets, rich_text_plain,
+    page_update_title_properties, properties_from_sets_with_schema, rich_text_plain,
 };
 use crate::context::{AuthSource, Context, OauthCredentials};
 use crate::error::NotionliError;
 use crate::resolve::{resolve_target, ResolvedTarget};
-use crate::storage::log_operation;
-use crate::util::{api_message, approx_tokens, object_id, operation_id};
+use crate::storage::{cache_object, log_operation, sqlite_query_json};
+use crate::util::{api_message, approx_tokens, object_id, operation_id, sql_escape};
 
 const API_BASE: &str = "https://api.notion.com/v1";
 
@@ -49,19 +49,21 @@ pub(crate) fn update_page(
     if_unmodified_since: Option<String>,
 ) -> Result<Value, NotionliError> {
     let resolved = resolve_target(ctx, target)?;
-    let mut properties = properties_from_sets(sets)?;
+    let page = if title.is_some() || !sets.is_empty() {
+        page_for_property_schema(ctx, &resolved.id, !ctx.dry_run)?
+    } else {
+        None
+    };
+    let schema = page
+        .as_ref()
+        .and_then(page_data_source_id)
+        .map(|data_source_id| data_source_schema(ctx, data_source_id, !ctx.dry_run))
+        .transpose()?
+        .flatten();
+    let mut properties = properties_from_sets_with_schema(sets, schema.as_ref())?;
     if let Some(title) = title {
-        let page = if ctx.dry_run {
-            None
-        } else {
-            Some(notion_request(
-                ctx,
-                "GET",
-                &format!("/pages/{}", resolved.id),
-                None,
-            )?)
-        };
-        properties = page_update_title_properties(&title, page.as_ref(), properties);
+        properties =
+            page_update_title_properties(&title, page.as_ref(), properties, schema.as_ref());
     }
     let mut payload = json!({ "properties": properties });
     if let Some(ts) = if_unmodified_since {
@@ -75,6 +77,96 @@ pub(crate) fn update_page(
         json!(resolved),
         vec![json!({ "type": "page.update" })],
     )
+}
+
+pub(crate) fn data_source_schema_for_parent(
+    ctx: &Context,
+    parent: &ResolvedTarget,
+    allow_live: bool,
+) -> Result<Option<Value>, NotionliError> {
+    match parent.object_type.as_str() {
+        "data_source" => data_source_schema(ctx, &parent.id, allow_live),
+        "database" => {
+            let Some(database) = cached_object(ctx, &parent.id)?.or_else(|| {
+                if allow_live {
+                    notion_request(ctx, "GET", &format!("/databases/{}", parent.id), None).ok()
+                } else {
+                    None
+                }
+            }) else {
+                return Ok(None);
+            };
+            let Some(source_id) = database
+                .get("data_sources")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+                .and_then(|item| item.get("id"))
+                .and_then(Value::as_str)
+            else {
+                return Ok(None);
+            };
+            data_source_schema(ctx, source_id, allow_live)
+        }
+        _ => Ok(None),
+    }
+}
+
+pub(crate) fn data_source_schema(
+    ctx: &Context,
+    data_source_id: &str,
+    allow_live: bool,
+) -> Result<Option<Value>, NotionliError> {
+    if let Some(schema) =
+        cached_object(ctx, data_source_id)?.and_then(|value| value.get("properties").cloned())
+    {
+        return Ok(Some(schema));
+    }
+    if !allow_live {
+        return Ok(None);
+    }
+    let data_source = notion_request(ctx, "GET", &format!("/data_sources/{data_source_id}"), None)?;
+    cache_object(ctx, &data_source)?;
+    Ok(data_source.get("properties").cloned())
+}
+
+fn page_for_property_schema(
+    ctx: &Context,
+    page_id: &str,
+    allow_live: bool,
+) -> Result<Option<Value>, NotionliError> {
+    if let Some(page) = cached_object(ctx, page_id)? {
+        return Ok(Some(page));
+    }
+    if !allow_live {
+        return Ok(None);
+    }
+    let page = notion_request(ctx, "GET", &format!("/pages/{page_id}"), None)?;
+    cache_object(ctx, &page)?;
+    Ok(Some(page))
+}
+
+fn cached_object(ctx: &Context, object_id: &str) -> Result<Option<Value>, NotionliError> {
+    let rows = sqlite_query_json(
+        &ctx.db_path,
+        &format!(
+            "SELECT raw_json FROM objects WHERE object_id = '{}' LIMIT 1",
+            sql_escape(object_id)
+        ),
+    )?;
+    let Some(raw) = rows.into_iter().next().and_then(|row| {
+        row.get("raw_json")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+    }) else {
+        return Ok(None);
+    };
+    Ok(Some(serde_json::from_str(&raw)?))
+}
+
+fn page_data_source_id(page: &Value) -> Option<&str> {
+    page.get("parent")
+        .and_then(|parent| parent.get("data_source_id"))
+        .and_then(Value::as_str)
 }
 
 pub(crate) fn patch_page(ctx: &Context, args: PagePatchArgs) -> Result<Value, NotionliError> {
