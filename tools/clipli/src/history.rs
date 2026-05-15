@@ -169,7 +169,7 @@ impl HistoryStore {
         for line in contents.lines().filter(|line| !line.trim().is_empty()) {
             entries.push(serde_json::from_str::<HistoryEntry>(line)?);
         }
-        entries.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+        entries.sort_by_key(|entry| std::cmp::Reverse(entry.captured_at));
         Ok(entries)
     }
 
