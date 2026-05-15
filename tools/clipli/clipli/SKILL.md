@@ -10,7 +10,8 @@ description: |
   conversion, (6) template management (versioning, linting, search, import/export),
   (7) checking local clipboard/config readiness with doctor, (8) agent-command
   templatization and batch rendering, (9) copying generated Excel-style tables
-  as SVG or PNG image artifacts instead of editable HTML.
+  as SVG or PNG image artifacts instead of editable HTML, (10) privacy-aware clipboard
+  history, watch, search, and restore workflows, (11) shell completion generation.
   Requires macOS. Binary must be built first with cargo build --release.
 ---
 
@@ -24,7 +25,7 @@ Binary in this repo: `tools/clipli/target/release/clipli`
 
 Current binary version: `clipli 0.4.0`
 
-All clipboard operations require a macOS GUI session. Non-clipboard commands (`doctor --skip-clipboard`, `convert`, `lint`, `render`, `excel --dry-run`) work in automation and CI-like contexts.
+All clipboard operations require a macOS GUI session. Non-clipboard commands (`doctor --skip-clipboard`, `convert`, `lint`, `render`, `history record --input`, `excel --dry-run`) work in automation and CI-like contexts.
 
 ## Readiness Check
 
@@ -45,7 +46,9 @@ In sandboxed agent environments, `doctor` may report the template store as not w
 If a new agent is handed `clipli` as a skill, the main thing to understand is that it mixes safe inspection commands with commands that mutate live user state.
 
 - `write`, `capture`, `paste`, `excel`, and `excel-edit` change the current macOS clipboard.
+- `watch`, `history record`, and `history restore` can persist or replay clipboard data. Treat them as privacy-sensitive.
 - `capture`, `edit`, `delete`, `restore`, and `import` persist changes under the clipli config store, typically `~/Library/Application Support/clipli/templates/` on macOS.
+- `history` persists entries under the clipli config store, typically `~/Library/Application Support/clipli/history/` on macOS.
 - `doctor`, `inspect`, `read`, `convert`, `search`, `show`, `lint`, and `render` are the safest first moves.
 - `excel --dry-run`, `excel-edit --dry-run`, and `paste --dry-run` let you preview output before touching the clipboard.
 - `capture` reads whatever is on the clipboard right now. It does not capture from a file path.
@@ -53,16 +56,19 @@ If a new agent is handed `clipli` as a skill, the main thing to understand is th
 - `render` writes files or stdout only. It does not touch the clipboard.
 - `capture --strategy agent --agent-command <cmd>` invokes an external process directly, passes a JSON request on stdin, and validates JSON from stdout.
 - If the user asks for an Excel table copied as SVG or PNG, use `clipli excel --copy-as svg` or `clipli excel --copy-as png`; do not use the default editable HTML clipboard path for that request.
+- `watch` and `history record` default to `--sensitive skip`, which stores metadata only if common secret markers are detected. Use `--sensitive allow` only when the user explicitly wants payload retention.
 - If the clipboard format is unknown, start with `inspect`.
 
 ## Safe Vs Mutating Commands
 
 | Command family | Side effect |
 |---|---|
-| `doctor`, `inspect`, `read`, `convert`, `list`, `show`, `search`, `versions`, `lint`, `render` | Safe read/preview operations |
-| `excel --dry-run`, `excel-edit --dry-run`, `paste --dry-run` | Safe preview operations |
+| `doctor`, `inspect`, `read`, `convert`, `list`, `show`, `search`, `versions`, `lint`, `render`, `history list`, `history search`, `history show` | Safe read/preview operations |
+| `excel --dry-run`, `excel-edit --dry-run`, `paste --dry-run`, `history restore --dry-run` | Safe preview operations |
 | `write`, `paste`, `excel`, `excel-edit` | Mutate the live clipboard |
 | `capture`, `edit`, `delete`, `restore`, `import` | Change the persistent template store |
+| `watch`, `history record` | Change the persistent history store |
+| `history restore` | Mutates the live clipboard unless `--dry-run` is used |
 
 ## Safe Default Workflow
 
@@ -105,6 +111,10 @@ CSV file  →  clipli excel  →  clipboard  →  Cmd+V into Excel
 | Convert RTF to HTML | `clipli convert --from rtf --to html` |
 | Render many outputs without touching the clipboard | `clipli render my_template --data-file rows.json` |
 | Let an external LLM tool templatize captured HTML | `clipli capture --name my_template --templatize --strategy agent --agent-command my-agent` |
+| Record one clipboard item into history | `clipli watch --once` |
+| Search clipboard history | `clipli history search "revenue"` |
+| Restore a history item safely | `clipli history restore ID --dry-run -o payload.bin` |
+| Generate shell completions | `clipli completions zsh` |
 
 ## 1. CSV to Excel Table
 
@@ -249,7 +259,37 @@ clipli write --type png -i image.png        # binary content
 
 When writing HTML, `--with-plain` (default: true) auto-generates a plain-text fallback so apps that don't accept HTML still get content.
 
-## 4. Format Conversion
+## 4. Clipboard History and Watch
+
+History is local and privacy-sensitive. Prefer bounded commands in agent workflows.
+
+```bash
+# Record exactly one current clipboard item
+clipli watch --once
+
+# Record up to 10 new clipboard payloads, redacting likely sensitive text
+clipli watch --max-items 10 --sensitive redact
+
+# Test history without reading the live clipboard
+clipli history record --type plain --input note.txt --json
+
+# Query and inspect
+clipli history list
+clipli history list --json
+clipli history search "quarterly revenue"
+clipli history show ID --content
+
+# Restore or preview
+clipli history restore ID
+clipli history restore ID --dry-run
+clipli history restore ID --dry-run -o restored.bin
+```
+
+Default sensitive policy is `skip`: if text contains common secret markers such as `api_key`, `bearer `, `password`, `private key`, `secret=`, or `token=`, clipli stores metadata but no payload. `redact` stores a redacted marker payload. `allow` stores the original payload and should only be used when payload retention is explicitly desired.
+
+History metadata includes ID, timestamp, source app when available, pasteboard type, UTI, byte size, SHA-256, payload path, and redaction status. Payloads live under the clipli config directory in `history/payloads/`.
+
+## 5. Format Conversion
 
 Reads from stdin (or `-i file`), converts, outputs to stdout (or `-o file`). Does not touch the clipboard.
 
@@ -269,7 +309,7 @@ clipli convert --from html --to j2 --strategy heuristic < table.html
 clipli convert --from j2 --to html -D '{"name":"Alice","revenue":"$5.2M"}' -i template.j2
 ```
 
-## 5. Capture Clipboard as Template
+## 6. Capture Clipboard as Template
 
 Copy formatted content in any app (Excel, PowerPoint, Word, browser), then run:
 
@@ -329,7 +369,7 @@ Expected agent response:
 
 Validation rejects invalid Jinja, invalid variable names, structural mismatches, scripts, iframes, event handlers, and `javascript:` URLs.
 
-## 6. Render and Paste Templates
+## 7. Render and Paste Templates
 
 Fill a saved template with data, write the rendered HTML + plain-text fallback to the clipboard.
 
@@ -375,7 +415,7 @@ clipli render quarterly_report --data-file rows.json --format plain
 clipli render quarterly_report --data-file rows.json --json
 ```
 
-## 7. Template Lifecycle
+## 8. Template Lifecycle
 
 **Find templates:**
 
@@ -447,6 +487,16 @@ The default `clipli excel` command generates Excel-native HTML (Office XML names
 
 For hand-crafted Excel HTML via `clipli write --type html`, see [references/excel_format.md](references/excel_format.md).
 
+## Shell Completions
+
+Generate completion scripts from the installed binary:
+
+```bash
+clipli completions bash
+clipli completions zsh
+clipli completions fish
+```
+
 ## Config
 
 Optional config file, typically `~/Library/Application Support/clipli/config.toml` on macOS. CLI flags always override these values:
@@ -474,6 +524,6 @@ timeout_secs = 30
 
 Without `--json`: errors go to stderr as plain text, exit code 1.
 
-With `--json`, errors go to stdout as `{"ok":false,"error":"...","code":"STORE_NOT_FOUND"}`. JSON mode is available on the automation-oriented commands, including `inspect`, `capture`, `paste`, `list`, `show`, `delete`, `versions`, `lint`, `search`, `excel`, `excel-edit`, `render`, `convert`, and `doctor`.
+With `--json`, errors go to stdout as `{"ok":false,"error":"...","code":"STORE_NOT_FOUND"}`. JSON mode is available on the automation-oriented commands, including `inspect`, `capture`, `paste`, `list`, `show`, `delete`, `versions`, `lint`, `search`, `excel`, `excel-edit`, `render`, `convert`, `doctor`, `watch`, and `history`.
 
 Error code prefixes: `PB_` (pasteboard), `STORE_` (template store), `RENDER_` (template engine), `CLEAN_` (HTML cleaner), `TEMPLATIZE_` (variable extraction), `RTF_` (conversion).

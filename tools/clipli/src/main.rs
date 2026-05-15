@@ -1,6 +1,7 @@
 mod clean;
 mod excel;
 mod excel_edit;
+mod history;
 mod lint;
 mod model;
 mod pb;
@@ -11,7 +12,8 @@ mod templatize;
 
 use std::path::PathBuf;
 
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::Shell;
 
 use clean::{CleanOptions, TargetApp};
 use model::{PbType, TableInput, TemplateMeta};
@@ -500,6 +502,90 @@ enum Commands {
         #[arg(long)]
         skip_clipboard: bool,
     },
+    /// Generate shell completions
+    Completions {
+        #[arg(value_enum)]
+        shell: Shell,
+    },
+    /// Searchable, privacy-aware clipboard history
+    History {
+        #[command(subcommand)]
+        command: HistoryCommand,
+    },
+    /// Capture clipboard changes into history
+    Watch {
+        /// Capture one current clipboard snapshot and exit
+        #[arg(long)]
+        once: bool,
+        /// Maximum entries to record before exiting
+        #[arg(long)]
+        max_items: Option<usize>,
+        /// Polling interval in milliseconds
+        #[arg(long, default_value = "1000")]
+        interval_ms: u64,
+        /// Sensitive payload handling: skip, redact, or allow
+        #[arg(long, default_value = "skip", value_parser = ["skip", "redact", "allow"])]
+        sensitive: String,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum HistoryCommand {
+    /// Record clipboard content or test input into history
+    Record {
+        /// Pasteboard type to record
+        #[arg(long, short = 't', default_value = "plain")]
+        r#type: String,
+        /// Read payload from file instead of the clipboard
+        #[arg(long, short = 'i')]
+        input: Option<PathBuf>,
+        /// Source app label for file-based records
+        #[arg(long)]
+        source_app: Option<String>,
+        /// Sensitive payload handling: skip, redact, or allow
+        #[arg(long, default_value = "skip", value_parser = ["skip", "redact", "allow"])]
+        sensitive: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// List recorded history entries
+    List {
+        #[arg(long, default_value = "20")]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Search metadata and text payloads
+    Search {
+        query: String,
+        #[arg(long, default_value = "20")]
+        limit: usize,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show one history entry
+    Show {
+        id: String,
+        /// Include text payload preview when available
+        #[arg(long)]
+        content: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Restore one history entry to the clipboard or dry-run output
+    Restore {
+        id: String,
+        /// Print or write payload instead of mutating the clipboard
+        #[arg(long)]
+        dry_run: bool,
+        /// Write dry-run payload to a file
+        #[arg(long, short = 'o')]
+        output: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -548,6 +634,14 @@ fn main() {
             | Commands::Render { json: true, .. }
             | Commands::Convert { json: true, .. }
             | Commands::Doctor { json: true, .. }
+            | Commands::Watch { json: true, .. }
+            | Commands::History {
+                command: HistoryCommand::Record { json: true, .. }
+                    | HistoryCommand::List { json: true, .. }
+                    | HistoryCommand::Search { json: true, .. }
+                    | HistoryCommand::Show { json: true, .. }
+                    | HistoryCommand::Restore { json: true, .. },
+            }
     );
 
     if let Err(e) = run(cli.command, &config) {
@@ -751,6 +845,15 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
             json,
             skip_clipboard,
         } => cmd_doctor(json, skip_clipboard, config),
+        Commands::Completions { shell } => cmd_completions(shell),
+        Commands::History { command } => cmd_history(command),
+        Commands::Watch {
+            once,
+            max_items,
+            interval_ms,
+            sensitive,
+            json,
+        } => cmd_watch(once, max_items, interval_ms, sensitive, json),
     }
 }
 
@@ -1996,6 +2099,151 @@ fn cmd_convert(
     Ok(())
 }
 
+fn cmd_completions(shell: Shell) -> Result<(), Box<dyn std::error::Error>> {
+    let mut cmd = Cli::command();
+    clap_complete::generate(shell, &mut cmd, "clipli", &mut std::io::stdout());
+    Ok(())
+}
+
+fn cmd_history(command: HistoryCommand) -> Result<(), Box<dyn std::error::Error>> {
+    let store = history::HistoryStore::new(history_dir());
+    match command {
+        HistoryCommand::Record {
+            r#type,
+            input,
+            source_app,
+            sensitive,
+            json,
+        } => {
+            let pb_type = parse_pb_type(&r#type)?;
+            let policy = parse_sensitive_policy(&sensitive)?;
+            let (data, source_app) = match input {
+                Some(path) => (std::fs::read(path)?, source_app),
+                None => (pb::read_type(pb_type)?, source_app.or_else(pb::source_app)),
+            };
+            let entry = store.record(pb_type, &data, source_app, policy)?;
+            print_history_entries(vec![entry], json)?;
+        }
+        HistoryCommand::List { limit, json } => {
+            let entries = store.list()?.into_iter().take(limit).collect();
+            print_history_entries(entries, json)?;
+        }
+        HistoryCommand::Search { query, limit, json } => {
+            let entries = store.search(&query)?.into_iter().take(limit).collect();
+            print_history_entries(entries, json)?;
+        }
+        HistoryCommand::Show { id, content, json } => {
+            let entry = store.get(&id)?;
+            if json {
+                let content_value = if content && history::is_text_type(entry.pb_type) {
+                    store
+                        .payload(&entry)
+                        .ok()
+                        .map(|payload| String::from_utf8_lossy(&payload).to_string())
+                } else {
+                    None
+                };
+                let mut out = serde_json::json!({"ok": true, "entry": entry});
+                if let Some(content) = content_value {
+                    out["content"] = serde_json::Value::String(content);
+                }
+                println!("{}", serde_json::to_string_pretty(&out)?);
+            } else {
+                print_history_entry(&entry);
+                if content {
+                    let payload = store.payload(&entry)?;
+                    if history::is_text_type(entry.pb_type) {
+                        println!("\n{}", String::from_utf8_lossy(&payload));
+                    } else {
+                        println!("\n(binary payload: {} bytes)", payload.len());
+                    }
+                }
+            }
+        }
+        HistoryCommand::Restore {
+            id,
+            dry_run,
+            output,
+            json,
+        } => {
+            let entry = store.get(&id)?;
+            let payload = store.payload(&entry)?;
+            if dry_run {
+                if let Some(path) = output {
+                    std::fs::write(path, &payload)?;
+                } else if json {
+                    // JSON mode must remain parseable; omit payload bytes unless --output is used.
+                } else if history::is_text_type(entry.pb_type) {
+                    print!("{}", String::from_utf8_lossy(&payload));
+                } else {
+                    return Err("binary history restore --dry-run requires --output <file>".into());
+                }
+            } else {
+                pb::write(&[(entry.pb_type, &payload)])?;
+            }
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "ok": true,
+                        "id": entry.id,
+                        "dry_run": dry_run,
+                        "bytes": payload.len(),
+                        "type": entry.uti,
+                    }))?
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn cmd_watch(
+    once: bool,
+    max_items: Option<usize>,
+    interval_ms: u64,
+    sensitive: String,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let policy = parse_sensitive_policy(&sensitive)?;
+    let store = history::HistoryStore::new(history_dir());
+    let mut recorded = Vec::new();
+    let mut last_hash: Option<String> = None;
+
+    loop {
+        let snapshot = pb::read_all()?;
+        let source_app = snapshot.source_app.clone();
+        if let Some(entry) = snapshot
+            .types
+            .into_iter()
+            .find(|entry| !matches!(entry.pb_type, PbType::Unknown))
+        {
+            let hash = history::sha256_hex(&entry.data);
+            if last_hash.as_deref() != Some(hash.as_str()) {
+                last_hash = Some(hash);
+                let saved = store.record(entry.pb_type, &entry.data, source_app, policy)?;
+                if !json {
+                    eprintln!("recorded history entry {}", saved.id);
+                }
+                recorded.push(saved);
+            }
+        }
+
+        if once {
+            break;
+        }
+        if max_items.map(|max| recorded.len() >= max).unwrap_or(false) {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(interval_ms));
+    }
+
+    if json {
+        print_history_entries(recorded, true)?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, serde::Serialize)]
 struct DoctorCheck {
     name: &'static str,
@@ -2199,6 +2447,10 @@ fn config_dir() -> PathBuf {
         .join("clipli")
 }
 
+fn history_dir() -> PathBuf {
+    config_dir().join("history")
+}
+
 fn config_file_path() -> PathBuf {
     config_dir().join("config.toml")
 }
@@ -2223,6 +2475,43 @@ fn parse_pb_type(s: &str) -> Result<PbType, Box<dyn std::error::Error>> {
         )
         .into()),
     }
+}
+
+fn parse_sensitive_policy(
+    value: &str,
+) -> Result<history::SensitivePolicy, Box<dyn std::error::Error>> {
+    history::SensitivePolicy::parse(value).map_err(Into::into)
+}
+
+fn print_history_entries(
+    entries: Vec<history::HistoryEntry>,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "ok": true,
+                "entries": entries,
+            }))?
+        );
+    } else if entries.is_empty() {
+        println!("No history entries");
+    } else {
+        for entry in &entries {
+            print_history_entry(entry);
+        }
+    }
+    Ok(())
+}
+
+fn print_history_entry(entry: &history::HistoryEntry) {
+    let source = entry.source_app.as_deref().unwrap_or("-");
+    let privacy = if entry.redacted { " redacted" } else { "" };
+    println!(
+        "{}  {}  {}  {} bytes  {}{}",
+        entry.id, entry.captured_at, entry.uti, entry.size_bytes, source, privacy
+    );
 }
 
 /// Map a target app string from config to TargetApp enum.

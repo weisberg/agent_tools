@@ -972,7 +972,7 @@ XLI uses the best tool for each job:
 
 **The OOXML patch engine is the target architecture.** It opens the ZIP, streams unchanged entries through, rewrites only the affected XML parts using `quick-xml`'s high-performance pull parser/writer, and writes a new ZIP. This avoids loading the entire workbook into a DOM, avoids the roundtrip corruption risks of general-purpose read-write libraries, and is naturally fast for surgical edits.
 
-**Phase 1 reality:** The OOXML patch engine currently covers plain cell value writes by rewriting only the affected worksheet XML while stream-copying unchanged ZIP parts. Formula writes, formatting, sheet operations, batches, and template application can still fall back to `umya-spreadsheet` with explicit warnings in the response. As the patch engine gains coverage in Phase 2 and 3, operations graduate off umya one by one until it can be removed.
+**Phase 1 reality:** The OOXML patch engine covers value writes, formula writes, write-only batches, supported mixed batches and template application, supported formatting, and sheet rename/hide/unhide/reorder by rewriting only the affected XML parts while stream-copying unchanged ZIP entries. Sheet add/delete/copy, alignment formatting, and any unsupported mutation shapes still fall back to `umya-spreadsheet` with explicit warnings in the response. Artifact-preservation tests cover charts, drawings, worksheet relationships, tables, data validation, formulas, formatting, sheet metadata updates, mixed batches, and template application; macro-bearing fixtures remain a planned expansion.
 
 ### 7.3 Key Implementation Details
 
@@ -1439,7 +1439,7 @@ The atomic commit model depends on predictable, fast execution.
 - `inspect`, `read`, `write`, `format`, `sheet`, `batch`, `apply`, `template`, `lint`, `recalc`, `validate`, `doctor`, `create`, `schema`
 - Atomic commit layer: locks, fingerprinting, staging, `sync_all()`, atomic rename
 - `--expect-fingerprint` on all mutating commands
-- OOXML patch engine: cell values/formulas, shared strings, styles/number formats, defined names, sheet add/rename/delete, workbook metadata, macro part pass-through
+- OOXML patch engine: cell values/formulas, supported styles/number formats, column widths, sheet rename/hide/unhide/reorder, workbook recalculation metadata, write-only batches, and supported mixed batch/apply paths
 - `umya-spreadsheet` fallback for operations outside OOXML patch coverage (with warnings)
 - `calamine` for all read operations
 - `rust_xlsxwriter` for new file creation

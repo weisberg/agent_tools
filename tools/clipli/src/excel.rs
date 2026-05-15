@@ -680,8 +680,8 @@ pub fn svg_to_png(svg: &str, scale: f32) -> Result<Vec<u8>, Box<dyn std::error::
     let scale = if scale > 0.0 { scale } else { 1.0 };
     let scaled_w = ((size.width() as f32) * scale).round().max(1.0) as u32;
     let scaled_h = ((size.height() as f32) * scale).round().max(1.0) as u32;
-    let mut pixmap = resvg::tiny_skia::Pixmap::new(scaled_w, scaled_h)
-        .ok_or("failed to allocate PNG pixmap")?;
+    let mut pixmap =
+        resvg::tiny_skia::Pixmap::new(scaled_w, scaled_h).ok_or("failed to allocate PNG pixmap")?;
     resvg::render(
         &tree,
         resvg::tiny_skia::Transform::from_scale(scale, scale),
@@ -1389,7 +1389,7 @@ mod tests {
         let headers = vec!["Name".to_string()];
         let rows = vec![vec!["Alice".to_string()]];
         let svg = generate_svg(&headers, &rows, &ExcelConfig::default());
-        let png = svg_to_png(&svg).unwrap();
+        let png = svg_to_png(&svg, 1.0).unwrap();
 
         assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
     }

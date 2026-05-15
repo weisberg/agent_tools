@@ -83,6 +83,7 @@ fn sheet_reorder() {
         "C,A,B",
     ]);
     assert_eq!(out["status"], "ok");
+    assert_eq!(out["warnings"].as_array().expect("warnings").len(), 0);
 
     let names = sheet_names(&path);
     assert_eq!(names, vec!["C", "A", "B"]);
@@ -109,9 +110,11 @@ fn sheet_unhide() {
 
     let hide = xli_json(&["sheet", path.to_str().unwrap(), "hide", "B"]);
     assert_eq!(hide["status"], "ok");
+    assert_eq!(hide["warnings"].as_array().expect("warnings").len(), 0);
 
     let unhide = xli_json(&["sheet", path.to_str().unwrap(), "unhide", "B"]);
     assert_eq!(unhide["status"], "ok");
+    assert_eq!(unhide["warnings"].as_array().expect("warnings").len(), 0);
 
     let inspect = xli_json(&["inspect", path.to_str().unwrap()]);
     let sheets = inspect["output"]["sheets"].as_array().unwrap();
@@ -153,8 +156,27 @@ fn sheet_rename() {
         "NewName",
     ]);
     assert_eq!(out["status"], "ok");
+    assert_eq!(out["warnings"].as_array().expect("warnings").len(), 0);
 
     let names = sheet_names(&path);
     assert!(!names.contains(&"OldName".to_string()));
     assert!(names.contains(&"NewName".to_string()));
+}
+
+#[test]
+fn sheet_add_still_discloses_fallback() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("test.xlsx");
+    create_workbook(&path, "A");
+
+    let out = xli_json(&["sheet", path.to_str().unwrap(), "add", "B"]);
+    assert_eq!(out["status"], "ok");
+    assert!(
+        out["warnings"]
+            .as_array()
+            .expect("warnings")
+            .iter()
+            .any(|warning| warning.as_str().unwrap_or_default().contains("umya")),
+        "sheet add should still disclose fallback usage"
+    );
 }

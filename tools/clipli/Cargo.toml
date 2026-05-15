@@ -5,6 +5,9 @@ edition = "2021"
 rust-version = "1.75"
 description = "Clipboard intelligence CLI — template-driven pasteboard for agents and power users"
 license = "MIT"
+repository = "https://github.com/weisberg/agent_tools"
+homepage = "https://github.com/weisberg/agent_tools/tree/main/tools/clipli"
+readme = "README.md"
 
 [[bin]]
 name = "clipli"
@@ -13,6 +16,7 @@ path = "src/main.rs"
 [dependencies]
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
+clap_complete = "4"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -40,6 +44,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 regex = "1"
 zip = "2"
 resvg = "0.45"
+sha2 = "0.10"
 
 [dev-dependencies]
 assert_cmd = "2"

@@ -159,7 +159,7 @@ fn error_envelope_always_has_status_and_command() {
             "case {i}: status should be \"error\""
         );
         assert!(
-            json["command"].as_str().map_or(false, |s| !s.is_empty()),
+            json["command"].as_str().is_some_and(|s| !s.is_empty()),
             "case {i}: command should be a non-empty string"
         );
         let errors = json["errors"]

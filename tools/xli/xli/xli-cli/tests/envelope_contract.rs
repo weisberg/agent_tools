@@ -117,7 +117,7 @@ fn error_envelope_structure() {
     let json: Value = serde_json::from_slice(&out.stdout).expect("valid json");
     assert_eq!(json["status"], "error", "status should be error");
     assert!(
-        json["errors"].as_array().map_or(false, |a| !a.is_empty()),
+        json["errors"].as_array().is_some_and(|a| !a.is_empty()),
         "errors array should be non-empty"
     );
     assert!(json["command"].is_string(), "command field should be set");
@@ -148,7 +148,7 @@ fn value_write_does_not_include_umya_warning() {
 }
 
 #[test]
-fn formula_write_includes_explicit_umya_warning() {
+fn formula_write_does_not_include_umya_warning() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("test.xlsx");
     create_workbook(&path);
@@ -162,13 +162,14 @@ fn formula_write_includes_explicit_umya_warning() {
     ]);
     let warnings = json["warnings"].as_array().expect("warnings array");
     assert!(
-        warnings.iter().any(|w| {
+        warnings.iter().all(|w| {
             let msg = w.as_str().unwrap_or_default();
-            msg.contains("umya")
+            !msg.contains("umya")
         }),
-        "formula writes should still disclose fallback usage, got: {:?}",
+        "formula writes should use the OOXML patch path, got warnings: {:?}",
         warnings
     );
+    assert_eq!(json["needs_recalc"], true);
 }
 
 #[test]

@@ -2,7 +2,7 @@
 
 **Spec:** `CLIPLI_SPEC.md` v1.0.0-spec  
 **Current crate version:** `0.4.0`
-**Plan updated:** 2026-04-23
+**Plan updated:** 2026-05-15
 
 ---
 
@@ -50,10 +50,13 @@ The next stage is to turn that solid core into a more complete product: close th
 - [x] `-v` / `-vv` / `-vvv` tracing for automation debugging
 - [x] `doctor` environment readiness checks with JSON output
 - [x] `excel --copy-as svg|png` image clipboard output for table artifacts
+- [x] `watch`, `history record/list/search/show/restore`, and privacy-aware local clipboard history
+- [x] shell completion generation via `clap_complete`
+- [x] macOS GitHub Actions workflow for fmt, tests, clippy, and package checks
 
 ### Verified baseline
 
-`cargo test` passes 210 tests with 0 failures, including the unit and integration suites, with 7 GUI-dependent pasteboard tests still ignored as expected.
+`cargo test` passes 214 tests with 0 failures, including the unit and integration suites, with 7 GUI-dependent pasteboard tests still ignored as expected.
 
 ### Completed so far
 
@@ -75,12 +78,14 @@ The next stage is to turn that solid core into a more complete product: close th
 - [x] ~~agent templatization uses a stdin/stdout protocol only; clipli does not yet invoke an external agent command itself~~ (done in v0.4)
 - [x] ~~template storage has no versioning, rollback, locking, or import/export story~~ (done in v0.3)
 - [x] ~~`capture` does not yet provide the preview workflow described in the spec~~ (done in v0.2)
-- [ ] shell completions and release/distribution work are still missing
+- [x] ~~shell completions are still missing~~ (implemented via `clipli completions <SHELL>`)
+- [ ] release packaging and distribution work are still missing
 - [x] ~~batch rendering workflows do not exist yet~~ (done in v0.4)
 - [x] ~~external agent command execution (beyond stdin/stdout protocol) is not yet supported~~ (done in v0.4)
 - [x] ~~`-v` / `-vv` debug logging is not yet available~~ (done in v0.4)
-- [ ] JSON output is broad, but the project still needs explicit compatibility guarantees before a stable release
-- [ ] clipboard watch/history needs privacy controls before implementation
+- [x] JSON output has a documented v1.0 compatibility target for the top-level error envelope
+- [x] clipboard watch/history has default privacy controls for likely sensitive text
+- [ ] history filtering by source app/type/date and retention policy are still missing
 
 ### Strategic implication
 
@@ -365,8 +370,8 @@ The version roadmap below is sequenced around those layers.
 
 ### Primary deliverables
 
-- [ ] clipboard watch mode and history capture
-- [ ] history search and replay
+- [x] clipboard watch mode and history capture
+- [x] history search and replay
 - [ ] improved preview and browser workflows
 - [ ] deeper Excel and table automation
 
@@ -374,23 +379,26 @@ The version roadmap below is sequenced around those layers.
 
 #### 0.5.1 Clipboard watch and history
 
-- [ ] Add `clipli watch`
-- [ ] Persist captures with timestamps, source app, and content fingerprints
-- [ ] Deduplicate by hash where appropriate
-- [ ] Define a storage structure that can scale without becoming opaque
+- [x] Add `clipli watch`
+- [x] Persist captures with timestamps, source app, content type, size, UTI, and SHA-256 fingerprint
+- [x] Deduplicate consecutive watch captures by hash
+- [x] Define a transparent JSONL-plus-payloads storage structure under the clipli config directory
+- [x] Add privacy controls: `--sensitive skip|redact|allow`
 
 **Acceptance:**
 
-- [ ] users can build a searchable clipboard history instead of relying on one-off captures
+- [x] users can build a searchable clipboard history instead of relying on one-off captures
 
 #### 0.5.2 History query and replay
 
-- [ ] Add commands such as:
-  - [ ] `clipli history list`
-  - [ ] `clipli history search <QUERY>`
-  - [ ] `clipli history show <ID>`
-  - [ ] `clipli history restore <ID>`
+- [x] Add commands such as:
+  - [x] `clipli history list`
+  - [x] `clipli history search <QUERY>`
+  - [x] `clipli history show <ID>`
+  - [x] `clipli history restore <ID>`
+  - [x] `clipli history record`
 - [ ] Support filtering by source app, type, and date range
+- [ ] Add retention/prune controls so long-running history does not grow forever
 
 #### 0.5.3 Preview improvements
 
@@ -410,12 +418,13 @@ The version roadmap below is sequenced around those layers.
 
 ### Risks
 
-- [ ] watch mode turns clipli into a longer-running tool with different operational concerns
-- [ ] history can accumulate sensitive data; storage model and documentation must respect that reality
+- [x] watch mode turns clipli into a longer-running tool with different operational concerns; initial controls are `--once`, `--max-items`, and `--interval-ms`
+- [x] history can accumulate sensitive data; storage model and documentation now call out the default `skip` policy
+- [ ] long-running watch still needs retention, lock/single-writer behavior, and operational docs before being declared stable
 
 ### Exit criteria
 
-- [ ] clipli can passively collect and actively query clipboard history
+- [x] clipli can passively collect and actively query clipboard history
 - [ ] power users can automate more of their recurring Excel and preview workflows
 
 ---
@@ -426,8 +435,9 @@ The version roadmap below is sequenced around those layers.
 
 ### Primary deliverables
 
-- [ ] shell completions
-- [ ] CI and release automation
+- [x] shell completions
+- [x] CI foundation
+- [ ] release automation
 - [ ] packaging and installation polish
 - [ ] optional library extraction
 - [ ] initial platform/interface expansion groundwork
@@ -436,20 +446,20 @@ The version roadmap below is sequenced around those layers.
 
 #### 0.6.1 Shell completions and help polish
 
-- [ ] Add `clap_complete`
-- [ ] Generate bash, zsh, and fish completions
+- [x] Add `clap_complete`
+- [x] Generate bash, zsh, and fish completions
 - [ ] Improve command help text with realistic examples
 - [ ] Add template-name completion if practical
 
 #### 0.6.2 CI and release pipeline
 
-- [ ] Add GitHub Actions for build, test, clippy, and fmt
-- [ ] Document expected handling for GUI-only tests
+- [x] Add GitHub Actions for build, test, clippy, and fmt
+- [x] Document expected handling for GUI-only tests in the workflow comments and docs
 - [ ] Add release packaging for macOS
 
 #### 0.6.3 Packaging
 
-- [ ] Support `cargo install` cleanly
+- [ ] Support `cargo install` cleanly from a published package or tagged git revision
 - [ ] Add Homebrew distribution if desired
 - [ ] Ensure release artifacts are easy to download and verify
 
@@ -468,8 +478,9 @@ The version roadmap below is sequenced around those layers.
 
 ### Exit criteria
 
-- [ ] clipli is easier to install and use from a shell
-- [ ] CI protects the mainline
+- [x] clipli is easier to use from a shell via generated completions
+- [x] CI protects the mainline
+- [ ] clipli is easier to install through release artifacts
 - [ ] the codebase is structured for broader integrations without premature abstraction
 
 ---
@@ -485,12 +496,13 @@ The version roadmap below is sequenced around those layers.
 - [x] config behavior is consistent and tested
 - [x] template versioning, linting, and search exist
 - [ ] agent integration is production-usable
-- [ ] CI, packaging, completions, and docs are in place
+- [x] CI foundation, completions, and docs are in place
+- [ ] packaging/release artifacts are in place
 - [ ] the release notes clearly distinguish stable core features from experimental ones
 
 ### Features that may remain post-1.0 or experimental
 
-- [ ] clipboard watch/history
+- [ ] clipboard watch/history retention and advanced filtering
 - [ ] MCP server
 - [ ] preview server
 - [ ] image templates
@@ -543,15 +555,16 @@ These workstreams should progress alongside the version milestones rather than b
 
 ### Next wave
 
-4. `v0.6` distribution, interfaces, and ecosystem ← **recommended next**
-5. `v0.5` automation and history, after privacy controls are designed
+4. `v0.5` history/watch groundwork ✅ IMPLEMENTED
+5. `v0.6` distribution, interfaces, and ecosystem ← **recommended next**
 
 ### Why this order
 
 - [ ] It fixes the most obvious user-facing correctness gaps first.
 - [ ] It protects user-generated assets before adding more automation on top.
 - [ ] It makes agent integration more trustworthy by building on a safer core.
-- [ ] It postpones broader operational surface area until the fundamentals are stable.
+- [x] It postponed broader operational surface area until privacy controls existed; initial history/watch now ships with `skip` as the default sensitive-data policy.
+- [ ] The next high-leverage work is release packaging, retention policy, and stronger compatibility documentation.
 
 ---
 

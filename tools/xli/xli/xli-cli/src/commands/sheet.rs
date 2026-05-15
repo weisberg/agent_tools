@@ -89,21 +89,22 @@ pub fn run(args: SheetArgs, human: bool) -> Result<bool> {
         AtomicCommitOptions {
             dry_run: args.dry_run,
         },
-        |src, dst| {
-            xli_ooxml::apply_sheet_action(src, dst, &action)?;
-            Ok::<_, xli_core::XliError>(())
-        },
+        |src, dst| xli_ooxml::apply_sheet_action(src, dst, &action),
     );
 
     match result {
-        Ok((commit, ())) => output::emit(
+        Ok((commit, result)) => output::emit(
             &output::ok_envelope(
                 "sheet",
                 input,
                 SheetOutput {
                     action: format!("{:?}", args.action),
                 },
-                vec![UMYA_FALLBACK_WARNING.to_string()],
+                if result.used_fallback {
+                    vec![UMYA_FALLBACK_WARNING.to_string()]
+                } else {
+                    Vec::new()
+                },
                 false,
                 if args.dry_run {
                     xli_core::CommitMode::DryRun

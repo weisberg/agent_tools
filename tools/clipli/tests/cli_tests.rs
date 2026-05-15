@@ -1,8 +1,17 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
+use serde_json::Value;
+use tempfile::TempDir;
 
 fn clipli() -> Command {
     Command::cargo_bin("clipli").unwrap()
+}
+
+fn isolated_clipli(home: &TempDir) -> Command {
+    let mut cmd = clipli();
+    cmd.env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join(".config"));
+    cmd
 }
 
 // ---------------------------------------------------------------------------
@@ -276,4 +285,93 @@ fn test_excel_png_dry_run_writes_png_file() {
 
     let png = std::fs::read(png_path).unwrap();
     assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
+}
+
+#[test]
+fn test_completions_emit_shell_script() {
+    clipli()
+        .args(["completions", "zsh"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("#compdef clipli"));
+}
+
+#[test]
+fn test_history_record_search_show_restore_dry_run() {
+    let home = tempfile::TempDir::new().unwrap();
+    let input_dir = tempfile::TempDir::new().unwrap();
+    let input = input_dir.path().join("payload.txt");
+    std::fs::write(&input, "Quarterly launch notes").unwrap();
+
+    let output = isolated_clipli(&home)
+        .args([
+            "history",
+            "record",
+            "--type",
+            "plain",
+            "--input",
+            input.to_str().unwrap(),
+            "--source-app",
+            "fixture.app",
+            "--sensitive",
+            "allow",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let id = json["entries"][0]["id"].as_str().unwrap().to_string();
+
+    isolated_clipli(&home)
+        .args(["history", "search", "launch", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(&id));
+
+    isolated_clipli(&home)
+        .args(["history", "show", &id, "--content", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Quarterly launch notes"));
+
+    isolated_clipli(&home)
+        .args(["history", "restore", &id, "--dry-run"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Quarterly launch notes"));
+
+    let restore_json = isolated_clipli(&home)
+        .args(["history", "restore", &id, "--dry-run", "--json"])
+        .output()
+        .unwrap();
+    assert!(restore_json.status.success());
+    let json: Value = serde_json::from_slice(&restore_json.stdout).unwrap();
+    assert_eq!(json["ok"], true);
+    assert_eq!(json["id"], id);
+}
+
+#[test]
+fn test_history_record_skips_sensitive_payload_by_default() {
+    let home = tempfile::TempDir::new().unwrap();
+    let input_dir = tempfile::TempDir::new().unwrap();
+    let input = input_dir.path().join("secret.txt");
+    std::fs::write(&input, "NOTION_API_KEY=secret").unwrap();
+
+    let output = isolated_clipli(&home)
+        .args([
+            "history",
+            "record",
+            "--type",
+            "plain",
+            "--input",
+            input.to_str().unwrap(),
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["entries"][0]["redacted"], true);
+    assert!(json["entries"][0]["payload_path"].is_null());
 }
