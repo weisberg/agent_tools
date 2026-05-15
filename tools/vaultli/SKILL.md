@@ -29,11 +29,11 @@ The source of truth is the files on disk. `INDEX.jsonl` is a derived cache.
 
 ## What This Skill Is Not
 
-`vaultli` is not a full-text search engine and not a document reader.
+`vaultli` is not a full-text search engine or vector database.
 
 - `search` and `show` operate on `INDEX.jsonl`.
 - Search quality depends on frontmatter, especially `description`, `tags`, and `category`.
-- After a hit is found, open the file from the returned `file` field.
+- After a hit is found, use `resolve`, `cat`, or `context` to hydrate real file content.
 - For sidecars, you often need both the `.md` sidecar and the `source` asset.
 
 ## Default Invocation
@@ -70,6 +70,25 @@ explicitly instead of depending on the current working directory.
 | Best for | Fast repeated CLI calls | Debugging and reference reads |
 | Parity role | Checked against Python | Oracle for Rust parity tests |
 | Expected behavior | Same user-visible commands and JSON envelopes | Same user-visible commands and JSON envelopes |
+
+## Stability Boundaries
+
+Treat the flat-file lifecycle as stable: `init`, `add`, `scaffold`, `ingest`,
+`index`, `validate`, `search`, `show`, `resolve`, `cat`, `set`, `unset`, and
+`refresh`.
+
+Treat `search --semantic`, `context`, `federated-search`, and `git-info` as
+implemented but still experimental helper surfaces. They are safe to use, but a
+new agent should prefer explicit JSON inspection and validation around them
+instead of assuming they are a full vector store, orchestration engine, or git
+history system.
+
+Before claiming compatibility or release readiness, run:
+
+```bash
+UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/test_vaultli.py
+cd tools/vaultli/rs && cargo test
+```
 
 ## Core model
 
@@ -117,10 +136,17 @@ vaultli --json init ./kb
 | Create a sidecar for a non-markdown asset without indexing yet | `scaffold <file>` |
 | Bulk scaffold missing metadata for a file or directory | `ingest <path>` |
 | Preview a bulk ingest without writing files | `ingest <path> --dry-run` |
+| Limit bulk ingest to safe slices | `ingest <path> --include 'queries/*.sql' --exclude 'queries/tmp*'` |
 | Preview the generated metadata before writing anything | `infer <file>` |
+| Edit one frontmatter field by path or id | `set <target> <field> <value>` |
+| Remove one frontmatter field by path or id | `unset <target> <field>` |
+| Refresh inferred metadata while preserving body content | `refresh <target>` |
 | Rebuild cache state after edits | `index` |
 | Audit the vault for broken links, duplicate IDs, and stale index state | `validate` |
-| Look up candidate records by metadata | `search`, then `show`; narrow with `--category`, `--status`, `--domain`, `--scope`, `--tag`, or `--limit` |
+| Look up candidate records by metadata | `search`, then `resolve` or `cat`; narrow with filters, `--sort`, `--explain`, or experimental `--semantic` |
+| Assemble content for an answer | `context [query]` or `context --id <id>` |
+| Search multiple vaults | `federated-search --vault <root> --vault <other>` |
+| Inspect git state for a vault item | `git-info [target]` |
 
 4. Immediately refine generated metadata.
 
@@ -143,11 +169,17 @@ vaultli --json validate --root ./kb
 
 ```bash
 vaultli --json search retention --root ./kb
-vaultli --json search --root ./kb --category query --tag retention --limit 5
-vaultli --json show queries/retention --root ./kb
+vaultli --json search --root ./kb --category query --tag retention --sort priority --limit 5
+vaultli --json search "retention query" --root ./kb --semantic --explain
+vaultli --json resolve queries/retention --root ./kb --body --source
+vaultli cat queries/retention --root ./kb --source
+vaultli --json context --root ./kb --id queries/retention --token-budget 2000
 ```
 
-Then open the actual file referenced by `file`.
+Use `show` when you only need metadata. Use `resolve` when you need file paths
+and optional body/source content. Use `cat` when the next step needs raw text.
+Use `context` when answering a question and you want dependencies packed into a
+single JSON bundle.
 
 ## Sidecar rules
 
@@ -174,8 +206,11 @@ source: ./report.sql
 - Non-markdown assets are not searchable until a sidecar exists.
 - `validate` reports problems; it does not repair them.
 - Prefer `search` filters over `search --jq` for common metadata fields.
+- Treat `search --semantic` as experimental token-overlap matching, not vector retrieval.
 - `search --jq` requires the `jq` binary to be installed.
 - Sidecar hash changes come from the source asset bytes, not from sidecar prose edits.
+- Use `ingest --dry-run` before bulk writes, and add `--include`/`--exclude` globs on large trees.
+- Use `set`, `unset`, and `refresh` instead of hand-editing frontmatter when making simple metadata changes.
 
 ## A Safe Default Loop
 
@@ -184,10 +219,12 @@ vaultli --json root .
 vaultli --json add ./kb/docs/guide.md --root ./kb
 vaultli --json scaffold ./kb/queries/report.sql --root ./kb
 vaultli --json ingest ./kb --root ./kb --dry-run
+vaultli --json ingest ./kb --root ./kb --dry-run --include 'queries/*.sql'
 # edit the generated markdown files
 vaultli --json index --root ./kb
 vaultli --json validate --root ./kb
 vaultli --json search report --root ./kb
+vaultli --json resolve queries/report --root ./kb --body --source
 ```
 
 ## When A New Agent Usually Gets Confused
@@ -198,6 +235,8 @@ vaultli --json search report --root ./kb
 - Forgetting to re-run `index` after metadata edits.
 - Treating `validate` output as if it were self-healing.
 - Reaching for Python by habit even when the Rust binary is already built.
+- Opening source paths manually when `resolve --source` or `cat --source` would avoid mistakes.
+- Running broad `ingest` on a large tree without `--dry-run` and include/exclude globs.
 
 ## Related docs
 

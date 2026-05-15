@@ -6,6 +6,7 @@ use serde_json::{Map, Number, Value};
 
 use crate::error::VaultliError;
 use crate::id::make_id;
+use crate::metadata::load_vault_defaults;
 use crate::paths::canonicalize_or_join;
 use crate::util::{order_metadata, COMMON_TAGS, DOMAIN_CANDIDATES};
 
@@ -46,6 +47,11 @@ pub fn infer_frontmatter(file: &Path, root: &Path) -> Result<Map<String, Value>,
             "source".into(),
             Value::String(format!("./{}", file.file_name().unwrap().to_string_lossy())),
         );
+    }
+    for (key, value) in load_vault_defaults(root)? {
+        if !matches!(key.as_str(), "id" | "source" | "file" | "hash") {
+            metadata.insert(key, value);
+        }
     }
     Ok(order_metadata(&metadata))
 }

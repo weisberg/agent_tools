@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import shutil
@@ -346,20 +347,29 @@ def search_index(
     scope: str | None = None,
     tags: list[str] | None = None,
     limit: int | None = None,
+    sort: str | None = None,
+    order: str = "asc",
+    explain: bool = False,
+    semantic: bool = False,
 ) -> list[dict[str, Any]]:
     """Search the index using a keyword query and optional jq filter."""
 
     if limit is not None and limit < 0:
         raise VaultliError("limit must be greater than or equal to 0", code="INVALID_LIMIT")
+    if order not in {"asc", "desc"}:
+        raise VaultliError("order must be either 'asc' or 'desc'", code="INVALID_ORDER")
 
     records = load_index_records(root)
     if query:
-        needle = query.casefold()
-        records = [
-            record
-            for record in records
-            if needle in json.dumps(record, sort_keys=True, ensure_ascii=False).casefold()
-        ]
+        if semantic:
+            records = [record for record in records if _semantic_score(record, query) > 0]
+        else:
+            needle = query.casefold()
+            records = [
+                record
+                for record in records
+                if needle in json.dumps(record, sort_keys=True, ensure_ascii=False).casefold()
+            ]
 
     field_filters = {
         "category": category,
@@ -409,6 +419,12 @@ def search_index(
             filtered.append(parsed)
         records = filtered
 
+    if explain:
+        records = [_with_match_explanation(record, query, field_filters, tags or [], semantic) for record in records]
+
+    if sort:
+        records = _sort_records(records, sort, order)
+
     if limit is not None:
         records = records[:limit]
 
@@ -425,6 +441,352 @@ def show_record(doc_id: str, *, root: Path | str | None = None) -> dict[str, Any
     if len(matches) > 1:
         raise VaultliError(f"Multiple indexed documents found for id {doc_id!r}", code="DUPLICATE_ID")
     return matches[0]
+
+
+def resolve_record(
+    doc_id: str,
+    *,
+    root: Path | str | None = None,
+    include_body: bool = False,
+    include_source: bool = False,
+) -> dict[str, Any]:
+    """Resolve an indexed id to source-of-truth files and optional content."""
+
+    root_path = _resolve_root_hint(root)
+    record = show_record(doc_id, root=root_path)
+    file_value = record.get("file")
+    if not isinstance(file_value, str) or not file_value:
+        raise VaultliError(f"Indexed record {doc_id!r} is missing a file path", code="RECORD_MISSING_FILE")
+
+    markdown_path = (root_path / file_value).resolve()
+    if not markdown_path.exists():
+        raise VaultliError(f"Indexed markdown file does not exist: {file_value}", code="FILE_NOT_FOUND")
+
+    resolved: dict[str, Any] = {
+        "record": record,
+        "file": file_value,
+        "path": str(markdown_path),
+    }
+    document = parse_markdown_file(markdown_path, root_path)
+    if include_body:
+        resolved["body"] = document.body
+
+    source = record.get("source")
+    if isinstance(source, str) and source.strip():
+        source_path = (markdown_path.parent / source).resolve()
+        resolved["source"] = source
+        resolved["source_path"] = str(source_path)
+        if source_path.exists():
+            resolved["source_file"] = _relative_path(source_path, root_path)
+        if include_source:
+            if not source_path.exists():
+                raise VaultliError(f"Source target does not exist for {doc_id!r}: {source}", code="BROKEN_SOURCE")
+            resolved["source_content"] = source_path.read_text(encoding="utf-8")
+    elif include_source:
+        resolved["source_content"] = markdown_path.read_text(encoding="utf-8")
+
+    return resolved
+
+
+def cat_record(doc_id: str, *, root: Path | str | None = None, source: bool = False) -> dict[str, Any]:
+    """Return body or source content for an indexed document."""
+
+    resolved = resolve_record(doc_id, root=root, include_body=not source, include_source=source)
+    if source:
+        return {
+            "id": doc_id,
+            "mode": "source",
+            "file": resolved.get("source_file", resolved["file"]),
+            "content": resolved.get("source_content", ""),
+        }
+    return {
+        "id": doc_id,
+        "mode": "body",
+        "file": resolved["file"],
+        "content": resolved.get("body", ""),
+    }
+
+
+def assemble_context(
+    query: str | None = None,
+    *,
+    root: Path | str | None = None,
+    ids: list[str] | None = None,
+    token_budget: int | None = None,
+    include_related: bool = False,
+    include_dependencies: bool = True,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """Build a deterministic, token-budgeted context bundle."""
+
+    if token_budget is not None and token_budget < 0:
+        raise VaultliError("token budget must be greater than or equal to 0", code="INVALID_TOKEN_BUDGET")
+
+    root_path = _resolve_root_hint(root)
+    seed_records = [show_record(doc_id, root=root_path) for doc_id in ids] if ids else search_index(query, root=root_path, limit=limit)
+    by_id = {record["id"]: record for record in load_index_records(root_path) if isinstance(record.get("id"), str)}
+
+    ordered_ids: list[str] = []
+    for record in seed_records:
+        doc_id = record.get("id")
+        if not isinstance(doc_id, str):
+            continue
+        ordered_ids.append(doc_id)
+        if include_dependencies and isinstance(record.get("depends_on"), list):
+            ordered_ids.extend(item for item in record["depends_on"] if isinstance(item, str))
+        if include_related and isinstance(record.get("related"), list):
+            ordered_ids.extend(item for item in record["related"] if isinstance(item, str))
+
+    selected: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    used_tokens = 0
+    for doc_id in ordered_ids:
+        if doc_id in seen or doc_id not in by_id:
+            continue
+        record = by_id[doc_id]
+        token_count = record.get("tokens") if isinstance(record.get("tokens"), int) else 0
+        if token_budget is not None and used_tokens + token_count > token_budget:
+            continue
+        resolved = resolve_record(doc_id, root=root_path, include_body=True)
+        selected.append({
+            "id": doc_id,
+            "tokens": token_count,
+            "file": resolved["file"],
+            "record": record,
+            "body": resolved.get("body", ""),
+        })
+        used_tokens += token_count
+        seen.add(doc_id)
+
+    return {
+        "root": str(root_path),
+        "query": query,
+        "token_budget": token_budget,
+        "used_tokens": used_tokens,
+        "count": len(selected),
+        "records": selected,
+    }
+
+
+def federated_search(
+    vaults: list[Path | str],
+    query: str | None = None,
+    *,
+    limit: int | None = None,
+    per_vault_limit: int | None = None,
+    semantic: bool = False,
+    explain: bool = False,
+    sort: str | None = None,
+    order: str = "asc",
+) -> dict[str, Any]:
+    """Search multiple vault roots and annotate each result with vault context."""
+
+    if not vaults:
+        raise VaultliError("at least one vault is required", code="VAULT_REQUIRED")
+    if limit is not None and limit < 0:
+        raise VaultliError("limit must be greater than or equal to 0", code="INVALID_LIMIT")
+    if per_vault_limit is not None and per_vault_limit < 0:
+        raise VaultliError("per-vault limit must be greater than or equal to 0", code="INVALID_LIMIT")
+
+    results: list[dict[str, Any]] = []
+    vault_summaries: list[dict[str, Any]] = []
+    for vault in vaults:
+        root_path = _resolve_root_hint(vault)
+        matches = search_index(
+            query,
+            root=root_path,
+            limit=per_vault_limit,
+            semantic=semantic,
+            explain=explain,
+            sort=sort,
+            order=order,
+        )
+        vault_name = root_path.name or str(root_path)
+        vault_summaries.append({"root": str(root_path), "name": vault_name, "matches": len(matches)})
+        for record in matches:
+            annotated = dict(record)
+            record_id = annotated.get("id")
+            annotated["_vault"] = {"root": str(root_path), "name": vault_name}
+            if isinstance(record_id, str):
+                annotated["global_id"] = f"{vault_name}:{record_id}"
+            results.append(annotated)
+
+    if limit is not None:
+        results = results[:limit]
+
+    return {
+        "query": query,
+        "total": len(results),
+        "vaults": vault_summaries,
+        "results": results,
+    }
+
+
+def git_info(target: Path | str | None = None, *, root: Path | str | None = None) -> dict[str, Any]:
+    """Return git repository and optional file state for a vault item."""
+
+    root_path = _resolve_root_hint(root)
+    git_path = shutil.which("git")
+    if git_path is None:
+        return {"root": str(root_path), "available": False, "reason": "git executable not found"}
+
+    file_path: Path | None = None
+    target_value = str(target) if target is not None else None
+    if target_value:
+        candidate = Path(target_value).expanduser()
+        if not candidate.is_absolute():
+            candidate = (root_path / candidate).resolve()
+        if candidate.exists():
+            file_path = candidate
+        else:
+            try:
+                record = show_record(target_value, root=root_path)
+                file_value = record.get("file")
+                if isinstance(file_value, str):
+                    file_path = (root_path / file_value).resolve()
+            except VaultliError:
+                file_path = candidate
+
+    repo_root = _git_capture(git_path, root_path, ["rev-parse", "--show-toplevel"])
+    if repo_root is None:
+        return {"root": str(root_path), "available": False, "reason": "not a git repository"}
+
+    branch = _git_capture(git_path, root_path, ["branch", "--show-current"])
+    head = _git_capture(git_path, root_path, ["rev-parse", "HEAD"])
+    dirty = bool(_git_capture(git_path, root_path, ["status", "--porcelain"]))
+    result: dict[str, Any] = {
+        "root": str(root_path),
+        "available": True,
+        "repo_root": repo_root,
+        "branch": branch or None,
+        "head": head,
+        "dirty": dirty,
+    }
+
+    if file_path is not None:
+        try:
+            relative = _relative_path(file_path, Path(repo_root))
+        except ValueError:
+            relative = str(file_path)
+        status = _git_capture(git_path, root_path, ["status", "--short", "--", relative])
+        last_commit = _git_capture(git_path, root_path, ["log", "-1", "--format=%H%x00%aI%x00%an", "--", relative])
+        file_info: dict[str, Any] = {
+            "path": str(file_path),
+            "relative_path": relative,
+            "status": status or "",
+            "tracked": _git_capture(git_path, root_path, ["ls-files", "--error-unmatch", "--", relative]) is not None,
+        }
+        if last_commit:
+            commit, committed_at, author = (last_commit.split("\0") + ["", "", ""])[:3]
+            file_info["last_commit"] = {"hash": commit, "committed_at": committed_at, "author": author}
+        result["file"] = file_info
+
+    return result
+
+
+def set_metadata_field(
+    target: Path | str,
+    field: str,
+    value: str,
+    *,
+    root: Path | str | None = None,
+    index: bool = False,
+) -> dict[str, Any]:
+    """Set one frontmatter field on a markdown file or indexed id."""
+
+    root_path = _resolve_root_hint(root)
+    document_path = _resolve_metadata_target(target, root_path)
+    document = parse_markdown_file(document_path, root_path)
+    if not document.has_frontmatter:
+        raise VaultliError(f"Markdown file has no frontmatter: {document.relative_path}", code="FRONTMATTER_MISSING")
+
+    metadata = dict(document.metadata)
+    metadata[field] = _parse_metadata_value(field, value)
+    document_path.write_text(render_document(metadata, document.body), encoding="utf-8")
+
+    result: dict[str, Any] = {
+        "root": str(root_path),
+        "file": document.relative_path,
+        "field": field,
+        "value": metadata[field],
+    }
+    if index:
+        result["index"] = build_index(root_path, full=False).to_dict()
+    return result
+
+
+def unset_metadata_field(
+    target: Path | str,
+    field: str,
+    *,
+    root: Path | str | None = None,
+    index: bool = False,
+) -> dict[str, Any]:
+    """Remove one frontmatter field from a markdown file or indexed id."""
+
+    root_path = _resolve_root_hint(root)
+    document_path = _resolve_metadata_target(target, root_path)
+    document = parse_markdown_file(document_path, root_path)
+    if not document.has_frontmatter:
+        raise VaultliError(f"Markdown file has no frontmatter: {document.relative_path}", code="FRONTMATTER_MISSING")
+
+    metadata = dict(document.metadata)
+    removed = metadata.pop(field, None)
+    document_path.write_text(render_document(metadata, document.body), encoding="utf-8")
+
+    result: dict[str, Any] = {
+        "root": str(root_path),
+        "file": document.relative_path,
+        "field": field,
+        "removed": removed,
+    }
+    if index:
+        result["index"] = build_index(root_path, full=False).to_dict()
+    return result
+
+
+def refresh_metadata(
+    target: Path | str,
+    *,
+    root: Path | str | None = None,
+    fields: list[str] | None = None,
+    index: bool = False,
+) -> dict[str, Any]:
+    """Refresh selected inferred metadata fields while preserving body content."""
+
+    root_path = _resolve_root_hint(root)
+    document_path = _resolve_metadata_target(target, root_path)
+    document = parse_markdown_file(document_path, root_path)
+    if not document.has_frontmatter:
+        raise VaultliError(f"Markdown file has no frontmatter: {document.relative_path}", code="FRONTMATTER_MISSING")
+
+    inference_target = document_path
+    source = document.metadata.get("source")
+    if isinstance(source, str) and source.strip():
+        inference_target = (document_path.parent / source).resolve()
+
+    inferred = infer_frontmatter(inference_target, root_path)
+    refreshable = fields or ["title", "description", "tags", "category", "domain", "tokens"]
+    metadata = dict(document.metadata)
+    changed: dict[str, Any] = {}
+    for field in refreshable:
+        if field in {"id", "source", "created"}:
+            continue
+        if field in inferred:
+            metadata[field] = inferred[field]
+            changed[field] = inferred[field]
+    metadata["updated"] = date.today().isoformat()
+    changed["updated"] = metadata["updated"]
+    document_path.write_text(render_document(metadata, document.body), encoding="utf-8")
+
+    result: dict[str, Any] = {
+        "root": str(root_path),
+        "file": document.relative_path,
+        "fields": changed,
+    }
+    if index:
+        result["index"] = build_index(root_path, full=False).to_dict()
+    return result
 
 
 def scaffold_file(file: Path | str, *, root: Path | str | None = None) -> dict[str, Any]:
@@ -473,6 +835,8 @@ def ingest_path(
     root: Path | str | None = None,
     index: bool = False,
     dry_run: bool = False,
+    include: list[str] | None = None,
+    exclude: list[str] | None = None,
 ) -> dict[str, Any]:
     """Scaffold missing metadata for one file or every eligible file under a directory."""
 
@@ -481,7 +845,9 @@ def ingest_path(
         raise VaultliError(f"File not found: {target_path}", code="FILE_NOT_FOUND")
 
     root_path = _resolve_root_hint(root if root is not None else (target_path if target_path.is_dir() else target_path.parent))
-    candidates = _ingest_candidates(target_path, root_path)
+    include_patterns = include or []
+    exclude_patterns = exclude or []
+    candidates = _ingest_candidates(target_path, root_path, include_patterns, exclude_patterns)
     scaffolded: list[dict[str, Any]] = []
     skipped: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
@@ -508,6 +874,8 @@ def ingest_path(
         "root": str(root_path),
         "path": _relative_path(target_path, root_path),
         "dry_run": dry_run,
+        "include": include_patterns,
+        "exclude": exclude_patterns,
         "indexed": False,
         "total": len(candidates),
         "scaffolded": scaffolded,
@@ -656,7 +1024,33 @@ def infer_frontmatter(path: Path | str, root: Path | str) -> dict[str, Any]:
         metadata["domain"] = domain
     if target_path.suffix.lower() != ".md":
         metadata["source"] = f"./{target_path.name}"
+    for key, value in load_vault_defaults(root_path).items():
+        if key not in {"id", "source", "file", "hash"}:
+            metadata[key] = value
     return ordered_metadata(metadata)
+
+
+def load_vault_defaults(root: Path | str) -> dict[str, Any]:
+    """Load optional metadata defaults from `.kbroot`.
+
+    `.kbroot` may be empty, a mapping of defaults, or a mapping with a
+    top-level `defaults` key. Invalid/non-mapping contents are ignored so the
+    marker remains safe as a pure marker file.
+    """
+
+    marker_path = Path(root).expanduser().resolve() / VAULT_MARKER
+    if not marker_path.exists():
+        return {}
+    text = marker_path.read_text(encoding="utf-8").strip()
+    if not text:
+        return {}
+    parsed = yaml.safe_load(text)
+    if not isinstance(parsed, dict):
+        return {}
+    defaults = parsed.get("defaults", parsed)
+    if not isinstance(defaults, dict):
+        return {}
+    return ordered_metadata(defaults)
 
 
 def infer_category(path: Path | str) -> str:
@@ -1037,9 +1431,26 @@ def _relative_path(path: Path, root: Path) -> str:
     return path.resolve().relative_to(root.resolve()).as_posix()
 
 
-def _ingest_candidates(target_path: Path, root_path: Path) -> list[Path]:
+def _git_capture(git_path: str, cwd: Path, args: list[str]) -> str | None:
+    completed = subprocess.run(
+        [git_path, "-C", str(cwd), *args],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.rstrip("\n")
+
+
+def _ingest_candidates(
+    target_path: Path,
+    root_path: Path,
+    include_patterns: list[str],
+    exclude_patterns: list[str],
+) -> list[Path]:
     if target_path.is_file():
-        return [target_path]
+        return [target_path] if _matches_ingest_patterns(target_path, root_path, include_patterns, exclude_patterns) else []
     if not target_path.is_dir():
         raise VaultliError(f"Expected a file, got directory: {target_path}", code="NOT_A_FILE")
 
@@ -1047,8 +1458,19 @@ def _ingest_candidates(target_path: Path, root_path: Path) -> list[Path]:
     for path in sorted(candidate for candidate in target_path.rglob("*") if candidate.is_file()):
         if _should_skip_ingest_file(path, root_path):
             continue
+        if not _matches_ingest_patterns(path, root_path, include_patterns, exclude_patterns):
+            continue
         candidates.append(path)
     return candidates
+
+
+def _matches_ingest_patterns(path: Path, root_path: Path, include_patterns: list[str], exclude_patterns: list[str]) -> bool:
+    relative = _relative_path(path, root_path)
+    if include_patterns and not any(fnmatch.fnmatch(relative, pattern) for pattern in include_patterns):
+        return False
+    if exclude_patterns and any(fnmatch.fnmatch(relative, pattern) for pattern in exclude_patterns):
+        return False
+    return True
 
 
 def _should_skip_ingest_file(path: Path, root_path: Path) -> bool:
@@ -1106,8 +1528,109 @@ def _normalize_value(value: Any) -> Any:
     return value
 
 
+def _resolve_metadata_target(target: Path | str, root_path: Path) -> Path:
+    """Resolve a metadata edit target from path or indexed id."""
+
+    raw = str(target)
+    candidate = Path(target).expanduser()
+    candidates: list[Path] = []
+    if candidate.is_absolute():
+        candidates.append(candidate.resolve())
+    else:
+        candidates.append((Path.cwd() / candidate).resolve())
+        candidates.append((root_path / raw).resolve())
+    for path in candidates:
+        if path.exists():
+            return path
+
+    record = show_record(raw, root=root_path)
+    file_value = record.get("file")
+    if not isinstance(file_value, str):
+        raise VaultliError(f"Indexed record {raw!r} is missing a file path", code="RECORD_MISSING_FILE")
+    return (root_path / file_value).resolve()
+
+
+def _parse_metadata_value(field: str, raw: str) -> Any:
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = raw
+
+    if field in LIST_FIELDS:
+        if isinstance(parsed, list):
+            return parsed
+        return [item.strip() for item in str(raw).split(",") if item.strip()]
+    if field in INTEGER_FIELDS:
+        try:
+            return int(parsed)
+        except (TypeError, ValueError) as exc:
+            raise VaultliError(f"Field {field!r} must be an integer", code="INVALID_FIELD_VALUE") from exc
+    return parsed
+
+
+def _record_match_score(record: dict[str, Any], query: str | None) -> int:
+    if not query:
+        return 0
+    needle = query.casefold()
+    weights = {"title": 8, "description": 5, "tags": 3, "aliases": 3, "id": 2}
+    score = 0
+    for field, weight in weights.items():
+        score += json.dumps(record.get(field), ensure_ascii=False).casefold().count(needle) * weight
+    return score + json.dumps(record, sort_keys=True, ensure_ascii=False).casefold().count(needle)
+
+
+def _semantic_score(record: dict[str, Any], query: str | None) -> int:
+    if not query:
+        return 0
+    query_tokens = set(_slug_tokens(query))
+    haystack = " ".join(
+        json.dumps(record.get(field, ""), ensure_ascii=False)
+        for field in ["id", "title", "description", "tags", "aliases", "category", "domain"]
+    )
+    return len(query_tokens & set(_slug_tokens(haystack)))
+
+
+def _with_match_explanation(
+    record: dict[str, Any],
+    query: str | None,
+    filters: dict[str, str | None],
+    tags: list[str],
+    semantic: bool,
+) -> dict[str, Any]:
+    explained = dict(record)
+    matched_fields: list[str] = []
+    if query:
+        needle = query.casefold()
+        for field, value in record.items():
+            if needle in json.dumps(value, ensure_ascii=False).casefold():
+                matched_fields.append(field)
+    explained["_match"] = {
+        "query": query,
+        "score": _record_match_score(record, query),
+        "semantic": semantic,
+        "semantic_score": _semantic_score(record, query) if semantic else 0,
+        "fields": matched_fields,
+        "filters": {key: value for key, value in filters.items() if value is not None},
+        "tags": tags,
+    }
+    return explained
+
+
+def _sort_records(records: list[dict[str, Any]], sort: str, order: str) -> list[dict[str, Any]]:
+    reverse = order == "desc"
+    if sort == "score":
+        return sorted(records, key=lambda record: record.get("_match", {}).get("score", 0), reverse=reverse)
+    allowed = {"id", "title", "updated", "created", "priority", "tokens", "category", "status"}
+    if sort not in allowed:
+        raise VaultliError(f"Unsupported sort field: {sort}", code="INVALID_SORT")
+    return sorted(records, key=lambda record: (record.get(sort) is None, record.get(sort)), reverse=reverse)
+
+
 def _slug_tokens(raw: str) -> list[str]:
-    cleaned = raw.replace(".", " ").replace("-", " ").replace("_", " ").lower()
+    cleaned = raw
+    for char in [".", "-", "_", '"', "'", "[", "]", ",", ":", "{", "}"]:
+        cleaned = cleaned.replace(char, " ")
+    cleaned = cleaned.lower()
     return [token for token in cleaned.split() if token]
 
 

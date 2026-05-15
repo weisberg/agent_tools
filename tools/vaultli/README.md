@@ -54,14 +54,16 @@ kb/
 
 ## What It Does Not Do
 
-`vaultli` is not a full retrieval engine or document database.
+`vaultli` is not a document database or vector retrieval engine.
 
 - `search` works against `INDEX.jsonl`, not raw document bodies.
 - Non-markdown files are invisible until they have sidecars.
 - `validate` reports problems but does not auto-fix them.
 - `INDEX.jsonl` should not be edited by hand.
 
-If you want the actual content behind a match, use the indexed `file` path and, for sidecars, the `source` field.
+If you want the actual content behind a match, use `resolve`, `cat`, or
+`context`. These commands hydrate files after `search` has narrowed the
+candidate set.
 
 ## Main Commands
 
@@ -69,12 +71,20 @@ If you want the actual content behind a match, use the indexed `file` path and, 
 |---|---|
 | `init [path]` | Create a new vault root with `.kbroot` and an empty `INDEX.jsonl` |
 | `index [--full]` | Rebuild the vault index |
-| `search <query>` | Search indexed metadata, optionally narrowed by category, status, domain, scope, tags, or limit |
+| `search <query>` | Search indexed metadata, optionally narrowed by filters, sorted, explained, or matched with experimental `--semantic` token overlap |
+| `federated-search --vault <root>` | Search multiple vaults and annotate each result with its vault origin |
 | `show <id>` | Show one indexed record by `id` |
+| `resolve <id>` | Resolve an indexed record to its markdown file, optional body, and optional source asset |
+| `cat <id>` | Print the markdown body or sidecar source content for an indexed record |
+| `context [query]` | Assemble a deterministic, token-budgeted context bundle from search results or explicit IDs |
 | `add <file>` | Scaffold metadata for a file and re-index |
 | `scaffold <file>` | Create frontmatter or sidecar metadata without re-indexing |
-| `ingest <path>` | Bulk scaffold missing metadata for one file or a directory |
+| `ingest <path>` | Bulk scaffold missing metadata for one file or a directory, with optional include/exclude globs |
+| `set <target> <field> <value>` | Set one frontmatter field by path or indexed ID |
+| `unset <target> <field>` | Remove one frontmatter field by path or indexed ID |
+| `refresh <target>` | Refresh inferred metadata fields while preserving body content |
 | `validate` | Report broken sources, duplicate ids, dangling refs, and stale index state |
+| `git-info [target]` | Return repository and optional file state for a vault item |
 | `root [path]` | Find the nearest vault root |
 | `make-id <file>` | Derive the canonical vault id for a file |
 | `infer <file>` | Preview inferred metadata without writing |
@@ -101,11 +111,18 @@ vaultli --json init ./kb
 vaultli --json add ./kb/docs/guide.md --root ./kb
 vaultli --json scaffold ./kb/queries/retention.sql --root ./kb
 vaultli --json ingest ./kb --root ./kb --dry-run
+vaultli --json ingest ./kb --root ./kb --dry-run --include 'queries/*.sql' --exclude 'queries/tmp*'
 vaultli --json index --root ./kb
 vaultli --json validate --root ./kb
 vaultli --json search retention --root ./kb
-vaultli --json search --root ./kb --category query --tag retention --limit 5
+vaultli --json search --root ./kb --category query --tag retention --sort priority --limit 5
+vaultli --json search "retention query" --root ./kb --semantic --explain
 vaultli --json show queries/retention --root ./kb
+vaultli --json resolve queries/retention --root ./kb --body --source
+vaultli cat queries/retention --root ./kb --source
+vaultli --json context --root ./kb --id queries/retention --token-budget 2000
+vaultli --json federated-search retention --vault ./kb --vault ../team-kb
+vaultli --json git-info queries/retention --root ./kb
 ```
 
 Python fallback (invoke with the parent of the `vaultli` package on `PYTHONPATH`):
@@ -140,11 +157,17 @@ For a new agent, the safest default loop is:
 4. Improve the inferred metadata, especially `description`, `tags`, and `category`.
 5. Run `index`.
 6. Run `validate`.
-7. Use `search` to shortlist records, then open the real files.
+7. Use `search` to shortlist records, then `resolve`, `cat`, or `context` to hydrate the real files.
 
 Use first-class filters before reaching for `--jq`: `--category`, `--status`,
-`--domain`, `--scope`, repeated `--tag`, and `--limit` all operate on indexed
-metadata and are available in both implementations.
+`--domain`, `--scope`, repeated `--tag`, `--limit`, `--sort`, `--order`, and
+`--explain` all operate on indexed metadata and are available in both
+implementations. `--semantic` is experimental token-overlap matching over
+indexed metadata, not vector retrieval.
+
+Use `ingest --include` and `ingest --exclude` with relative-path globs when
+preparing large trees. This keeps dry-runs small, reviewable, and safe for a
+new agent.
 
 ## Implementations
 
@@ -166,6 +189,26 @@ want to run the parity tests from outside the default in-repo layout.
 New agents should use the Rust binary unless it is unavailable or they are
 debugging a suspected Rust-specific issue. The Python implementation is still
 kept current so it can serve as a readable reference and cross-check.
+
+## Stability And Release Expectations
+
+The stable core is the flat-file workflow: `init`, `add`, `scaffold`, `ingest`,
+`index`, `validate`, `search`, `show`, `resolve`, `cat`, metadata maintenance,
+and JSON envelopes. `search --semantic`, `context`, `federated-search`, and
+`git-info` are implemented, dependency-light retrieval/operations helpers, but
+should still be treated as experimental surfaces until broader vaults exercise
+them.
+
+Before release or CI promotion, run:
+
+```bash
+UV_CACHE_DIR=/tmp/uv-cache uv run pytest tests/test_vaultli.py
+cd tools/vaultli/rs && cargo test
+```
+
+Compatibility expectation: Rust and Python should expose the same normal
+agent-facing commands and JSON shapes. If they intentionally diverge, document
+the divergence here and in `SKILL.md`.
 
 ## Related Docs
 

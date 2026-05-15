@@ -2,13 +2,17 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use serde_json::{json, Map, Value};
+use vaultli::context::assemble_context;
 use vaultli::error::VaultliError;
+use vaultli::federation::federated_search;
+use vaultli::gitinfo::git_info;
 use vaultli::id::make_id;
 use vaultli::index::{build_index, load_index_records};
 use vaultli::infer::infer_frontmatter;
+use vaultli::metadata::{refresh_metadata, set_metadata_field, unset_metadata_field};
 use vaultli::paths::find_root;
 use vaultli::scaffold::{add_file, ingest_path, init_vault, scaffold_file};
-use vaultli::search::{search_records, show_record};
+use vaultli::search::{cat_record, resolve_record, search_records, show_record};
 use vaultli::validate::validate_vault;
 
 #[derive(Parser)]
@@ -66,9 +70,70 @@ enum Commands {
         tags: Vec<String>,
         #[arg(long)]
         limit: Option<usize>,
+        #[arg(long)]
+        sort: Option<String>,
+        #[arg(long, default_value = "asc")]
+        order: String,
+        #[arg(long)]
+        explain: bool,
+        #[arg(long)]
+        semantic: bool,
+    },
+    FederatedSearch {
+        query: Option<String>,
+        #[arg(long = "vault", required = true)]
+        vaults: Vec<PathBuf>,
+        #[arg(long)]
+        limit: Option<usize>,
+        #[arg(long)]
+        per_vault_limit: Option<usize>,
+        #[arg(long)]
+        sort: Option<String>,
+        #[arg(long, default_value = "asc")]
+        order: String,
+        #[arg(long)]
+        semantic: bool,
+        #[arg(long)]
+        explain: bool,
     },
     Show {
         id: String,
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+    },
+    Resolve {
+        id: String,
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long)]
+        body: bool,
+        #[arg(long)]
+        source: bool,
+    },
+    Cat {
+        id: String,
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long)]
+        source: bool,
+    },
+    Context {
+        query: Option<String>,
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long = "id")]
+        ids: Vec<String>,
+        #[arg(long)]
+        token_budget: Option<i64>,
+        #[arg(long)]
+        related: bool,
+        #[arg(long)]
+        no_dependencies: bool,
+        #[arg(long)]
+        limit: Option<usize>,
+    },
+    GitInfo {
+        target: Option<String>,
         #[arg(long, default_value = ".")]
         root: PathBuf,
     },
@@ -85,6 +150,36 @@ enum Commands {
         index: bool,
         #[arg(long)]
         dry_run: bool,
+        #[arg(long)]
+        include: Vec<String>,
+        #[arg(long)]
+        exclude: Vec<String>,
+    },
+    Set {
+        target: String,
+        field: String,
+        value: String,
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long)]
+        index: bool,
+    },
+    Unset {
+        target: String,
+        field: String,
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long)]
+        index: bool,
+    },
+    Refresh {
+        target: String,
+        #[arg(long, default_value = ".")]
+        root: PathBuf,
+        #[arg(long = "field")]
+        fields: Vec<String>,
+        #[arg(long)]
+        index: bool,
     },
     Add {
         file: PathBuf,
@@ -147,6 +242,10 @@ fn run(cli: Cli) -> Result<i32, (VaultliError, bool)> {
             scope,
             tags,
             limit,
+            sort,
+            order,
+            explain,
+            semantic,
         } => {
             let result = search_records(
                 &root,
@@ -158,12 +257,90 @@ fn run(cli: Cli) -> Result<i32, (VaultliError, bool)> {
                 scope.as_deref(),
                 &tags,
                 limit,
+                sort.as_deref(),
+                &order,
+                explain,
+                semantic,
             )
             .map_err(|error| (error, as_json))?;
             emit_result(json!({ "results": result, "total": result.len() }), as_json);
         }
+        Commands::FederatedSearch {
+            query,
+            vaults,
+            limit,
+            per_vault_limit,
+            sort,
+            order,
+            semantic,
+            explain,
+        } => {
+            let result = federated_search(
+                &vaults,
+                query.as_deref(),
+                limit,
+                per_vault_limit,
+                semantic,
+                explain,
+                sort.as_deref(),
+                &order,
+            )
+            .map_err(|error| (error, as_json))?;
+            emit_result(Value::Object(result), as_json);
+        }
         Commands::Show { id, root } => {
             let result = show_record(&root, &id).map_err(|error| (error, as_json))?;
+            emit_result(Value::Object(result), as_json);
+        }
+        Commands::Resolve {
+            id,
+            root,
+            body,
+            source,
+        } => {
+            let result =
+                resolve_record(&root, &id, body, source).map_err(|error| (error, as_json))?;
+            emit_result(Value::Object(result), as_json);
+        }
+        Commands::Cat { id, root, source } => {
+            let result = cat_record(&root, &id, source).map_err(|error| (error, as_json))?;
+            if as_json {
+                emit_result(Value::Object(result), as_json);
+            } else {
+                let content = result
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if content.ends_with('\n') {
+                    print!("{content}");
+                } else {
+                    println!("{content}");
+                }
+            }
+        }
+        Commands::Context {
+            query,
+            root,
+            ids,
+            token_budget,
+            related,
+            no_dependencies,
+            limit,
+        } => {
+            let result = assemble_context(
+                &root,
+                query.as_deref(),
+                &ids,
+                token_budget,
+                related,
+                !no_dependencies,
+                limit,
+            )
+            .map_err(|error| (error, as_json))?;
+            emit_result(Value::Object(result), as_json);
+        }
+        Commands::GitInfo { target, root } => {
+            let result = git_info(&root, target.as_deref()).map_err(|error| (error, as_json))?;
             emit_result(Value::Object(result), as_json);
         }
         Commands::Scaffold { file, root } => {
@@ -175,9 +352,42 @@ fn run(cli: Cli) -> Result<i32, (VaultliError, bool)> {
             root,
             index,
             dry_run,
+            include,
+            exclude,
         } => {
-            let result =
-                ingest_path(&root, &path, index, dry_run).map_err(|error| (error, as_json))?;
+            let result = ingest_path(&root, &path, index, dry_run, &include, &exclude)
+                .map_err(|error| (error, as_json))?;
+            emit_result(Value::Object(result), as_json);
+        }
+        Commands::Set {
+            target,
+            field,
+            value,
+            root,
+            index,
+        } => {
+            let result = set_metadata_field(&root, &target, &field, &value, index)
+                .map_err(|error| (error, as_json))?;
+            emit_result(Value::Object(result), as_json);
+        }
+        Commands::Unset {
+            target,
+            field,
+            root,
+            index,
+        } => {
+            let result = unset_metadata_field(&root, &target, &field, index)
+                .map_err(|error| (error, as_json))?;
+            emit_result(Value::Object(result), as_json);
+        }
+        Commands::Refresh {
+            target,
+            root,
+            fields,
+            index,
+        } => {
+            let result = refresh_metadata(&root, &target, &fields, index)
+                .map_err(|error| (error, as_json))?;
             emit_result(Value::Object(result), as_json);
         }
         Commands::Add { file, root } => {

@@ -35,7 +35,7 @@ Every design decision optimizes for consumption by AI agents operating under tok
 
 The index format is JSONL specifically because grep returns one complete record per matching line. No custom query language is needed for basic ad hoc search. For structured queries, jq provides full JSON filtering.
 
-The `vaultli search` command is the preferred agent entrypoint because it wraps common retrieval patterns in a stable JSON envelope. It supports keyword search, first-class metadata filters (`--category`, `--status`, `--domain`, `--scope`, repeated `--tag`, and `--limit`), and `--jq` for advanced filters when the `jq` binary is available.
+The `vaultli search` command is the preferred agent entrypoint because it wraps common retrieval patterns in a stable JSON envelope. It supports keyword search, first-class metadata filters (`--category`, `--status`, `--domain`, `--scope`, repeated `--tag`, `--limit`, `--sort`, `--order`, and `--explain`), experimental token-overlap matching via `--semantic`, and `--jq` for advanced filters when the `jq` binary is available.
 
 ---
 
@@ -47,7 +47,11 @@ The vault root is the top-level directory that contains all knowledge assets. It
 
 Any tool that needs to locate the vault root walks up the directory tree from its current working directory until it finds a `.kbroot` file. This means vaultli commands can be invoked from any subdirectory within the vault.
 
-The `.kbroot` file may be empty or may contain optional vault-level configuration in the future (e.g., vault name, default author). For version 1.0, its mere presence is sufficient.
+The `.kbroot` file may be empty or may contain optional vault-level defaults.
+When it contains YAML, either a top-level mapping or a `defaults:` mapping can
+provide fields such as `author`, `scope`, or `domain` that are applied during
+metadata inference. Identity and derived fields such as `id`, `source`, `file`,
+and `hash` are never overridden by defaults.
 
 **Root discovery algorithm:**
 
@@ -306,7 +310,18 @@ vaultli --json search retention --root ./kb
 
 # Common structured filters without jq
 vaultli --json search --root ./kb --category query --status active --domain experimentation
-vaultli --json search --root ./kb --tag retention --tag athena --limit 5
+vaultli --json search --root ./kb --tag retention --tag athena --sort priority --limit 5
+
+# Experimental token-overlap retrieval over indexed metadata
+vaultli --json search "retention query" --root ./kb --semantic --explain
+
+# Hydrate results after search has found a candidate id
+vaultli --json resolve queries/retention-holdout --root ./kb --body --source
+vaultli cat queries/retention-holdout --root ./kb --source
+vaultli --json context --root ./kb --id queries/retention-holdout --token-budget 2000
+
+# Search multiple vaults while preserving origin metadata
+vaultli --json federated-search retention --vault ./kb --vault ../team-kb
 
 # Advanced structured filters when jq is installed
 vaultli --json search --root ./kb --jq 'select(.tokens < 500 and .priority <= 2)'
@@ -427,17 +442,29 @@ This section outlines the command surface for vaultli version 1.0. All commands 
 
 **`vaultli index`** — Rebuild the INDEX.jsonl. Performs an incremental rebuild by default. Accepts a `--full` flag to force a complete rebuild. Reports the number of files indexed, updated, pruned, and skipped.
 
-**`vaultli search <query>`** — Search the index for documents matching the query. Keyword search operates on indexed metadata, not raw document bodies. Accepts `--category`, `--status`, `--domain`, `--scope`, repeated `--tag`, `--limit`, and `--jq` for structured queries. Returns formatted results or a JSON envelope containing `total` and `results`.
+**`vaultli search <query>`** — Search the index for documents matching the query. Keyword search operates on indexed metadata, not raw document bodies. Accepts `--category`, `--status`, `--domain`, `--scope`, repeated `--tag`, `--limit`, `--sort`, `--order`, `--explain`, `--semantic`, and `--jq` for structured queries. Returns formatted results or a JSON envelope containing `total` and `results`.
 
 **`vaultli add <file>`** — Add metadata to a file. For `.md` files, injects a frontmatter template at the top. For non-`.md` files, creates a sidecar `.md` file with pre-populated frontmatter including the `source` field. Computes and suggests the `id`. Runs the indexer on the new/modified file.
 
-**`vaultli show <id>`** — Display the full metadata and file path for a document by its `id`. Resolves the `id` against INDEX.jsonl and pretty-prints the record.
+**`vaultli show <id>`** — Display the indexed metadata and file path for a document by its `id`. Resolves the `id` against INDEX.jsonl and pretty-prints the record.
+
+**`vaultli resolve <id>`** — Resolve an indexed record to its markdown path and, with `--body` or `--source`, hydrate the markdown body and sidecar source asset content. This is the safest next step after `search` when an agent needs grounded content.
+
+**`vaultli cat <id>`** — Print the markdown body for an indexed document, or the sidecar source asset with `--source`. This command is intended for shell pipelines and fast agent reads.
+
+**`vaultli context [query]`** — Assemble a deterministic context bundle from a query or repeated `--id` seeds. It can include `depends_on` references by default, optionally include `related` references, and respect `--token-budget`.
 
 **`vaultli validate`** — Audit the vault for integrity issues. Checks for: missing required fields, broken `source` references in sidecars, orphaned sidecar files, dangling `depends_on` and `related` references, duplicate `id`s, and index staleness (files modified since last index).
 
 **`vaultli scaffold <file>`** — Auto-generate a sidecar or frontmatter stub for a file. Uses the filename, file extension, and optionally the file's content to infer sensible defaults for `category`, `tags`, `domain`, and `description`. Designed to be run by an agent that can fill in richer metadata after reading the file.
 
-**`vaultli ingest <path>`** — Bulk scaffold missing metadata for one file or a directory. Accepts `--dry-run` to preview planned writes and `--index` to rebuild INDEX.jsonl after scaffolding. This is the safest first pass for a new agent preparing an existing tree.
+**`vaultli ingest <path>`** — Bulk scaffold missing metadata for one file or a directory. Accepts `--dry-run` to preview planned writes, `--index` to rebuild INDEX.jsonl after scaffolding, and repeatable `--include`/`--exclude` relative-path globs to keep large ingests reviewable. This is the safest first pass for a new agent preparing an existing tree.
+
+**`vaultli set <target> <field> <value>`** — Set one YAML frontmatter field by file path or indexed `id`. List fields accept JSON arrays or comma-separated values; integer fields are validated.
+
+**`vaultli unset <target> <field>`** — Remove one YAML frontmatter field by file path or indexed `id`.
+
+**`vaultli refresh <target>`** — Refresh selected inferred metadata fields while preserving body content and immutable identity fields. Accepts repeated `--field` values and can re-index with `--index`.
 
 **`vaultli root [path]`** — Locate the nearest vault root by walking upward until `.kbroot` is found.
 
@@ -446,6 +473,10 @@ This section outlines the command surface for vaultli version 1.0. All commands 
 **`vaultli infer <file>`** — Preview inferred metadata for a file without writing frontmatter or sidecars.
 
 **`vaultli dump-index`** — Dump all current index records as JSON.
+
+**`vaultli federated-search`** — Search multiple vault roots with repeated `--vault` flags. Results are annotated with `_vault` and `global_id` so duplicate per-vault IDs remain disambiguated.
+
+**`vaultli git-info [target]`** — Return git repository state and optional file state for a path or indexed `id`, including branch, HEAD, dirty status, per-file status, tracked state, and last commit when available.
 
 ### 9.2 Implementations
 
@@ -469,19 +500,26 @@ The following capabilities are explicitly deferred from version 1.0 but are anti
 
 ### 10.1 Semantic Search Integration
 
-The `tokens` field and the description-optimized retrieval design anticipate integration with a vector embedding layer. A future embedd daemon or sqlite-vec index could provide hybrid BM25 + vector retrieval, using the JSONL index for keyword filtering and a vector store for semantic similarity. The flat-file architecture does not preclude this — the JSONL index and a vector index can coexist as parallel retrieval paths.
+The stable core now includes an experimental `search --semantic` mode that performs dependency-free token-overlap matching against indexed metadata. This is intentionally not a vector store. The `tokens` field and the description-optimized retrieval design still anticipate a future embedding layer. A future embedd daemon or sqlite-vec index could provide hybrid BM25 + vector retrieval, using the JSONL index for keyword filtering and a vector store for semantic similarity. The flat-file architecture does not preclude this — the JSONL index and a vector index can coexist as parallel retrieval paths.
 
 ### 10.2 Agent Context Assembly
 
-The `tokens`, `priority`, `depends_on`, and `related` fields are specifically designed for a context-assembly algorithm that solves the knapsack problem: given a token budget, select the most relevant and important documents, resolve their dependencies, and pack them into a context window. This algorithm is a consumer of the vaultli index, not part of vaultli itself.
+The `context` command provides a deterministic built-in context assembler for
+agent use. Given a query or explicit IDs, it resolves matching records, includes
+`depends_on` references by default, can include `related` references on request,
+and skips records that would exceed `--token-budget`.
 
 ### 10.3 Multi-Vault Federation
 
-The `scope` field and the path-based `id` scheme support a future where multiple vaults can be federated into a single search surface. Each vault maintains its own INDEX.jsonl; a federation layer merges them with vault-prefix disambiguation of `id`s.
+The `scope` field and the path-based `id` scheme support multiple vaults in a
+single search surface. `federated-search` merges independent INDEX.jsonl results
+and annotates each record with `_vault` and `global_id` for disambiguation.
 
 ### 10.4 Git Integration
 
-Because the vault is a plain directory tree, it is already git-compatible. Future versions may integrate git metadata (commit history, blame) to auto-populate the `created` and `updated` fields, track authorship across contributors, and provide change history for individual documents.
+Because the vault is a plain directory tree, it is git-compatible by design.
+`git-info` exposes repository and file state in a JSON shape that agents can use
+before editing or citing content. It does not mutate git state.
 
 ---
 

@@ -114,13 +114,15 @@ pub fn ingest_path(
     path: &Path,
     index: bool,
     dry_run: bool,
+    include: &[String],
+    exclude: &[String],
 ) -> Result<Map<String, Value>, VaultliError> {
     let target = canonicalize_or_join(path)?;
     if !target.exists() {
         return Err(VaultliError::FileNotFound(target.display().to_string()));
     }
     let root = resolve_root(root)?;
-    let candidates = ingest_candidates(&target, &root)?;
+    let candidates = ingest_candidates(&target, &root, include, exclude)?;
     let mut scaffolded = Vec::new();
     let mut skipped = Vec::new();
     let mut errors = Vec::new();
@@ -175,6 +177,14 @@ pub fn ingest_path(
             Value::String(display_relative_path(&target, &root)?),
         ),
         ("dry_run", Value::Bool(dry_run)),
+        (
+            "include",
+            Value::Array(include.iter().cloned().map(Value::String).collect()),
+        ),
+        (
+            "exclude",
+            Value::Array(exclude.iter().cloned().map(Value::String).collect()),
+        ),
         ("indexed", Value::Bool(false)),
         ("total", json!(candidates.len())),
         ("scaffolded", Value::Array(scaffolded)),
@@ -201,16 +211,25 @@ pub(crate) fn render_document(metadata: &Map<String, Value>, body: &str) -> Stri
     format!("---\n{frontmatter}\n---{rendered_body}")
 }
 
-fn ingest_candidates(target: &Path, root: &Path) -> Result<Vec<PathBuf>, VaultliError> {
+fn ingest_candidates(
+    target: &Path,
+    root: &Path,
+    include: &[String],
+    exclude: &[String],
+) -> Result<Vec<PathBuf>, VaultliError> {
     if target.is_file() {
-        return Ok(vec![target.to_path_buf()]);
+        return if matches_ingest_patterns(target, root, include, exclude)? {
+            Ok(vec![target.to_path_buf()])
+        } else {
+            Ok(Vec::new())
+        };
     }
     if !target.is_dir() {
         return Err(VaultliError::NotAFile(target.display().to_string()));
     }
 
     let mut files = Vec::new();
-    visit_ingest_files(target, root, &mut files)?;
+    visit_ingest_files(target, root, include, exclude, &mut files)?;
     files.sort();
     Ok(files)
 }
@@ -218,6 +237,8 @@ fn ingest_candidates(target: &Path, root: &Path) -> Result<Vec<PathBuf>, Vaultli
 fn visit_ingest_files(
     path: &Path,
     root: &Path,
+    include: &[String],
+    exclude: &[String],
     files: &mut Vec<PathBuf>,
 ) -> Result<(), VaultliError> {
     for entry in fs::read_dir(path)? {
@@ -232,15 +253,55 @@ fn visit_ingest_files(
             {
                 continue;
             }
-            visit_ingest_files(&child, root, files)?;
+            visit_ingest_files(&child, root, include, exclude, files)?;
             continue;
         }
         if should_skip_ingest_file(&child, root)? {
             continue;
         }
+        if !matches_ingest_patterns(&child, root, include, exclude)? {
+            continue;
+        }
         files.push(child);
     }
     Ok(())
+}
+
+fn matches_ingest_patterns(
+    path: &Path,
+    root: &Path,
+    include: &[String],
+    exclude: &[String],
+) -> Result<bool, VaultliError> {
+    let relative = relative_path(path, root)?;
+    if !include.is_empty()
+        && !include
+            .iter()
+            .any(|pattern| glob_matches(pattern.as_bytes(), relative.as_bytes()))
+    {
+        return Ok(false);
+    }
+    if exclude
+        .iter()
+        .any(|pattern| glob_matches(pattern.as_bytes(), relative.as_bytes()))
+    {
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+fn glob_matches(pattern: &[u8], text: &[u8]) -> bool {
+    if pattern.is_empty() {
+        return text.is_empty();
+    }
+    if pattern[0] == b'*' {
+        return glob_matches(&pattern[1..], text)
+            || (!text.is_empty() && glob_matches(pattern, &text[1..]));
+    }
+    if !text.is_empty() && (pattern[0] == b'?' || pattern[0] == text[0]) {
+        return glob_matches(&pattern[1..], &text[1..]);
+    }
+    false
 }
 
 fn should_skip_ingest_file(path: &Path, root: &Path) -> Result<bool, VaultliError> {

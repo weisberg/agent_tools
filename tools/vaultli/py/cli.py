@@ -10,16 +10,24 @@ from typing import Any
 from .core import (
     VaultliError,
     add_file,
+    assemble_context,
     build_index,
+    cat_record,
+    federated_search,
     find_root,
+    git_info,
     infer_frontmatter,
     ingest_path,
     init_vault,
     load_index_records,
     make_id,
+    refresh_metadata,
+    resolve_record,
     scaffold_file,
     search_index,
+    set_metadata_field,
     show_record,
+    unset_metadata_field,
     validate_vault,
 )
 
@@ -48,6 +56,20 @@ def _build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("--scope", default=None, help="Filter by exact scope")
     search_parser.add_argument("--tag", action="append", default=[], help="Require a tag; repeat for AND filtering")
     search_parser.add_argument("--limit", type=int, default=None, help="Limit the number of returned records")
+    search_parser.add_argument("--sort", default=None, help="Sort by id, title, updated, priority, tokens, category, status, or score")
+    search_parser.add_argument("--order", choices=["asc", "desc"], default="asc")
+    search_parser.add_argument("--explain", action="store_true", help="Include match explanation metadata")
+    search_parser.add_argument("--semantic", action="store_true", help="Use experimental token-overlap matching")
+
+    federated_parser = subparsers.add_parser("federated-search", help="Search multiple vault roots")
+    federated_parser.add_argument("query", nargs="?", default=None)
+    federated_parser.add_argument("--vault", action="append", required=True, help="Vault root to search; repeat for multiple")
+    federated_parser.add_argument("--limit", type=int, default=None, help="Limit total returned records")
+    federated_parser.add_argument("--per-vault-limit", type=int, default=None, help="Limit records per vault")
+    federated_parser.add_argument("--sort", default=None, help="Sort within each vault")
+    federated_parser.add_argument("--order", choices=["asc", "desc"], default="asc")
+    federated_parser.add_argument("--semantic", action="store_true", help="Use experimental token-overlap matching")
+    federated_parser.add_argument("--explain", action="store_true", help="Include per-record match explanations")
 
     add_parser = subparsers.add_parser("add", help="Add metadata to a file and re-index")
     add_parser.add_argument("file")
@@ -56,6 +78,30 @@ def _build_parser() -> argparse.ArgumentParser:
     show_parser = subparsers.add_parser("show", help="Show an indexed record by id")
     show_parser.add_argument("id")
     show_parser.add_argument("--root", default=".")
+
+    resolve_parser = subparsers.add_parser("resolve", help="Resolve an indexed id to files and optional content")
+    resolve_parser.add_argument("id")
+    resolve_parser.add_argument("--root", default=".")
+    resolve_parser.add_argument("--body", action="store_true", help="Include markdown body content")
+    resolve_parser.add_argument("--source", action="store_true", help="Include source asset content when present")
+
+    cat_parser = subparsers.add_parser("cat", help="Print indexed markdown body or sidecar source content")
+    cat_parser.add_argument("id")
+    cat_parser.add_argument("--root", default=".")
+    cat_parser.add_argument("--source", action="store_true", help="Print source asset content instead of markdown body")
+
+    context_parser = subparsers.add_parser("context", help="Assemble a deterministic context bundle")
+    context_parser.add_argument("query", nargs="?", default=None)
+    context_parser.add_argument("--root", default=".")
+    context_parser.add_argument("--id", action="append", dest="ids", default=[], help="Seed with an id; repeat to include multiple")
+    context_parser.add_argument("--token-budget", type=int, default=None)
+    context_parser.add_argument("--related", action="store_true", help="Include related references")
+    context_parser.add_argument("--no-dependencies", action="store_true", help="Do not include depends_on references")
+    context_parser.add_argument("--limit", type=int, default=None, help="Limit search seeds when using a query")
+
+    git_parser = subparsers.add_parser("git-info", help="Return git state for a vault or indexed item")
+    git_parser.add_argument("target", nargs="?", default=None)
+    git_parser.add_argument("--root", default=".")
 
     validate_parser = subparsers.add_parser("validate", help="Validate vault integrity")
     validate_parser.add_argument("--root", default=".")
@@ -69,6 +115,27 @@ def _build_parser() -> argparse.ArgumentParser:
     ingest_parser.add_argument("--root", default=".")
     ingest_parser.add_argument("--index", action="store_true", help="Rebuild INDEX.jsonl after scaffolding")
     ingest_parser.add_argument("--dry-run", action="store_true", help="Preview writes without changing files")
+    ingest_parser.add_argument("--include", action="append", default=[], help="Glob of relative paths to include; repeatable")
+    ingest_parser.add_argument("--exclude", action="append", default=[], help="Glob of relative paths to exclude; repeatable")
+
+    set_parser = subparsers.add_parser("set", help="Set one frontmatter field")
+    set_parser.add_argument("target")
+    set_parser.add_argument("field")
+    set_parser.add_argument("value")
+    set_parser.add_argument("--root", default=".")
+    set_parser.add_argument("--index", action="store_true")
+
+    unset_parser = subparsers.add_parser("unset", help="Remove one frontmatter field")
+    unset_parser.add_argument("target")
+    unset_parser.add_argument("field")
+    unset_parser.add_argument("--root", default=".")
+    unset_parser.add_argument("--index", action="store_true")
+
+    refresh_parser = subparsers.add_parser("refresh", help="Refresh inferred metadata fields")
+    refresh_parser.add_argument("target")
+    refresh_parser.add_argument("--root", default=".")
+    refresh_parser.add_argument("--field", action="append", default=[])
+    refresh_parser.add_argument("--index", action="store_true")
 
     root_parser = subparsers.add_parser("root", help="Locate the nearest vault root")
     root_parser.add_argument("path", nargs="?", default=".")
@@ -193,6 +260,26 @@ def main(argv: list[str] | None = None) -> int:
                     scope=args.scope,
                     tags=args.tag,
                     limit=args.limit,
+                    sort=args.sort,
+                    order=args.order,
+                    explain=args.explain,
+                    semantic=args.semantic,
+                ),
+                as_json,
+            )
+            return 0
+
+        if args.command == "federated-search":
+            _print_generic(
+                federated_search(
+                    args.vault,
+                    args.query,
+                    limit=args.limit,
+                    per_vault_limit=args.per_vault_limit,
+                    semantic=args.semantic,
+                    explain=args.explain,
+                    sort=args.sort,
+                    order=args.order,
                 ),
                 as_json,
             )
@@ -206,6 +293,40 @@ def main(argv: list[str] | None = None) -> int:
             _print_record(show_record(args.id, root=args.root), as_json)
             return 0
 
+        if args.command == "resolve":
+            _print_generic(
+                resolve_record(args.id, root=args.root, include_body=args.body, include_source=args.source),
+                as_json,
+            )
+            return 0
+
+        if args.command == "cat":
+            result = cat_record(args.id, root=args.root, source=args.source)
+            if as_json:
+                _print_json({"ok": True, "result": result})
+            else:
+                print(result["content"], end="" if str(result["content"]).endswith("\n") else "\n")
+            return 0
+
+        if args.command == "context":
+            _print_generic(
+                assemble_context(
+                    args.query,
+                    root=args.root,
+                    ids=args.ids or None,
+                    token_budget=args.token_budget,
+                    include_related=args.related,
+                    include_dependencies=not args.no_dependencies,
+                    limit=args.limit,
+                ),
+                as_json,
+            )
+            return 0
+
+        if args.command == "git-info":
+            _print_generic(git_info(args.target, root=args.root), as_json)
+            return 0
+
         if args.command == "validate":
             result = validate_vault(root=args.root)
             _print_validation(result, as_json)
@@ -216,7 +337,29 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "ingest":
-            _print_generic(ingest_path(args.path, root=args.root, index=args.index, dry_run=args.dry_run), as_json)
+            _print_generic(
+                ingest_path(
+                    args.path,
+                    root=args.root,
+                    index=args.index,
+                    dry_run=args.dry_run,
+                    include=args.include,
+                    exclude=args.exclude,
+                ),
+                as_json,
+            )
+            return 0
+
+        if args.command == "set":
+            _print_generic(set_metadata_field(args.target, args.field, args.value, root=args.root, index=args.index), as_json)
+            return 0
+
+        if args.command == "unset":
+            _print_generic(unset_metadata_field(args.target, args.field, root=args.root, index=args.index), as_json)
+            return 0
+
+        if args.command == "refresh":
+            _print_generic(refresh_metadata(args.target, root=args.root, fields=args.field, index=args.index), as_json)
             return 0
 
         if args.command == "root":
