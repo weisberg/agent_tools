@@ -37,7 +37,7 @@ below for detail):
 | Tool | Domain | Maturity | Notes |
 |---|---|---:|---|
 | `mdli` | Markdown AST | 7 | PRD Phases 1–8 implemented; cross-tool integration tested via recipes |
-| `xli` | Excel `.xlsx` | 6 | Atomic + fingerprint; plain value writes use OOXML patching; fallback warnings remain for broader mutation coverage |
+| `xli` | Excel `.xlsx` | 6 | Atomic + fingerprint; OOXML patching covers core writes, supported formatting, sheet metadata edits, and supported batch/apply paths |
 | `vaultli` | File-based knowledge vault | 6 | Rust + Python parity, sidecar model, `INDEX.jsonl` cache |
 | `clipli` | macOS clipboard intelligence | 5 | Capture/templatize/render loop; macOS-only |
 | `jirali` | Jira issues / JQL / sprints | 5 | Live + local-deterministic execution paths |
@@ -124,9 +124,11 @@ Current docs:
 
 Current caveats:
 
-- Plain value writes use the artifact-preserving OOXML patch path. Formula
-  writes, formatting, sheet operations, batch, and apply can still use the
-  `umya-spreadsheet` fallback path and emit a warning.
+- Artifact-preserving OOXML patching covers value/formula writes, supported
+  formatting, write-only and supported mixed batches, template application, and
+  sheet rename/hide/unhide/reorder. Sheet add/delete/copy, alignment formatting,
+  and unsupported mutation shapes still use the `umya-spreadsheet` fallback path
+  and emit a warning.
 - The spec is broader than the MVP. Use `tools/xli/README.md` for the current
   parity matrix.
 

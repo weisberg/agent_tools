@@ -94,7 +94,7 @@ to these by the next compatible bump.
 
 | Code | Meaning | `is_retryable` | First/canonical use |
 |---|---|---|---|
-| `E_PARTIAL_FIDELITY` | Operation succeeded but some artifact features may not have round-tripped (e.g. `xli`'s `umya-spreadsheet` fallback path on chart-bearing workbooks). Surfaced today as `meta.warnings`; promotion to a structured code is recommended. | n/a (operation already succeeded) | Recommended; today emitted as warnings by `xli`. |
+| `E_PARTIAL_FIDELITY` | Operation succeeded but some artifact features may not have round-tripped (e.g. `xli`'s `umya-spreadsheet` fallback path on chart-bearing workbooks). Surfaced today through the xli envelope `warnings` field; promotion to a structured code is recommended. | n/a (operation already succeeded) | Recommended; today emitted as warnings by `xli`. |
 | `E_INVALID_UTF8` | Input bytes are not valid UTF-8. | true (after re-encoding) | `mdli` |
 
 ---
@@ -113,9 +113,9 @@ families when `category` is added.
 ### `xli`
 
 Errors documented per command in `tools/xli/README.md`. Partial-fidelity
-warnings on the `umya-spreadsheet` path are emitted as `meta.warnings`
-today; promotion to `E_PARTIAL_FIDELITY` is recommended at the next
-compatible bump.
+warnings on the `umya-spreadsheet` path are emitted in the envelope
+`warnings` field today; promotion to `E_PARTIAL_FIDELITY` is recommended
+at the next compatible bump.
 
 ### `vaultli`
 

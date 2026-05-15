@@ -17,7 +17,7 @@ Implemented today:
 
 Still planned or partial:
 
-- Native OOXML mutation for all edit paths. `write --value` uses the artifact-preserving OOXML patch path; formula writes, formatting, sheet operations, batches, and template application can still use the explicit `umya-spreadsheet` fallback warning.
+- Native OOXML mutation for every edit shape. The artifact-preserving OOXML patch engine covers value writes, formula writes, write-only batches, supported mixed batches and template application, supported formatting, and sheet rename/hide/unhide/reorder. Unsupported formatting fields and sheet add/remove/copy still use the explicit `umya-spreadsheet` fallback warning.
 - First-class `profile`, `diff`, `chart`, `table`, `repair`, and `ooxml` command families.
 - Rich report-table ergonomics beyond number-format aliases, CSV report options, conditional formats, hyperlinks, and the basic table template.
 
@@ -149,11 +149,11 @@ Use `xli-companion` when you need Python's ecosystem: dataframe validation, reco
 | --- | --- | --- |
 | `inspect` | Implemented | JSON envelope with workbook metadata and fingerprints |
 | `read` | Implemented | Cells, ranges, tables, pagination, formulas, Markdown output |
-| `write` | Implemented | Values and formulas through atomic commit path |
-| `format` | Implemented | Range formatting, number-format aliases, column widths |
-| `sheet` | Implemented | Add, remove, rename, copy, reorder, hide, unhide |
-| `batch` | Implemented | NDJSON micro-ops in one atomic commit |
-| `apply` | Implemented minimal | Built-in template expansion into batch ops |
+| `write` | Implemented | Values and formulas through the OOXML patch path |
+| `format` | Implemented | Bold, italic, colors, fills, number-format aliases, and column widths use OOXML patching; alignment fields remain fallback-only |
+| `sheet` | Implemented | Rename, reorder, hide, and unhide use OOXML patching; add, remove, and copy remain fallback-only |
+| `batch` | Implemented | NDJSON micro-ops in one atomic commit; write-only and supported mixed batches use OOXML patching |
+| `apply` | Implemented minimal | Built-in template expansion into batch ops through the supported batch path |
 | `template` | Implemented minimal | List, preview, and validate built-in templates |
 | `create` | Implemented | Blank, CSV, Markdown table, JSON, and CSV report-table options including titles, selected/hidden/renamed columns, hyperlinks, conditional formats, number formats, and total rows |
 | `lint` | Implemented MVP | Fast structural/formula checks |
@@ -170,6 +170,7 @@ Use `xli-companion` when you need Python's ecosystem: dataframe validation, reco
 
 ## Known Limitations
 
-- Mutating commands that use the `umya-spreadsheet` fallback emit a warning. Treat that as a signal to verify artifact-sensitive workbooks that contain charts, drawings, macros, data validation, or complex tables. Plain value writes now avoid that fallback.
+- Mutating commands that use the `umya-spreadsheet` fallback emit a warning. Treat that as a signal to verify artifact-sensitive workbooks that contain charts, drawings, macros, data validation, or complex tables.
+- Artifact-preservation tests now cover charts, drawings, worksheet relationships, tables, data validation, formulas, formatting, sheet metadata updates, mixed batches, and template application. Macro-bearing fixture coverage remains a next expansion target.
 - `xli-spec.md` is broader than the current MVP. The parity matrix above is the operational source of truth for what the CLI exposes today.
 - Formula recalculation depends on LibreOffice being available on the machine.

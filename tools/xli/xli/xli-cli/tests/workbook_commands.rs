@@ -107,6 +107,50 @@ fn value_write_preserves_chart_artifacts() {
 }
 
 #[test]
+fn formula_write_preserves_chart_artifacts() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("chart_formula.xlsx");
+    create_chart_workbook(&path);
+
+    let drawing_before = read_zip_part(&path, "xl/drawings/drawing1.xml");
+    let chart_before = read_zip_part(&path, "xl/charts/chart1.xml");
+    let rels_before = read_zip_part(&path, "xl/worksheets/_rels/sheet1.xml.rels");
+
+    let write = run_json([
+        "write",
+        path.to_str().expect("path"),
+        "Sheet1!C2",
+        "--formula",
+        "=SUM(B2:B3)",
+    ]);
+    assert_eq!(write["status"], "ok");
+    assert_eq!(write["needs_recalc"], true);
+    assert_eq!(
+        write["warnings"].as_array().expect("warnings").len(),
+        0,
+        "artifact-preserving formula writes should not warn"
+    );
+
+    assert_eq!(
+        drawing_before,
+        read_zip_part(&path, "xl/drawings/drawing1.xml")
+    );
+    assert_eq!(chart_before, read_zip_part(&path, "xl/charts/chart1.xml"));
+    assert_eq!(
+        rels_before,
+        read_zip_part(&path, "xl/worksheets/_rels/sheet1.xml.rels")
+    );
+
+    let sheet = String::from_utf8(read_zip_part(&path, "xl/worksheets/sheet1.xml")).expect("xml");
+    assert!(sheet.contains("<f>SUM(B2:B3)</f>"), "sheet xml: {sheet}");
+    let workbook = String::from_utf8(read_zip_part(&path, "xl/workbook.xml")).expect("xml");
+    assert!(
+        workbook.contains("fullCalcOnLoad=\"1\""),
+        "workbook xml should request recalculation: {workbook}"
+    );
+}
+
+#[test]
 fn batch_writes_multiple_cells_atomically() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("test.xlsx");
@@ -255,6 +299,46 @@ fn format_command_resolves_number_format_aliases() {
 }
 
 #[test]
+fn format_command_preserves_chart_artifacts_without_warning() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("chart_format.xlsx");
+    create_chart_workbook(&path);
+
+    let drawing_before = read_zip_part(&path, "xl/drawings/drawing1.xml");
+    let chart_before = read_zip_part(&path, "xl/charts/chart1.xml");
+    let rels_before = read_zip_part(&path, "xl/worksheets/_rels/sheet1.xml.rels");
+
+    let format = run_json([
+        "format",
+        path.to_str().expect("path"),
+        "Sheet1!B2:B3",
+        "--number-format",
+        "currency",
+        "--fill",
+        "C6EFCE",
+        "--font-color",
+        "006100",
+    ]);
+    assert_eq!(format["status"], "ok");
+    assert_eq!(format["warnings"].as_array().expect("warnings").len(), 0);
+
+    assert_eq!(
+        drawing_before,
+        read_zip_part(&path, "xl/drawings/drawing1.xml")
+    );
+    assert_eq!(chart_before, read_zip_part(&path, "xl/charts/chart1.xml"));
+    assert_eq!(
+        rels_before,
+        read_zip_part(&path, "xl/worksheets/_rels/sheet1.xml.rels")
+    );
+
+    let styles = read_styles_xml(&path);
+    assert!(styles.contains("$#,##0;[Red]($#,##0)"));
+    assert!(styles.contains("FFC6EFCE"));
+    assert!(styles.contains("FF006100"));
+}
+
+#[test]
 fn template_preview_and_apply_basic_table_format() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("test.xlsx");
@@ -301,6 +385,7 @@ fn template_preview_and_apply_basic_table_format() {
         "number_format=currency",
     ]);
     assert_eq!(apply["status"], "ok");
+    assert_eq!(apply["warnings"].as_array().expect("warnings").len(), 0);
 
     let styles = read_styles_xml(&path);
     assert!(
@@ -396,6 +481,23 @@ fn read_zip_part(path: &std::path::Path, part: &str) -> Vec<u8> {
     let mut bytes = Vec::new();
     item.read_to_end(&mut bytes).expect("read zip part");
     bytes
+}
+
+fn create_chart_workbook(path: &std::path::Path) {
+    let mut workbook = rust_xlsxwriter::Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    worksheet.write_string(0, 0, "Month").expect("write");
+    worksheet.write_string(1, 0, "Jan").expect("write");
+    worksheet.write_number(1, 1, 10).expect("write");
+    worksheet.write_string(2, 0, "Feb").expect("write");
+    worksheet.write_number(2, 1, 20).expect("write");
+    let mut chart = rust_xlsxwriter::Chart::new(rust_xlsxwriter::ChartType::Column);
+    chart
+        .add_series()
+        .set_categories("Sheet1!$A$2:$A$3")
+        .set_values("Sheet1!$B$2:$B$3");
+    worksheet.insert_chart(0, 3, &chart).expect("chart");
+    workbook.save(path).expect("save");
 }
 
 fn run_output<const N: usize>(args: [&str; N]) -> Output {

@@ -5,7 +5,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use umya_spreadsheet::{self, NumberingFormat, SheetStateValues, Spreadsheet, Style};
 use xli_core::{
     col_to_letter, parse_address, parse_range, BatchOp, SheetAction, StyleSpec, XliError,
@@ -92,8 +92,8 @@ pub fn apply_write(
     }
 
     patch_write_cell(src, dst, address, CellContent::Value(value)).map(|()| WriteResult {
-            needs_recalc: false,
-            used_fallback: false,
+        needs_recalc: false,
+        used_fallback: false,
     })
 }
 
@@ -162,9 +162,7 @@ fn write_recalc_calc_pr(writer: &mut Writer<Vec<u8>>) -> Result<(), XliError> {
     calc_pr.push_attribute(("calcMode", "auto"));
     calc_pr.push_attribute(("fullCalcOnLoad", "1"));
     calc_pr.push_attribute(("forceFullCalc", "1"));
-    writer
-        .write_event(Event::Empty(calc_pr))
-        .map_err(xml_error)
+    writer.write_event(Event::Empty(calc_pr)).map_err(xml_error)
 }
 
 pub fn apply_format(
@@ -187,18 +185,32 @@ pub fn apply_format(
     })
 }
 
-pub fn apply_sheet_action(src: &Path, dst: &Path, action: &SheetAction) -> Result<(), XliError> {
-    mutate_workbook(src, dst, |book| {
-        sheet_action_in_book(book, action)?;
-        Ok(())
-    })
-}
-
-pub fn apply_batch(
+pub fn apply_sheet_action(
     src: &Path,
     dst: &Path,
-    ops: &[BatchOp],
-) -> Result<BatchApplyResult, XliError> {
+    action: &SheetAction,
+) -> Result<MutationResult, XliError> {
+    match action {
+        SheetAction::Rename { .. }
+        | SheetAction::Hide { .. }
+        | SheetAction::Unhide { .. }
+        | SheetAction::Reorder { .. } => {
+            patch_sheet_action(src, dst, action).map(|()| MutationResult {
+                used_fallback: false,
+            })
+        }
+        SheetAction::Add { .. } | SheetAction::Delete { .. } | SheetAction::Copy { .. } => {
+            mutate_workbook(src, dst, |book| {
+                sheet_action_in_book(book, action)?;
+                Ok(MutationResult {
+                    used_fallback: true,
+                })
+            })
+        }
+    }
+}
+
+pub fn apply_batch(src: &Path, dst: &Path, ops: &[BatchOp]) -> Result<BatchApplyResult, XliError> {
     if ops.iter().all(|op| matches!(op, BatchOp::Write { .. })) {
         return patch_write_only_batch(src, dst, ops).map(|(summary, needs_recalc)| {
             BatchApplyResult {
@@ -207,6 +219,10 @@ pub fn apply_batch(
                 used_fallback: false,
             }
         });
+    }
+
+    if ops.iter().all(batch_op_supported_without_fallback) {
+        return patch_supported_batch(src, dst, ops);
     }
 
     mutate_workbook(src, dst, |book| {
@@ -247,6 +263,115 @@ pub fn apply_batch(
             used_fallback: true,
         })
     })
+}
+
+fn batch_op_supported_without_fallback(op: &BatchOp) -> bool {
+    match op {
+        BatchOp::Write { .. } => true,
+        BatchOp::Format { style, .. } => {
+            style.horizontal_align.is_none() && style.vertical_align.is_none()
+        }
+        BatchOp::Sheet { action } => matches!(
+            action,
+            SheetAction::Rename { .. }
+                | SheetAction::Hide { .. }
+                | SheetAction::Unhide { .. }
+                | SheetAction::Reorder { .. }
+        ),
+    }
+}
+
+fn patch_supported_batch(
+    src: &Path,
+    dst: &Path,
+    ops: &[BatchOp],
+) -> Result<BatchApplyResult, XliError> {
+    if ops.is_empty() {
+        WorkbookPatcher::open(src, dst)?.finalize()?;
+        return Ok(BatchApplyResult::default());
+    }
+
+    let mut summary = BatchSummary::default();
+    let mut needs_recalc = false;
+    let mut current = src.to_path_buf();
+    let mut temps = Vec::new();
+
+    for (index, op) in ops.iter().enumerate() {
+        let is_last = index + 1 == ops.len();
+        let target = if is_last {
+            dst.to_path_buf()
+        } else {
+            let temp = batch_temp_path(dst, index);
+            temps.push(temp.clone());
+            temp
+        };
+
+        let result = match op {
+            BatchOp::Write {
+                address,
+                value,
+                formula,
+            } => {
+                let write = apply_write(&current, &target, address, value.clone(), formula.clone());
+                if let Ok(write) = &write {
+                    needs_recalc |= write.needs_recalc;
+                    summary.ops_executed += 1;
+                    summary.cells_written += 1;
+                    if formula.is_some() {
+                        summary.formulas_written += 1;
+                    }
+                }
+                write.map(|_| ())
+            }
+            BatchOp::Format { range, style } => {
+                let format = apply_format(&current, &target, range, style);
+                if format.is_ok() {
+                    summary.ops_executed += 1;
+                    summary.cells_formatted += cells_in_range(range)? as usize;
+                }
+                format.map(|_| ())
+            }
+            BatchOp::Sheet { action } => {
+                let sheet = apply_sheet_action(&current, &target, action);
+                if sheet.is_ok() {
+                    summary.ops_executed += 1;
+                }
+                sheet.map(|_| ())
+            }
+        };
+
+        if let Err(error) = result {
+            cleanup_batch_temps(&temps);
+            return Err(error);
+        }
+
+        current = target;
+    }
+
+    cleanup_batch_temps(&temps);
+    Ok(BatchApplyResult {
+        summary,
+        needs_recalc,
+        used_fallback: false,
+    })
+}
+
+fn batch_temp_path(dst: &Path, index: usize) -> PathBuf {
+    let parent = dst.parent().unwrap_or_else(|| Path::new("."));
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    parent.join(format!(
+        ".xli-batch-{}-{timestamp}-{index}.tmp.xlsx",
+        std::process::id()
+    ))
+}
+
+fn cleanup_batch_temps(paths: &[PathBuf]) {
+    for path in paths {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 fn patch_write_only_batch(
@@ -352,6 +477,172 @@ fn patch_format(src: &Path, dst: &Path, range: &str, style: &StyleSpec) -> Resul
     patcher.finalize()
 }
 
+fn patch_sheet_action(src: &Path, dst: &Path, action: &SheetAction) -> Result<(), XliError> {
+    let mut patcher = WorkbookPatcher::open(src, dst)?;
+    let workbook_xml = patcher.read_part("xl/workbook.xml")?;
+    let patched = patch_workbook_sheet_action(&workbook_xml, action)?;
+    patcher.patch_part_bytes("xl/workbook.xml", patched);
+    patcher.finalize()
+}
+
+fn patch_workbook_sheet_action(
+    workbook_xml: &[u8],
+    action: &SheetAction,
+) -> Result<Vec<u8>, XliError> {
+    let mut reader = Reader::from_reader(Cursor::new(workbook_xml));
+    let mut writer = Writer::new(Vec::new());
+    let mut buffer = Vec::new();
+
+    loop {
+        buffer.clear();
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(start)) if start.name().local_name().as_ref() == b"sheets" => {
+                writer.write_event(Event::Start(start)).map_err(xml_error)?;
+                patch_sheets_block(&mut reader, &mut writer, action)?;
+            }
+            Ok(Event::Eof) => break,
+            Ok(event) => writer.write_event(event).map_err(xml_error)?,
+            Err(error) => return Err(xml_error(error)),
+        }
+    }
+
+    Ok(writer.into_inner())
+}
+
+fn patch_sheets_block(
+    reader: &mut Reader<Cursor<&[u8]>>,
+    writer: &mut Writer<Vec<u8>>,
+    action: &SheetAction,
+) -> Result<(), XliError> {
+    let mut buffer = Vec::new();
+    let mut sheets = Vec::new();
+
+    loop {
+        buffer.clear();
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Empty(start)) if start.name().local_name().as_ref() == b"sheet" => {
+                sheets.push(sheet_element(reader, &start)?);
+            }
+            Ok(Event::Start(start)) if start.name().local_name().as_ref() == b"sheet" => {
+                let sheet = sheet_element(reader, &start)?;
+                skip_until_end(reader, b"sheet")?;
+                sheets.push(sheet);
+            }
+            Ok(Event::End(end)) if end.name().local_name().as_ref() == b"sheets" => {
+                apply_workbook_sheet_action(&mut sheets, action)?;
+                for sheet in &sheets {
+                    write_sheet_element(writer, sheet)?;
+                }
+                writer.write_event(Event::End(end)).map_err(xml_error)?;
+                break;
+            }
+            Ok(Event::Eof) => break,
+            Ok(event) => writer.write_event(event).map_err(xml_error)?,
+            Err(error) => return Err(xml_error(error)),
+        }
+    }
+
+    Ok(())
+}
+
+#[derive(Clone, Debug, Default)]
+struct WorkbookSheet {
+    name: String,
+    sheet_id: String,
+    rel_id: String,
+    state: Option<String>,
+}
+
+fn sheet_element(
+    reader: &Reader<Cursor<&[u8]>>,
+    start: &BytesStart<'_>,
+) -> Result<WorkbookSheet, XliError> {
+    let mut sheet = WorkbookSheet::default();
+    for attribute in start.attributes() {
+        let attribute = attribute.map_err(xml_error)?;
+        let key = normalize_xml_attr_name(&attribute)?;
+        let value = decode_attribute(reader, &attribute)?;
+        match key.as_str() {
+            "name" => sheet.name = value,
+            "sheetid" => sheet.sheet_id = value,
+            "id" => sheet.rel_id = value,
+            "state" => sheet.state = Some(value),
+            _ => {}
+        }
+    }
+    Ok(sheet)
+}
+
+fn apply_workbook_sheet_action(
+    sheets: &mut Vec<WorkbookSheet>,
+    action: &SheetAction,
+) -> Result<(), XliError> {
+    match action {
+        SheetAction::Rename { from, to } => {
+            let sheet = sheets
+                .iter_mut()
+                .find(|sheet| sheet.name == *from)
+                .ok_or_else(|| XliError::SheetNotFound {
+                    sheet: from.clone(),
+                })?;
+            sheet.name = to.clone();
+        }
+        SheetAction::Hide { name } => {
+            let sheet = sheets
+                .iter_mut()
+                .find(|sheet| sheet.name == *name)
+                .ok_or_else(|| XliError::SheetNotFound {
+                    sheet: name.clone(),
+                })?;
+            sheet.state = Some("hidden".to_string());
+        }
+        SheetAction::Unhide { name } => {
+            let sheet = sheets
+                .iter_mut()
+                .find(|sheet| sheet.name == *name)
+                .ok_or_else(|| XliError::SheetNotFound {
+                    sheet: name.clone(),
+                })?;
+            sheet.state = None;
+        }
+        SheetAction::Reorder { sheets: order } => {
+            if order.len() != sheets.len() {
+                return Err(XliError::SpecValidationError {
+                    spec: "sheet reorder".to_string(),
+                    details: "Order must list every existing sheet exactly once".to_string(),
+                });
+            }
+            let mut reordered = Vec::with_capacity(sheets.len());
+            for name in order {
+                let position = sheets
+                    .iter()
+                    .position(|sheet| sheet.name == *name)
+                    .ok_or_else(|| XliError::SheetNotFound {
+                        sheet: name.clone(),
+                    })?;
+                reordered.push(sheets[position].clone());
+            }
+            *sheets = reordered;
+        }
+        SheetAction::Add { .. } | SheetAction::Delete { .. } | SheetAction::Copy { .. } => {}
+    }
+    Ok(())
+}
+
+fn write_sheet_element(
+    writer: &mut Writer<Vec<u8>>,
+    sheet: &WorkbookSheet,
+) -> Result<(), XliError> {
+    let mut start = BytesStart::new("sheet");
+    start.push_attribute(("name", sheet.name.as_str()));
+    start.push_attribute(("sheetId", sheet.sheet_id.as_str()));
+    start.push_attribute(("r:id", sheet.rel_id.as_str()));
+    if let Some(state) = sheet.state.as_deref() {
+        start.push_attribute(("state", state));
+    }
+    writer.write_event(Event::Empty(start)).map_err(xml_error)
+}
+
 fn style_has_cell_changes(style: &StyleSpec) -> bool {
     style.bold.is_some()
         || style.italic.is_some()
@@ -393,12 +684,21 @@ fn append_style(styles_xml: &[u8], style: &StyleSpec) -> Result<(Vec<u8>, u32), 
         buffer.clear();
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(start)) if start.name().local_name().as_ref() == b"numFmts" => {
-                write_start_with_count(&reader, &mut writer, &start, counts.num_fmts + 1)?;
+                write_start_with_count(
+                    &reader,
+                    &mut writer,
+                    &start,
+                    counts.num_fmts + u32::from(add_num_fmt),
+                )?;
                 inserted_num_fmts = true;
             }
             Ok(Event::End(end)) if end.name().local_name().as_ref() == b"numFmts" => {
                 if add_num_fmt {
-                    write_num_fmt(&mut writer, num_fmt_id, style.number_format.as_deref().unwrap())?;
+                    write_num_fmt(
+                        &mut writer,
+                        num_fmt_id,
+                        style.number_format.as_deref().unwrap(),
+                    )?;
                 }
                 writer.write_event(Event::End(end)).map_err(xml_error)?;
             }
@@ -442,7 +742,15 @@ fn append_style(styles_xml: &[u8], style: &StyleSpec) -> Result<(Vec<u8>, u32), 
                 write_start_with_count(&reader, &mut writer, &start, counts.cell_xfs + 1)?;
             }
             Ok(Event::End(end)) if end.name().local_name().as_ref() == b"cellXfs" => {
-                write_cell_xf(&mut writer, font_id, fill_id, num_fmt_id, add_font, add_fill, add_num_fmt)?;
+                write_cell_xf(
+                    &mut writer,
+                    font_id,
+                    fill_id,
+                    num_fmt_id,
+                    add_font,
+                    add_fill,
+                    add_num_fmt,
+                )?;
                 writer.write_event(Event::End(end)).map_err(xml_error)?;
             }
             Ok(Event::Eof) => break,
@@ -529,9 +837,7 @@ fn write_start_with_count(
         updated.push_attribute((key.as_str(), value.as_str()));
     }
     updated.push_attribute(("count", count_text.as_str()));
-    writer
-        .write_event(Event::Start(updated))
-        .map_err(xml_error)
+    writer.write_event(Event::Start(updated)).map_err(xml_error)
 }
 
 fn attr_value(
@@ -568,9 +874,7 @@ fn write_num_fmt(writer: &mut Writer<Vec<u8>>, id: u32, format: &str) -> Result<
     let resolved = xli_core::resolve_number_format(format);
     num_fmt.push_attribute(("numFmtId", id_text.as_str()));
     num_fmt.push_attribute(("formatCode", resolved.as_str()));
-    writer
-        .write_event(Event::Empty(num_fmt))
-        .map_err(xml_error)
+    writer.write_event(Event::Empty(num_fmt)).map_err(xml_error)
 }
 
 fn write_font(writer: &mut Writer<Vec<u8>>, style: &StyleSpec) -> Result<(), XliError> {
@@ -654,6 +958,128 @@ fn write_cell_xf(
     writer.write_event(Event::Empty(xf)).map_err(xml_error)
 }
 
+fn patch_column_widths(
+    sheet_xml: &[u8],
+    start_col_idx: u32,
+    end_col_idx: u32,
+    width: f64,
+) -> Result<Vec<u8>, XliError> {
+    let mut reader = Reader::from_reader(Cursor::new(sheet_xml));
+    let mut writer = Writer::new(Vec::new());
+    let mut buffer = Vec::new();
+    let mut patched_cols = false;
+
+    loop {
+        buffer.clear();
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(start)) if start.name().local_name().as_ref() == b"cols" => {
+                writer.write_event(Event::Start(start)).map_err(xml_error)?;
+                copy_until_end_with_inserted_col(
+                    &mut reader,
+                    &mut writer,
+                    start_col_idx,
+                    end_col_idx,
+                    width,
+                )?;
+                patched_cols = true;
+            }
+            Ok(Event::Empty(start)) if start.name().local_name().as_ref() == b"cols" => {
+                writer
+                    .write_event(Event::Start(start.to_owned()))
+                    .map_err(xml_error)?;
+                write_col_width(&mut writer, start_col_idx, end_col_idx, width)?;
+                writer
+                    .write_event(Event::End(BytesEnd::new("cols")))
+                    .map_err(xml_error)?;
+                patched_cols = true;
+            }
+            Ok(Event::Start(start)) if start.name().local_name().as_ref() == b"sheetData" => {
+                if !patched_cols {
+                    write_cols_block(&mut writer, start_col_idx, end_col_idx, width)?;
+                    patched_cols = true;
+                }
+                writer.write_event(Event::Start(start)).map_err(xml_error)?;
+            }
+            Ok(Event::Empty(start)) if start.name().local_name().as_ref() == b"sheetData" => {
+                if !patched_cols {
+                    write_cols_block(&mut writer, start_col_idx, end_col_idx, width)?;
+                    patched_cols = true;
+                }
+                writer.write_event(Event::Empty(start)).map_err(xml_error)?;
+            }
+            Ok(Event::Eof) => break,
+            Ok(event) => writer.write_event(event).map_err(xml_error)?,
+            Err(error) => return Err(xml_error(error)),
+        }
+    }
+
+    Ok(writer.into_inner())
+}
+
+fn copy_until_end_with_inserted_col(
+    reader: &mut Reader<Cursor<&[u8]>>,
+    writer: &mut Writer<Vec<u8>>,
+    start_col_idx: u32,
+    end_col_idx: u32,
+    width: f64,
+) -> Result<(), XliError> {
+    let mut buffer = Vec::new();
+    let mut depth = 1_u32;
+    while depth > 0 {
+        buffer.clear();
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::End(end)) if end.name().local_name().as_ref() == b"cols" && depth == 1 => {
+                write_col_width(writer, start_col_idx, end_col_idx, width)?;
+                writer.write_event(Event::End(end)).map_err(xml_error)?;
+                depth -= 1;
+            }
+            Ok(Event::Start(start)) if start.name().local_name().as_ref() == b"cols" => {
+                depth += 1;
+                writer.write_event(Event::Start(start)).map_err(xml_error)?;
+            }
+            Ok(Event::End(end)) if end.name().local_name().as_ref() == b"cols" => {
+                depth -= 1;
+                writer.write_event(Event::End(end)).map_err(xml_error)?;
+            }
+            Ok(Event::Eof) => break,
+            Ok(event) => writer.write_event(event).map_err(xml_error)?,
+            Err(error) => return Err(xml_error(error)),
+        }
+    }
+    Ok(())
+}
+
+fn write_cols_block(
+    writer: &mut Writer<Vec<u8>>,
+    start_col_idx: u32,
+    end_col_idx: u32,
+    width: f64,
+) -> Result<(), XliError> {
+    writer
+        .write_event(Event::Start(BytesStart::new("cols")))
+        .map_err(xml_error)?;
+    write_col_width(writer, start_col_idx, end_col_idx, width)?;
+    writer
+        .write_event(Event::End(BytesEnd::new("cols")))
+        .map_err(xml_error)
+}
+
+fn write_col_width(
+    writer: &mut Writer<Vec<u8>>,
+    start_col_idx: u32,
+    end_col_idx: u32,
+    width: f64,
+) -> Result<(), XliError> {
+    let mut col = BytesStart::new("col");
+    let min = (start_col_idx + 1).to_string();
+    let max = (end_col_idx + 1).to_string();
+    let width = width.to_string();
+    col.push_attribute(("min", min.as_str()));
+    col.push_attribute(("max", max.as_str()));
+    col.push_attribute(("width", width.as_str()));
+    col.push_attribute(("customWidth", "1"));
+    writer.write_event(Event::Empty(col)).map_err(xml_error)
+}
 
 fn discover_sheet_parts(patcher: &mut WorkbookPatcher) -> Result<SheetPartMap, XliError> {
     let workbook_xml = patcher.read_part("xl/workbook.xml")?;
@@ -777,9 +1203,11 @@ fn resolve_sheet_part_name(
         });
     }
 
-    sheet_parts.first_name().ok_or_else(|| XliError::SheetNotFound {
+    sheet_parts
+        .first_name()
+        .ok_or_else(|| XliError::SheetNotFound {
             sheet: "<first>".to_string(),
-    })
+        })
 }
 
 fn patch_sheet_cell(
@@ -817,6 +1245,237 @@ fn patch_sheet_cell(
     }
 
     Ok(writer.into_inner())
+}
+
+fn patch_sheet_cell_style(
+    sheet_xml: &[u8],
+    cell_ref: &str,
+    style_id: u32,
+) -> Result<Vec<u8>, XliError> {
+    let target = parse_address(cell_ref).map_err(XliError::from)?;
+    let mut reader = Reader::from_reader(Cursor::new(sheet_xml));
+    let mut writer = Writer::new(Vec::new());
+    let mut buffer = Vec::new();
+    let mut inserted = false;
+
+    loop {
+        buffer.clear();
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(start)) if start.name().local_name().as_ref() == b"sheetData" => {
+                writer.write_event(Event::Start(start)).map_err(xml_error)?;
+                patch_sheet_data_style(&mut reader, &mut writer, &target, style_id, &mut inserted)?;
+            }
+            Ok(Event::Empty(start)) if start.name().local_name().as_ref() == b"sheetData" => {
+                writer
+                    .write_event(Event::Start(start.to_owned()))
+                    .map_err(xml_error)?;
+                write_row_with_styled_blank(&mut writer, target.row, cell_ref, style_id)?;
+                writer
+                    .write_event(Event::End(BytesEnd::new("sheetData")))
+                    .map_err(xml_error)?;
+                inserted = true;
+            }
+            Ok(Event::Eof) => break,
+            Ok(event) => writer.write_event(event).map_err(xml_error)?,
+            Err(error) => return Err(xml_error(error)),
+        }
+    }
+
+    Ok(writer.into_inner())
+}
+
+fn patch_sheet_data_style(
+    reader: &mut Reader<Cursor<&[u8]>>,
+    writer: &mut Writer<Vec<u8>>,
+    target: &xli_core::CellRef,
+    style_id: u32,
+    inserted: &mut bool,
+) -> Result<(), XliError> {
+    let mut buffer = Vec::new();
+
+    loop {
+        buffer.clear();
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(start)) if start.name().local_name().as_ref() == b"row" => {
+                let row_num = row_number(reader, &start)?;
+                if !*inserted && row_num > target.row {
+                    write_row_with_styled_blank(writer, target.row, &target_ref(target), style_id)?;
+                    *inserted = true;
+                }
+                if row_num == target.row {
+                    patch_row_style(reader, writer, start, target, style_id)?;
+                    *inserted = true;
+                } else {
+                    writer.write_event(Event::Start(start)).map_err(xml_error)?;
+                    copy_until_end(reader, writer, b"row")?;
+                }
+            }
+            Ok(Event::Empty(start)) if start.name().local_name().as_ref() == b"row" => {
+                let row_num = row_number(reader, &start)?;
+                if !*inserted && row_num > target.row {
+                    write_row_with_styled_blank(writer, target.row, &target_ref(target), style_id)?;
+                    *inserted = true;
+                }
+                if row_num == target.row {
+                    write_row_with_styled_blank(writer, target.row, &target_ref(target), style_id)?;
+                    *inserted = true;
+                } else {
+                    writer.write_event(Event::Empty(start)).map_err(xml_error)?;
+                }
+            }
+            Ok(Event::End(end)) if end.name().local_name().as_ref() == b"sheetData" => {
+                if !*inserted {
+                    write_row_with_styled_blank(writer, target.row, &target_ref(target), style_id)?;
+                    *inserted = true;
+                }
+                writer.write_event(Event::End(end)).map_err(xml_error)?;
+                break;
+            }
+            Ok(Event::Eof) => break,
+            Ok(event) => writer.write_event(event).map_err(xml_error)?,
+            Err(error) => return Err(xml_error(error)),
+        }
+    }
+
+    Ok(())
+}
+
+fn patch_row_style(
+    reader: &mut Reader<Cursor<&[u8]>>,
+    writer: &mut Writer<Vec<u8>>,
+    row_start: BytesStart<'_>,
+    target: &xli_core::CellRef,
+    style_id: u32,
+) -> Result<(), XliError> {
+    writer
+        .write_event(Event::Start(row_start))
+        .map_err(xml_error)?;
+    let mut buffer = Vec::new();
+    let mut inserted = false;
+
+    loop {
+        buffer.clear();
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(start)) if start.name().local_name().as_ref() == b"c" => {
+                let (cell_ref, _) = cell_reference_and_style(reader, &start)?;
+                let cell_col = cell_ref
+                    .as_deref()
+                    .and_then(|value| parse_address(value).ok())
+                    .map(|cell| cell.col_idx);
+                if !inserted && cell_col.is_some_and(|col| col > target.col_idx) {
+                    write_styled_blank_cell(writer, &target_ref(target), style_id)?;
+                    inserted = true;
+                }
+                if cell_col == Some(target.col_idx) {
+                    write_styled_cell_start(writer, &start, style_id)?;
+                    copy_until_end(reader, writer, b"c")?;
+                    inserted = true;
+                } else {
+                    writer.write_event(Event::Start(start)).map_err(xml_error)?;
+                    copy_until_end(reader, writer, b"c")?;
+                }
+            }
+            Ok(Event::Empty(start)) if start.name().local_name().as_ref() == b"c" => {
+                let (cell_ref, _) = cell_reference_and_style(reader, &start)?;
+                let cell_col = cell_ref
+                    .as_deref()
+                    .and_then(|value| parse_address(value).ok())
+                    .map(|cell| cell.col_idx);
+                if !inserted && cell_col.is_some_and(|col| col > target.col_idx) {
+                    write_styled_blank_cell(writer, &target_ref(target), style_id)?;
+                    inserted = true;
+                }
+                if cell_col == Some(target.col_idx) {
+                    write_styled_cell_empty(writer, &start, style_id)?;
+                    inserted = true;
+                } else {
+                    writer.write_event(Event::Empty(start)).map_err(xml_error)?;
+                }
+            }
+            Ok(Event::End(end)) if end.name().local_name().as_ref() == b"row" => {
+                if !inserted {
+                    write_styled_blank_cell(writer, &target_ref(target), style_id)?;
+                }
+                writer.write_event(Event::End(end)).map_err(xml_error)?;
+                break;
+            }
+            Ok(Event::Eof) => break,
+            Ok(event) => writer.write_event(event).map_err(xml_error)?,
+            Err(error) => return Err(xml_error(error)),
+        }
+    }
+
+    Ok(())
+}
+
+fn write_row_with_styled_blank(
+    writer: &mut Writer<Vec<u8>>,
+    row: u32,
+    cell_ref: &str,
+    style_id: u32,
+) -> Result<(), XliError> {
+    let mut row_start = BytesStart::new("row");
+    let row_text = row.to_string();
+    row_start.push_attribute(("r", row_text.as_str()));
+    writer
+        .write_event(Event::Start(row_start))
+        .map_err(xml_error)?;
+    write_styled_blank_cell(writer, cell_ref, style_id)?;
+    writer
+        .write_event(Event::End(BytesEnd::new("row")))
+        .map_err(xml_error)
+}
+
+fn write_styled_blank_cell(
+    writer: &mut Writer<Vec<u8>>,
+    cell_ref: &str,
+    style_id: u32,
+) -> Result<(), XliError> {
+    let mut cell = BytesStart::new("c");
+    let style_text = style_id.to_string();
+    cell.push_attribute(("r", cell_ref));
+    cell.push_attribute(("s", style_text.as_str()));
+    writer.write_event(Event::Empty(cell)).map_err(xml_error)
+}
+
+fn write_styled_cell_start(
+    writer: &mut Writer<Vec<u8>>,
+    start: &BytesStart<'_>,
+    style_id: u32,
+) -> Result<(), XliError> {
+    let updated = cell_with_style(start, style_id)?;
+    writer.write_event(Event::Start(updated)).map_err(xml_error)
+}
+
+fn write_styled_cell_empty(
+    writer: &mut Writer<Vec<u8>>,
+    start: &BytesStart<'_>,
+    style_id: u32,
+) -> Result<(), XliError> {
+    let updated = cell_with_style(start, style_id)?;
+    writer.write_event(Event::Empty(updated)).map_err(xml_error)
+}
+
+fn cell_with_style(start: &BytesStart<'_>, style_id: u32) -> Result<BytesStart<'static>, XliError> {
+    let mut updated = BytesStart::new("c");
+    let style_text = style_id.to_string();
+    let mut attrs = Vec::new();
+    for attribute in start.attributes() {
+        let attribute = attribute.map_err(xml_error)?;
+        if attribute.key.local_name().as_ref() == b"s" {
+            continue;
+        }
+        let key = std::str::from_utf8(attribute.key.as_ref())
+            .map_err(xml_error)?
+            .to_string();
+        let value = String::from_utf8_lossy(attribute.value.as_ref()).into_owned();
+        attrs.push((key, value));
+    }
+    for (key, value) in &attrs {
+        updated.push_attribute((key.as_str(), value.as_str()));
+    }
+    updated.push_attribute(("s", style_text.as_str()));
+    Ok(updated)
 }
 
 fn patch_sheet_data(

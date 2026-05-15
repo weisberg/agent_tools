@@ -63,21 +63,22 @@ pub fn run(args: FormatArgs, human: bool) -> Result<bool> {
         AtomicCommitOptions {
             dry_run: args.dry_run,
         },
-        |src, dst| {
-            xli_ooxml::apply_format(src, dst, &range, &style)?;
-            Ok::<_, xli_core::XliError>(())
-        },
+        |src, dst| xli_ooxml::apply_format(src, dst, &range, &style),
     );
 
     match result {
-        Ok((commit, ())) => output::emit(
+        Ok((commit, result)) => output::emit(
             &output::ok_envelope(
                 "format",
                 input,
                 FormatOutput {
                     cells_formatted: formatted_cells(&range).unwrap_or(0),
                 },
-                vec![UMYA_FALLBACK_WARNING.to_string()],
+                if result.used_fallback {
+                    vec![UMYA_FALLBACK_WARNING.to_string()]
+                } else {
+                    Vec::new()
+                },
                 false,
                 if args.dry_run {
                     xli_core::CommitMode::DryRun

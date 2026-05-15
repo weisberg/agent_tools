@@ -61,14 +61,14 @@ These crates form the common substrate. Every tool in agent_tools should depend 
 |---|---|---|
 | `calamine` | Fast xlsx/xls/ods reading | Pure Rust, 2.5x faster than alternatives for bulk reads. Read-only — no write support. Serde integration for deserializing rows directly into structs |
 | `rust_xlsxwriter` | Fast xlsx creation | Used by `xli create`, including CSV/Markdown/JSON imports and report-table creation options. Strong for new workbooks, charts, conditional formatting, data validation, sparklines, and images. Write-only — cannot modify existing files |
-| `umya-spreadsheet` | Read + write + modify xlsx | Current mutation fallback for formula writes, `format`, `sheet`, `batch`, and `apply`. Practical for MVP editing, but `xli` intentionally warns because unrelated workbook artifacts may be rewritten |
+| `umya-spreadsheet` | Read + write + modify xlsx | Current mutation fallback for unsupported edits such as sheet add/delete/copy, alignment formatting, and unsupported batch/apply operations. `xli` intentionally warns because unrelated workbook artifacts may be rewritten |
 | `csv` | CSV read/write with serde | Import/export CSV. Handles quoting, escaping, flexible delimiters. Used by `xli create --from-csv` and column-name report options |
 | `schemars` | JSON Schema generation | Used for structured command/result schema output. Some command schemas are still maintained manually until CLI-type-derived schemas are complete |
-| `quick-xml` + `zip` | OOXML package inspection/patching | Existing helper crates for artifact-preserving OOXML work. Full mutation coverage is still active work |
+| `quick-xml` + `zip` | OOXML package inspection/patching | Artifact-preserving OOXML mutation engine for value/formula writes, supported formatting, supported sheet metadata edits, write-only batches, and supported mixed batch/apply operations |
 
 ### Strategy Note
 
-xli currently composes the spreadsheet crates directly: `calamine` for reads and inspection, `rust_xlsxwriter` for new workbook creation, `zip`/`quick-xml` for artifact-preserving plain value writes, and `umya-spreadsheet` as the mutation fallback. The long-term direction is to move more common mutations onto artifact-preserving OOXML patch paths, keeping fallback usage explicit in response warnings.
+xli currently composes the spreadsheet crates directly: `calamine` for reads and inspection, `rust_xlsxwriter` for new workbook creation, `zip`/`quick-xml` for artifact-preserving value writes, formula writes, supported formatting, sheet rename/hide/unhide/reorder, write-only batches, and supported mixed batch/apply paths, with `umya-spreadsheet` retained as the explicit warning-backed fallback for unsupported mutations. The long-term direction is to keep shrinking that fallback surface.
 
 ### Data Processing
 

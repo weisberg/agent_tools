@@ -22,10 +22,10 @@ fn write_and_read_float() {
     create_workbook(&path);
 
     let p = path.to_str().unwrap();
-    xli_json(&["write", p, "Sheet1!A1", "--value", "3.14"]);
+    xli_json(&["write", p, "Sheet1!A1", "--value", "2.72"]);
 
     let read = xli_json(&["read", p, "Sheet1!A1"]);
-    assert_eq!(read["output"]["value"], 3.14);
+    assert_eq!(read["output"]["value"], 2.72);
 }
 
 #[test]
@@ -76,6 +76,46 @@ fn write_formula_sets_needs_recalc() {
     let p = path.to_str().unwrap();
     let write = xli_json(&["write", p, "Sheet1!A1", "--formula", "=1+1"]);
     assert_eq!(write["needs_recalc"], true);
+    assert_eq!(write["warnings"].as_array().expect("warnings").len(), 0);
+
+    let read = xli_json(&["read", p, "Sheet1!A1"]);
+    assert_eq!(read["output"]["formula"], "1+1");
+}
+
+#[test]
+fn write_formula_overwrites_existing_value() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("test.xlsx");
+    create_workbook(&path);
+
+    let p = path.to_str().unwrap();
+    xli_json(&["write", p, "Sheet1!A1", "--value", "10"]);
+    let write = xli_json(&["write", p, "Sheet1!A1", "--formula", "=A2+A3"]);
+    assert_eq!(write["status"], "ok");
+    assert_eq!(write["needs_recalc"], true);
+    assert_eq!(write["warnings"].as_array().expect("warnings").len(), 0);
+
+    let read = xli_json(&["read", p, "Sheet1!A1"]);
+    assert_eq!(read["output"]["formula"], "A2+A3");
+    assert_eq!(read["output"]["value_type"], "formula");
+}
+
+#[test]
+fn write_formula_overwrites_existing_formula() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("test.xlsx");
+    create_workbook(&path);
+
+    let p = path.to_str().unwrap();
+    xli_json(&["write", p, "Sheet1!A1", "--formula", "=1+1"]);
+    let write = xli_json(&["write", p, "Sheet1!A1", "--formula", "=2+2"]);
+    assert_eq!(write["status"], "ok");
+    assert_eq!(write["needs_recalc"], true);
+    assert_eq!(write["warnings"].as_array().expect("warnings").len(), 0);
+
+    let read = xli_json(&["read", p, "Sheet1!A1"]);
+    assert_eq!(read["output"]["formula"], "2+2");
+    assert_eq!(read["output"]["value_type"], "formula");
 }
 
 #[test]

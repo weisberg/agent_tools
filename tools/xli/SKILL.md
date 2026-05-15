@@ -24,7 +24,7 @@ contract is in
 - Inspect an unknown workbook before deciding what to do.
 - Update a single cell, formula, range, table, or sheet.
 - Apply a batch of micro-ops in one atomic transaction.
-- Format ranges with number formats, fills, fonts, alignment, and widths.
+- Format ranges with number formats, fills, fonts, and widths.
 - Validate or lint a workbook before handing it to a stakeholder.
 - Apply a built-in template such as `basic-table-format`.
 
@@ -45,9 +45,13 @@ contract is in
 - Inspect workbook structure before writing and use precise sheet/range names.
 - Address content with `Sheet!A1`, `Sheet!A1:B10`, named tables, or named ranges.
 - Avoid sheet index addressing because sheet renames break it.
-- Always check `meta.warnings` on workbooks containing charts, drawings, macros,
-  data validation, or complex tables.
+- Always check `warnings` on workbooks containing charts, drawings, macros, data
+  validation, or complex tables.
 - Use `batch` for multi-step edits so changes apply through one atomic path.
+- Supported writes, formatting, sheet rename/hide/unhide/reorder, write-only
+  batches, mixed batches, and template application use the artifact-preserving
+  OOXML patch path. Sheet add/remove/copy and unsupported formatting fields
+  still emit the fallback warning.
 
 ## Safe Default Workflow
 
