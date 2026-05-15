@@ -66,17 +66,21 @@ pub fn run(args: BatchArgs, human: bool) -> Result<bool> {
     );
 
     match result {
-        Ok((commit, (summary, needs_recalc))) => output::emit(
+        Ok((commit, result)) => output::emit(
             &output::ok_envelope(
                 "batch",
                 input,
                 BatchOutput {
-                    ops_executed: summary.ops_executed,
+                    ops_executed: result.summary.ops_executed,
                     ops_failed: 0,
-                    stats: summary,
+                    stats: result.summary,
                 },
-                vec![UMYA_FALLBACK_WARNING.to_string()],
-                needs_recalc,
+                if result.used_fallback {
+                    vec![UMYA_FALLBACK_WARNING.to_string()]
+                } else {
+                    Vec::new()
+                },
+                result.needs_recalc,
                 if args.dry_run {
                     xli_core::CommitMode::DryRun
                 } else {

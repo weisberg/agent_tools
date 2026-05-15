@@ -2,7 +2,7 @@
 
 `clipli` is a macOS clipboard intelligence CLI for agents and power users.
 
-It turns rich clipboard content into something programmable: you can inspect what is on the clipboard, capture formatted content as reusable templates, render those templates with fresh data, convert between formats like RTF and HTML, and generate Excel-friendly clipboard payloads from CSV.
+It turns rich clipboard content into something programmable: you can inspect what is on the clipboard, capture formatted content as reusable templates, render those templates with fresh data, convert between formats like RTF and HTML, keep a privacy-aware clipboard history, and generate Excel-friendly clipboard payloads from CSV.
 
 ## What It Does
 
@@ -17,6 +17,7 @@ That makes it useful for workflows like:
 - saving a formatted table, slide fragment, or document snippet as a reusable template
 - filling the same template with new values and pasting it back into Office or browser apps
 - converting clipboard or file content between HTML, Jinja2 templates, RTF, and plain text
+- recording, searching, and restoring prior clipboard payloads without storing likely secrets by default
 - generating Excel-style tables from CSV as editable HTML or copied SVG/PNG images
 - making targeted edits to clipboard table cells without rebuilding the whole artifact
 
@@ -33,6 +34,22 @@ clipli inspect
 clipli read --type html
 clipli write --type html -i snippet.html
 clipli doctor
+```
+
+### Clipboard history and watch mode
+
+`clipli` can record clipboard entries into a local history store, search text payloads and metadata, and restore a prior entry to the clipboard. History is privacy-aware by default: text that looks like it contains secrets is recorded as metadata only unless you explicitly choose `--sensitive redact` or `--sensitive allow`.
+
+Typical commands:
+
+```bash
+clipli watch --once
+clipli watch --max-items 10 --sensitive redact
+clipli history list --json
+clipli history search revenue
+clipli history show <ID> --content
+clipli history restore <ID>
+clipli history restore <ID> --dry-run -o restored.bin
 ```
 
 ### Template capture and reuse
@@ -94,6 +111,16 @@ clipli excel data.csv --copy-as png --dry-run --out-file preview.png
 clipli excel-edit --set-bg "D4:#A0D771" --set-fg "D4:#628048"
 ```
 
+### Shell integration
+
+Generate shell completions directly from the CLI definition:
+
+```bash
+clipli completions bash
+clipli completions zsh
+clipli completions fish
+```
+
 ## Command Overview
 
 Current top-level commands:
@@ -103,6 +130,8 @@ Current top-level commands:
 - `write` — write content from stdin or a file to the clipboard
 - `capture` — save clipboard content as a named template
 - `paste` — render a template with data and write it to the clipboard
+- `watch` — record current or changing clipboard payloads into history
+- `history` — list, search, show, record, or restore clipboard history entries
 - `list`, `show`, `edit`, `delete` — manage saved templates
 - `versions`, `restore` — inspect and roll back template history
 - `lint`, `search` — validate and discover templates
@@ -111,6 +140,7 @@ Current top-level commands:
 - `render` — render a template to files or stdout without touching the clipboard
 - `convert` — convert between supported formats
 - `doctor` — check local environment, config, store, pasteboard, and agent readiness
+- `completions` — print shell completion scripts
 
 ## Automation Notes
 
@@ -119,6 +149,8 @@ Most commands that are useful to agents or scripts support `--json`. Failures in
 ```json
 {"ok": false, "error": "message", "code": "ERROR_CODE"}
 ```
+
+The current v1.0 compatibility target is to keep top-level `ok`, `error`, and `code` stable for JSON failures. Success payloads are command-specific but should remain structured JSON objects or arrays, not prose.
 
 `capture --strategy agent` supports two modes:
 
@@ -149,6 +181,8 @@ The agent response shape is:
 - Clipboard operations require a macOS GUI session.
 - Non-clipboard commands like `convert`, `lint`, and parts of `render` are easier to use in automation and CI-like contexts.
 - RTF-to-HTML conversion relies on the macOS `textutil` tool.
+- History entries are stored under the clipli config directory in `history/index.jsonl` plus `history/payloads/`.
+- Clipboard history can contain sensitive user data. The default `--sensitive skip` policy stores metadata only when common secret markers are detected.
 
 ## Build
 
@@ -169,6 +203,14 @@ Check local readiness with:
 ```bash
 cargo run -- doctor
 cargo run -- doctor --json --skip-clipboard
+```
+
+Run the practical verification set used for current development:
+
+```bash
+cargo fmt --check
+cargo test
+cargo clippy --all-targets -- -D warnings
 ```
 
 ## Where to Look Next

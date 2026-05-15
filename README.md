@@ -104,7 +104,8 @@ Start here: [`tools/mdli/README.md`](tools/mdli/README.md)
 
 Make the system clipboard programmable. Capture formatted content, convert rich
 formats, templatize snippets, render them with fresh data, and generate
-Excel-friendly clipboard payloads and table images.
+Excel-friendly clipboard payloads and table images. It also provides a
+privacy-aware local clipboard history for search and restore workflows.
 
 Highlights:
 
@@ -115,6 +116,9 @@ Highlights:
 - Convert between RTF, HTML, plain text, and Jinja2-style templates.
 - Generate Excel-style tables from CSV as editable HTML or copied SVG/PNG images,
   then edit clipboard tables by A1 cell reference.
+- Record, search, show, and restore clipboard history entries with secret-skipping
+  defaults.
+- Generate shell completions for bash, zsh, fish, and other clap-supported shells.
 
 Start here: [`tools/clipli/README.md`](tools/clipli/README.md)
 

@@ -31,7 +31,7 @@ Copy from App → clipli capture → templatize → agent fills data → clipli 
 
 ### 2.1 Crate Layout
 
-Single crate, binary target, ten modules:
+Single crate, binary target, eleven modules:
 
 ```
 clipli/
@@ -47,7 +47,8 @@ clipli/
 │   ├── rtf.rs               # RTF → HTML conversion via macOS textutil
 │   ├── lint.rs              # Template linter (variable/schema consistency)
 │   ├── excel.rs             # CSV → Excel-style HTML/SVG/PNG pipeline
-│   └── excel_edit.rs        # In-place cell editing of clipboard Excel HTML
+│   ├── excel_edit.rs        # In-place cell editing of clipboard Excel HTML
+│   └── history.rs           # Privacy-aware clipboard history store
 ├── templates/
 │   ├── _base.html.j2        # Base template with common boilerplate
 │   ├── table_default.html.j2
@@ -74,7 +75,8 @@ main.rs
   ├── rtf        (RTF → HTML via textutil)
   ├── lint       (template variable/schema validation)
   ├── excel      (CSV → Excel-style HTML/SVG/PNG)
-  └── excel_edit (cell-level editing of clipboard HTML)
+  ├── excel_edit (cell-level editing of clipboard HTML)
+  └── history    (JSONL history index + payload storage)
 ```
 
 No circular dependencies. `model` is a leaf. `pb` has no internal dependencies.
@@ -131,7 +133,35 @@ pub struct PbTypeEntry {
 }
 ```
 
-### 3.2 Template Metadata
+### 3.2 Clipboard History Metadata
+
+History is stored as newline-delimited JSON metadata plus payload files under the clipli config directory:
+
+```text
+history/
+├── index.jsonl
+└── payloads/
+```
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryEntry {
+    pub id: String,
+    pub captured_at: chrono::DateTime<chrono::Utc>,
+    pub source_app: Option<String>,
+    pub pb_type: PbType,
+    pub uti: String,
+    pub size_bytes: usize,
+    pub sha256: String,
+    pub payload_path: Option<String>,
+    pub redacted: bool,
+    pub privacy_reason: Option<String>,
+}
+```
+
+Sensitive text handling is controlled by `--sensitive skip|redact|allow`. The default `skip` policy records metadata only when common secret markers are detected.
+
+### 3.3 Template Metadata
 
 ```rust
 /// Stored alongside every captured template.
@@ -169,7 +199,7 @@ pub enum VarType {
 }
 ```
 
-### 3.3 Table Model (for structured input)
+### 3.4 Table Model (for structured input)
 
 ```rust
 /// Agent-friendly table input format for `clipli paste --from-table`.
@@ -371,7 +401,7 @@ clipli paste --from-table [OPTIONS]
 | `--from-table` | bool | false | Read TableInput JSON from stdin |
 | `--template` / `-t` | string | `table_default` | Built-in table template to use |
 
-**Stdin format:** A `TableInput` JSON object (see §3.3).
+**Stdin format:** A `TableInput` JSON object (see §3.4).
 
 ---
 
@@ -689,6 +719,69 @@ clipli excel-edit [OPTIONS]
 | `--set-italic CELL` | repeatable | none | Make cell italic |
 | `--set-wrap CELL` | repeatable | none | Enable word wrap on cell |
 | `--dry-run` | bool | false | Print modified HTML to stdout instead of writing to clipboard |
+
+---
+
+#### `clipli watch`
+
+Record clipboard snapshots into the local history store. By default, `watch` keeps polling until stopped; use `--once` or `--max-items` for bounded agent workflows.
+
+```
+clipli watch [OPTIONS]
+```
+
+**Flags:**
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--once` | bool | false | Capture one current clipboard snapshot and exit |
+| `--max-items` | usize | none | Maximum new entries to record before exiting |
+| `--interval-ms` | u64 | `1000` | Polling interval in milliseconds |
+| `--sensitive` | enum | `skip` | Sensitive payload policy: `skip`, `redact`, or `allow` |
+| `--json` | bool | false | JSON output |
+
+---
+
+#### `clipli history`
+
+List, search, inspect, record, or restore local clipboard history entries.
+
+```
+clipli history <SUBCOMMAND> [OPTIONS]
+```
+
+**Subcommands:**
+| Subcommand | Description |
+|------------|-------------|
+| `record` | Record clipboard content or a file payload into history |
+| `list` | List recent history entries |
+| `search <QUERY>` | Search metadata and stored text payloads |
+| `show <ID>` | Show one entry, optionally with text content |
+| `restore <ID>` | Restore one entry to the clipboard or dry-run output |
+
+**Key flags:**
+| Flag | Applies to | Description |
+|------|------------|-------------|
+| `--type` / `-t` | `record` | Pasteboard type for file/stdin records |
+| `--input` / `-i` | `record` | Read payload from a file instead of the clipboard |
+| `--source-app` | `record` | Source app label for file-based records |
+| `--sensitive` | `record` | Sensitive payload policy: `skip`, `redact`, or `allow` |
+| `--limit` | `list`, `search` | Maximum entries to print |
+| `--content` | `show` | Include text payload content when available |
+| `--dry-run` | `restore` | Print or write payload instead of mutating the clipboard |
+| `--output` / `-o` | `restore` | Write dry-run payload to a file |
+| `--json` | all | JSON output |
+
+---
+
+#### `clipli completions`
+
+Generate shell completion scripts from the current clap command definition.
+
+```
+clipli completions <SHELL>
+```
+
+Supported shells are provided by `clap_complete`, including `bash`, `zsh`, `fish`, `elvish`, and `powershell`.
 
 ---
 
@@ -1251,13 +1344,14 @@ command = "$EDITOR"    # for `clipli edit`
 ```toml
 [package]
 name = "clipli"
-version = "0.1.0"
+version = "0.4.0"
 edition = "2021"
 rust-version = "1.75"
 
 [dependencies]
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
+clap_complete = "4"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -1280,6 +1374,7 @@ thiserror = "1"
 dirs = "5"               # XDG / macOS config dirs
 toml = "0.8"             # config file parsing
 regex = "1"              # heuristic templatizer patterns
+sha2 = "0.10"            # history content fingerprints
 
 [dev-dependencies]
 assert_cmd = "2"         # CLI integration tests
@@ -1297,7 +1392,9 @@ insta = "1"              # snapshot testing for HTML output
 All modules use `thiserror` for typed errors. The CLI catches all errors in `main.rs` and produces either:
 
 - **Human-readable** (default): colored stderr output with actionable suggestions
-- **JSON** (when `--json` is set on any subcommand): `{"error": "...", "code": "..."}` on stdout
+- **JSON** (when `--json` is set on a JSON-capable subcommand): `{"ok": false, "error": "...", "code": "..."}` on stdout
+
+The v1.0 compatibility target is to keep `ok`, `error`, and `code` stable for failure envelopes. Success payloads are command-specific structured JSON, not prose.
 
 Error codes:
 
@@ -1316,6 +1413,7 @@ Error codes:
 | `TEMPLATIZE_AGENT_TIMEOUT` | templatize | Agent didn't respond |
 | `TEMPLATIZE_INVALID_RESPONSE` | templatize | Agent response didn't parse |
 | `CONFIG_PARSE_ERROR` | config | Invalid config.toml |
+| `UNKNOWN` | generic | Fallback for errors not yet mapped to typed codes |
 
 ---
 
@@ -1329,11 +1427,13 @@ Each module has co-located tests using captured HTML fixtures from real applicat
 - **`render_tests.rs`** — Round-trip tests: render template with known data, verify HTML output.
 - **`templatize_tests.rs`** — Verify heuristic extraction on sample HTML. Assert correct variable names, types, and that re-rendering with default values produces original content.
 - **`store_tests.rs`** — CRUD operations on a tempdir store.
+- **`history.rs` co-located tests** — Sensitive text detection and privacy policy behavior.
 
 ### 10.2 Integration Tests
 
 - **Full round-trip:** Capture fixture HTML → clean → templatize → save → load → render with new data → verify HTML is valid and formatted.
 - **CLI smoke tests:** `assert_cmd` tests for each subcommand with expected exit codes and output patterns.
+- **History workflow tests:** file-backed `history record/search/show/restore` flows under an isolated temp home.
 - **Pasteboard tests:** Marked `#[ignore]` by default (require macOS GUI session). Run manually with `cargo test -- --ignored`.
 
 ### 10.3 Fixtures
@@ -1396,7 +1496,7 @@ pb::write(&[(PbType::Html, rendered.html.as_bytes()), (PbType::PlainText, render
 | **Cross-platform pasteboard** | Linux (xclip/wl-copy/xsel), Windows (clipboard API) |
 | **Image template capture** | Capture `public.png`/`public.tiff`, use as template backgrounds |
 | **RTF rendering** | Full RTF round-trip (RTF → HTML is done via `textutil`; HTML → RTF rendering is not yet supported) |
-| **Clipboard watch mode** | `clipli watch` — daemon that auto-captures every clipboard change to a log |
+| **History retention and advanced filters** | Retention policies plus source-app, type, and date filters for `clipli history` |
 | **MCP server** | Expose clipli as an MCP tool server for direct agent integration |
 | **clipli-core crate** | Extract library crate for programmatic use without CLI overhead |
 | **Embedded preview server** | `clipli serve` — local HTTP server to preview templates in browser with hot reload |
@@ -1406,41 +1506,42 @@ pb::write(&[(PbType::Html, rendered.html.as_bytes()), (PbType::PlainText, render
 ## 13. Development Roadmap
 
 ### Phase 1: Foundation (MVP)
-- [ ] `pb.rs` — read/write pasteboard (HTML + plain text)
-- [ ] `model.rs` — all data types
-- [ ] `clipli inspect`
-- [ ] `clipli read`
-- [ ] `clipli write`
-- [ ] Test fixtures from Excel and PowerPoint
+- [x] `pb.rs` — read/write pasteboard (HTML + plain text)
+- [x] `model.rs` — all data types
+- [x] `clipli inspect`
+- [x] `clipli read`
+- [x] `clipli write`
+- [x] Test fixtures from Excel and PowerPoint
 
 ### Phase 2: Capture & Clean
-- [ ] `clean.rs` — full 10-stage pipeline
-- [ ] `store.rs` — filesystem template store
-- [ ] `clipli capture` (with `--raw` and `--strategy manual`)
-- [ ] `clipli list`, `clipli show`, `clipli delete`
-- [ ] Snapshot tests for cleaner
+- [x] `clean.rs` — full 10-stage pipeline
+- [x] `store.rs` — filesystem template store
+- [x] `clipli capture` (with `--raw` and `--strategy manual`)
+- [x] `clipli list`, `clipli show`, `clipli delete`
+- [x] Snapshot tests for cleaner
 
 ### Phase 3: Templates & Rendering
-- [ ] `render.rs` — minijinja integration + custom filters
-- [ ] Built-in templates (table_default, table_striped, slide_default)
-- [ ] `clipli paste` (named template + data)
-- [ ] `clipli paste --from-table`
-- [ ] `clipli edit`
-- [ ] Config file support
+- [x] `render.rs` — minijinja integration + custom filters
+- [x] Built-in templates (table_default, table_striped, slide_default)
+- [x] `clipli paste` (named template + data)
+- [x] `clipli paste --from-table`
+- [x] `clipli edit`
+- [x] Config file support
 
 ### Phase 4: Templatization
-- [ ] `templatize.rs` — heuristic strategy
-- [ ] `clipli capture --templatize --strategy heuristic`
-- [ ] Agent strategy protocol (stdout/stdin JSON)
-- [ ] `clipli capture --templatize --strategy agent`
-- [ ] `clipli convert`
+- [x] `templatize.rs` — heuristic strategy
+- [x] `clipli capture --templatize --strategy heuristic`
+- [x] Agent strategy protocol (stdout/stdin JSON)
+- [x] `clipli capture --templatize --strategy agent`
+- [x] `clipli convert`
 
 ### Phase 5: Polish
 - [ ] Colored CLI output (human-friendly errors)
-- [ ] Shell completions (clap_complete)
-- [ ] `clipli --version`, `clipli help` polish
-- [ ] README.md, man page
-- [ ] CI (GitHub Actions, macOS runner)
+- [x] Shell completions (clap_complete)
+- [x] `clipli --version`, `clipli help` polish
+- [x] README.md
+- [ ] Man page
+- [x] CI (GitHub Actions, macOS runner)
 - [ ] Homebrew formula
 
 ---

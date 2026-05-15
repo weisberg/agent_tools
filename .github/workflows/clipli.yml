@@ -1,0 +1,47 @@
+name: clipli
+
+on:
+  push:
+    paths:
+      - ".github/workflows/clipli.yml"
+      - "tools/clipli/**"
+  pull_request:
+    paths:
+      - ".github/workflows/clipli.yml"
+      - "tools/clipli/**"
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: Verify clipli
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: tools/clipli
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/clipli
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Test
+        # GUI pasteboard tests are marked #[ignore]; run them manually in a
+        # logged-in macOS session with `cargo test -- --ignored`.
+        run: cargo test
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Package
+        run: cargo package --allow-dirty
