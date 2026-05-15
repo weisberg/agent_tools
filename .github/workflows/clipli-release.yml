@@ -1,0 +1,60 @@
+name: clipli release
+
+on:
+  push:
+    tags:
+      - "clipli-v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: Package clipli
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tools/clipli
+
+      - name: Verify
+        working-directory: tools/clipli
+        run: |
+          cargo fmt --check
+          cargo test
+          cargo clippy --all-targets -- -D warnings
+          cargo package --allow-dirty
+
+      - name: Build release archive
+        run: tools/clipli/scripts/package_release.sh
+
+      - name: Upload packaged artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: clipli-release
+          path: |
+            tools/clipli/target/dist/*.tar.gz
+            tools/clipli/target/dist/*.sha256
+            tools/clipli/target/dist/SHA256SUMS
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            tools/clipli/target/dist/*.tar.gz \
+            tools/clipli/target/dist/*.sha256 \
+            tools/clipli/target/dist/SHA256SUMS \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes

@@ -150,7 +150,8 @@ fn load_config() -> Config {
 #[command(
     name = "clipli",
     version,
-    about = "Clipboard intelligence CLI — template-driven pasteboard for agents and power users"
+    about = "Clipboard intelligence CLI — template-driven pasteboard for agents and power users",
+    after_help = "Examples:\n  clipli inspect --json\n  clipli capture --name quarterly_report --templatize\n  clipli paste quarterly_report -D '{\"quarter\":\"Q2\"}'\n  clipli preview quarterly_report -D '{\"quarter\":\"Q2\"}' --open\n  clipli excel rows.json --input-format json --preset finance --copy-as svg\n  clipli history prune --keep-latest 200 --dry-run --json"
 )]
 struct Cli {
     /// Increase verbosity (-v info, -vv debug, -vvv trace)
@@ -236,6 +237,28 @@ enum Commands {
         from_table: bool,
         #[arg(long, short = 't', default_value = "table_default")]
         template: String,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Render or save an explicit HTML preview without touching the clipboard
+    Preview {
+        /// Template name to render; omit when previewing stdin or --input HTML
+        name: Option<String>,
+        /// HTML input file to preview instead of a stored template
+        #[arg(long, short = 'i')]
+        input: Option<PathBuf>,
+        /// Inline JSON data for template rendering
+        #[arg(long = "data", short = 'D')]
+        data: Option<String>,
+        /// JSON data file for template rendering
+        #[arg(long)]
+        data_file: Option<PathBuf>,
+        /// Open the generated preview file in the default browser
+        #[arg(long)]
+        open: bool,
+        /// Write preview HTML to this path instead of the preview cache
+        #[arg(long, short = 'o')]
+        output: Option<PathBuf>,
         #[arg(long)]
         json: bool,
     },
@@ -334,18 +357,24 @@ enum Commands {
     Excel {
         /// CSV file path (or - for stdin)
         file: PathBuf,
+        /// Input format: csv, json, or auto
+        #[arg(long = "input-format", default_value = "csv", value_parser = ["csv", "json", "auto"])]
+        input_format: String,
+        /// Named formatting preset: default, finance, executive, minimal, or status
+        #[arg(long, value_parser = ["default", "finance", "executive", "minimal", "status"])]
+        preset: Option<String>,
         /// Table style: "table" (banded rows) or "plain" (thick borders)
-        #[arg(long, default_value = "table")]
-        style: String,
+        #[arg(long)]
+        style: Option<String>,
         /// Header background color
-        #[arg(long, default_value = "#4472C4")]
-        header_bg: String,
+        #[arg(long)]
+        header_bg: Option<String>,
         /// Header text color
-        #[arg(long, default_value = "#FFFFFF")]
-        header_fg: String,
+        #[arg(long)]
+        header_fg: Option<String>,
         /// Banded row background color (table style only)
-        #[arg(long, default_value = "#D9E1F2")]
-        band_bg: String,
+        #[arg(long)]
+        band_bg: Option<String>,
         /// Font family
         #[arg(long)]
         font: Option<String>,
@@ -523,6 +552,9 @@ enum Commands {
         /// Polling interval in milliseconds
         #[arg(long, default_value = "1000")]
         interval_ms: u64,
+        /// Prune history after each recorded item, keeping the newest N entries
+        #[arg(long)]
+        max_history: Option<usize>,
         /// Sensitive payload handling: skip, redact, or allow
         #[arg(long, default_value = "skip", value_parser = ["skip", "redact", "allow"])]
         sensitive: String,
@@ -554,6 +586,18 @@ enum HistoryCommand {
     List {
         #[arg(long, default_value = "20")]
         limit: usize,
+        /// Filter by source app substring
+        #[arg(long)]
+        source_app: Option<String>,
+        /// Filter by pasteboard type
+        #[arg(long = "type")]
+        r#type: Option<String>,
+        /// Filter entries captured at or after this date/time
+        #[arg(long)]
+        from: Option<String>,
+        /// Filter entries captured at or before this date/time
+        #[arg(long)]
+        to: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -562,6 +606,18 @@ enum HistoryCommand {
         query: String,
         #[arg(long, default_value = "20")]
         limit: usize,
+        /// Filter by source app substring
+        #[arg(long)]
+        source_app: Option<String>,
+        /// Filter by pasteboard type
+        #[arg(long = "type")]
+        r#type: Option<String>,
+        /// Filter entries captured at or after this date/time
+        #[arg(long)]
+        from: Option<String>,
+        /// Filter entries captured at or before this date/time
+        #[arg(long)]
+        to: Option<String>,
         #[arg(long)]
         json: bool,
     },
@@ -583,6 +639,32 @@ enum HistoryCommand {
         /// Write dry-run payload to a file
         #[arg(long, short = 'o')]
         output: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove old history entries and payloads
+    Prune {
+        /// Keep the newest N entries matching the filters
+        #[arg(long)]
+        keep_latest: Option<usize>,
+        /// Prune entries captured before this date/time
+        #[arg(long)]
+        before: Option<String>,
+        /// Filter by source app substring
+        #[arg(long)]
+        source_app: Option<String>,
+        /// Filter by pasteboard type
+        #[arg(long = "type")]
+        r#type: Option<String>,
+        /// Filter entries captured at or after this date/time
+        #[arg(long)]
+        from: Option<String>,
+        /// Filter entries captured at or before this date/time
+        #[arg(long)]
+        to: Option<String>,
+        /// Report what would be removed without deleting anything
+        #[arg(long)]
+        dry_run: bool,
         #[arg(long)]
         json: bool,
     },
@@ -622,6 +704,7 @@ fn main() {
         &cli.command,
         Commands::Inspect { json: true, .. }
             | Commands::Capture { json: true, .. }
+            | Commands::Preview { json: true, .. }
             | Commands::List { json: true, .. }
             | Commands::Paste { json: true, .. }
             | Commands::Show { json: true, .. }
@@ -640,7 +723,8 @@ fn main() {
                     | HistoryCommand::List { json: true, .. }
                     | HistoryCommand::Search { json: true, .. }
                     | HistoryCommand::Show { json: true, .. }
-                    | HistoryCommand::Restore { json: true, .. },
+                    | HistoryCommand::Restore { json: true, .. }
+                    | HistoryCommand::Prune { json: true, .. },
             }
     );
 
@@ -711,6 +795,15 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
             name, data, data_file, stdin, dry_run, plain_text, open, from_table, template, json,
             config,
         ),
+        Commands::Preview {
+            name,
+            input,
+            data,
+            data_file,
+            open,
+            output,
+            json,
+        } => cmd_preview(name, input, data, data_file, open, output, json),
         Commands::List { tag, json, detail } => cmd_list(tag, json, detail),
         Commands::Show {
             name,
@@ -736,6 +829,8 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
         Commands::Import { file, force, name } => cmd_import(file, force, name),
         Commands::Excel {
             file,
+            input_format,
+            preset,
             style,
             header_bg,
             header_fg,
@@ -768,6 +863,8 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
             json,
         } => cmd_excel(
             file,
+            input_format,
+            preset,
             style,
             header_bg,
             header_fg,
@@ -851,9 +948,10 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
             once,
             max_items,
             interval_ms,
+            max_history,
             sensitive,
             json,
-        } => cmd_watch(once, max_items, interval_ms, sensitive, json),
+        } => cmd_watch(once, max_items, interval_ms, max_history, sensitive, json),
     }
 }
 
@@ -1101,9 +1199,8 @@ fn cmd_capture(
     };
 
     if preview {
-        let tmp_path = std::env::temp_dir().join("clipli_preview.html");
-        std::fs::write(&tmp_path, &template_html)?;
-        open_in_browser(&tmp_path)?;
+        let preview_path = write_preview_file("capture", &template_html, None)?;
+        open_in_browser(&preview_path)?;
     }
 
     let content = SaveContent {
@@ -1197,10 +1294,8 @@ fn cmd_paste(
     };
 
     if open {
-        // Write to a temp file and open in browser
-        let tmp_path = std::env::temp_dir().join("clipli_preview.html");
-        std::fs::write(&tmp_path, &rendered_html)?;
-        open_in_browser(&tmp_path)?;
+        let preview_path = write_preview_file("paste", &rendered_html, None)?;
+        open_in_browser(&preview_path)?;
     }
 
     pb::write_html(&rendered_html, plain.as_deref())?;
@@ -1214,6 +1309,56 @@ fn cmd_paste(
                 "plain_bytes": plain.as_ref().map(|p| p.len()),
             })
         );
+    }
+    Ok(())
+}
+
+fn cmd_preview(
+    name: Option<String>,
+    input: Option<PathBuf>,
+    data: Option<String>,
+    data_file: Option<PathBuf>,
+    open: bool,
+    output: Option<PathBuf>,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let html = if let Some(path) = input {
+        std::fs::read_to_string(path)?
+    } else if let Some(tmpl_name) = name {
+        let renderer = Renderer::new(&templates_dir())?;
+        let s = Store::new()?;
+        s.load(&tmpl_name)?;
+        let merged = merge_data(data, data_file, false)?;
+        renderer.render(&tmpl_name, &merged)?.html
+    } else {
+        use std::io::Read;
+        let mut buf = String::new();
+        std::io::stdin().read_to_string(&mut buf)?;
+        if buf.trim().is_empty() {
+            return Err(
+                "preview requires a template name, --input <file>, or HTML on stdin".into(),
+            );
+        }
+        buf
+    };
+
+    let path = write_preview_file("preview", &html, output)?;
+    if open {
+        open_in_browser(&path)?;
+    }
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "ok": true,
+                "path": path,
+                "html_bytes": html.len(),
+                "opened": open,
+            }))?
+        );
+    } else {
+        println!("{}", path.display());
     }
     Ok(())
 }
@@ -1331,9 +1476,8 @@ fn cmd_show(
         }
         let data = serde_json::Value::Object(defaults);
         let output = renderer.render(&name, &data)?;
-        let tmp_path = std::env::temp_dir().join("clipli_preview.html");
-        std::fs::write(&tmp_path, &output.html)?;
-        open_in_browser(&tmp_path)?;
+        let preview_path = write_preview_file("show", &output.html, None)?;
+        open_in_browser(&preview_path)?;
         return Ok(());
     }
 
@@ -1768,13 +1912,211 @@ fn cmd_excel_edit(
     Ok(())
 }
 
+#[derive(Debug, Default)]
+struct ExcelPresetConfig {
+    style: Option<String>,
+    header_bg: Option<String>,
+    header_fg: Option<String>,
+    band_bg: Option<String>,
+    font: Option<String>,
+    col_specs: Vec<String>,
+    align_specs: Vec<String>,
+    bold_cols: Vec<String>,
+    italic_cols: Vec<String>,
+    wrap_cols: Vec<String>,
+    fg_colors: Vec<String>,
+    bg_colors: Vec<String>,
+    color_rules: Vec<String>,
+}
+
+fn excel_preset_config(
+    preset: Option<&str>,
+) -> Result<ExcelPresetConfig, Box<dyn std::error::Error>> {
+    let mut cfg = ExcelPresetConfig::default();
+    match preset.unwrap_or("default") {
+        "default" => {}
+        "finance" => {
+            cfg.header_bg = Some("#0F766E".to_string());
+            cfg.header_fg = Some("#FFFFFF".to_string());
+            cfg.band_bg = Some("#CCFBF1".to_string());
+            cfg.font = Some("Aptos Display".to_string());
+            cfg.col_specs = vec![
+                "Revenue:currency:right".to_string(),
+                "Cost:currency:right".to_string(),
+                "Profit:currency:right".to_string(),
+                "Margin:percent_1dp:right".to_string(),
+            ];
+            cfg.align_specs = vec!["Status:center".to_string()];
+            cfg.bold_cols = vec!["Revenue".to_string(), "Profit".to_string()];
+        }
+        "executive" => {
+            cfg.header_bg = Some("#172554".to_string());
+            cfg.header_fg = Some("#F8FAFC".to_string());
+            cfg.band_bg = Some("#E0E7FF".to_string());
+            cfg.font = Some("Aptos Display".to_string());
+            cfg.bold_cols = vec!["Status".to_string(), "Owner".to_string()];
+            cfg.wrap_cols = vec!["Summary".to_string(), "Notes".to_string()];
+        }
+        "minimal" => {
+            cfg.style = Some("plain".to_string());
+            cfg.header_bg = Some("#F8FAFC".to_string());
+            cfg.header_fg = Some("#111827".to_string());
+            cfg.band_bg = Some("#FFFFFF".to_string());
+            cfg.font = Some("Aptos".to_string());
+        }
+        "status" => {
+            cfg.header_bg = Some("#1F2937".to_string());
+            cfg.header_fg = Some("#FFFFFF".to_string());
+            cfg.band_bg = Some("#F3F4F6".to_string());
+            cfg.align_specs = vec!["Status:center".to_string()];
+            cfg.bold_cols = vec!["Status".to_string()];
+            cfg.color_rules = vec![
+                "Status:contains:Done:#A0D771:#1B5E20".to_string(),
+                "Status:contains:Blocked:#C92E25:#FFFFFF".to_string(),
+                "Status:contains:Risk:#FCCF84:#6B4F00".to_string(),
+            ];
+        }
+        other => return Err(format!("unknown Excel preset '{other}'").into()),
+    }
+    Ok(cfg)
+}
+
+fn merge_vecs(mut base: Vec<String>, mut extra: Vec<String>) -> Vec<String> {
+    base.append(&mut extra);
+    base
+}
+
+fn read_tabular_input(
+    file: &PathBuf,
+    input_format: &str,
+) -> Result<excel::CsvData, Box<dyn std::error::Error>> {
+    if input_format == "csv" && file.to_str() != Some("-") {
+        return excel::read_csv(file);
+    }
+
+    let raw = if file.to_str() == Some("-") {
+        use std::io::Read;
+        let mut buf = String::new();
+        std::io::stdin().read_to_string(&mut buf)?;
+        buf
+    } else {
+        std::fs::read_to_string(file)?
+    };
+
+    let format = match input_format {
+        "auto" => {
+            let trimmed = raw.trim_start();
+            if trimmed.starts_with('{') || trimmed.starts_with('[') {
+                "json"
+            } else {
+                "csv"
+            }
+        }
+        other => other,
+    };
+
+    match format {
+        "csv" => excel::read_csv_from_str(&raw),
+        "json" => table_json_to_rows(&raw),
+        other => Err(format!("unsupported --input-format '{other}'").into()),
+    }
+}
+
+fn table_json_to_rows(data: &str) -> Result<excel::CsvData, Box<dyn std::error::Error>> {
+    let value: serde_json::Value = serde_json::from_str(data)?;
+
+    if value.get("rows").is_some() {
+        if let Ok(table) = serde_json::from_value::<TableInput>(value.clone()) {
+            let max_cols = table
+                .headers
+                .as_ref()
+                .map(|headers| headers.len())
+                .unwrap_or_else(|| table.rows.iter().map(|row| row.len()).max().unwrap_or(0));
+            let headers = table
+                .headers
+                .unwrap_or_else(|| {
+                    (1..=max_cols)
+                        .map(|idx| format!("Column {idx}"))
+                        .map(|value| model::Cell {
+                            value,
+                            style: model::CellStyle::default(),
+                        })
+                        .collect()
+                })
+                .into_iter()
+                .map(|cell| cell.value)
+                .collect();
+            let rows = table
+                .rows
+                .into_iter()
+                .map(|row| row.into_iter().map(|cell| cell.value).collect())
+                .collect();
+            return Ok((headers, rows));
+        }
+
+        let headers = value
+            .get("headers")
+            .and_then(|headers| headers.as_array())
+            .ok_or("JSON table objects require a headers array when not using TableInput cells")?
+            .iter()
+            .map(json_cell_to_string)
+            .collect::<Vec<_>>();
+        let rows = value
+            .get("rows")
+            .and_then(|rows| rows.as_array())
+            .ok_or("JSON table object requires a rows array")?
+            .iter()
+            .map(|row| {
+                row.as_array()
+                    .ok_or("JSON table rows must be arrays")
+                    .map(|cells| cells.iter().map(json_cell_to_string).collect::<Vec<_>>())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        return Ok((headers, rows));
+    }
+
+    let rows = value
+        .as_array()
+        .ok_or("JSON input must be a TableInput object, {headers, rows}, or an array of objects")?;
+    let first = rows
+        .first()
+        .and_then(|row| row.as_object())
+        .ok_or("JSON array input must contain objects")?;
+    let headers = first.keys().cloned().collect::<Vec<_>>();
+    let data_rows = rows
+        .iter()
+        .map(|row| {
+            let obj = row
+                .as_object()
+                .ok_or("JSON array input must contain objects")?;
+            Ok(headers
+                .iter()
+                .map(|header| obj.get(header).map(json_cell_to_string).unwrap_or_default())
+                .collect::<Vec<_>>())
+        })
+        .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?;
+    Ok((headers, data_rows))
+}
+
+fn json_cell_to_string(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Null => String::new(),
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Bool(v) => v.to_string(),
+        serde_json::Value::Number(v) => v.to_string(),
+        other => other.to_string(),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn cmd_excel(
     file: PathBuf,
-    style: String,
-    header_bg: String,
-    header_fg: String,
-    band_bg: String,
+    input_format: String,
+    preset: Option<String>,
+    style: Option<String>,
+    header_bg: Option<String>,
+    header_fg: Option<String>,
+    band_bg: Option<String>,
     font: Option<String>,
     font_size: Option<String>,
     col_specs: Vec<String>,
@@ -1803,17 +2145,24 @@ fn cmd_excel(
     json: bool,
     config: &Config,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let font = font.unwrap_or_else(|| config.defaults.font.clone());
+    let preset_config = excel_preset_config(preset.as_deref())?;
+    let font = font
+        .or_else(|| preset_config.font.clone())
+        .unwrap_or_else(|| config.defaults.font.clone());
     let font_size = font_size.unwrap_or_else(|| format!("{}", config.defaults.font_size_pt));
-    // Parse CSV
-    let (headers, rows) = if file.to_str() == Some("-") {
-        use std::io::Read;
-        let mut buf = String::new();
-        std::io::stdin().read_to_string(&mut buf)?;
-        excel::read_csv_from_str(&buf)?
-    } else {
-        excel::read_csv(&file)?
-    };
+    let style = style
+        .or_else(|| preset_config.style.clone())
+        .unwrap_or_else(|| "table".to_string());
+    let header_bg = header_bg
+        .or_else(|| preset_config.header_bg.clone())
+        .unwrap_or_else(|| "#4472C4".to_string());
+    let header_fg = header_fg
+        .or_else(|| preset_config.header_fg.clone())
+        .unwrap_or_else(|| "#FFFFFF".to_string());
+    let band_bg = band_bg
+        .or_else(|| preset_config.band_bg.clone())
+        .unwrap_or_else(|| "#D9E1F2".to_string());
+    let (headers, rows) = read_tabular_input(&file, &input_format)?;
 
     // Build config
     let table_style = match style.as_str() {
@@ -1822,30 +2171,49 @@ fn cmd_excel(
     };
 
     let mut col_formats = std::collections::HashMap::new();
+    for spec in &preset_config.col_specs {
+        let (name, fmt) = excel::parse_col_spec(spec);
+        col_formats.insert(name, fmt);
+    }
     for spec in &col_specs {
         let (name, fmt) = excel::parse_col_spec(spec);
         col_formats.insert(name, fmt);
     }
 
     let mut align_overrides = std::collections::HashMap::new();
+    for spec in &preset_config.align_specs {
+        let (name, align) = excel::parse_color_spec(spec);
+        align_overrides.insert(name, align);
+    }
     for spec in &align_specs {
         let (name, align) = excel::parse_color_spec(spec);
         align_overrides.insert(name, align);
     }
 
     let mut fg_map = std::collections::HashMap::new();
+    for spec in &preset_config.fg_colors {
+        let (name, color) = excel::parse_color_spec(spec);
+        fg_map.insert(name, color);
+    }
     for spec in &fg_colors {
         let (name, color) = excel::parse_color_spec(spec);
         fg_map.insert(name, color);
     }
 
     let mut bg_map = std::collections::HashMap::new();
+    for spec in &preset_config.bg_colors {
+        let (name, color) = excel::parse_color_spec(spec);
+        bg_map.insert(name, color);
+    }
     for spec in &bg_colors {
         let (name, color) = excel::parse_color_spec(spec);
         bg_map.insert(name, color);
     }
 
     let mut parsed_rules = Vec::new();
+    for spec in &preset_config.color_rules {
+        parsed_rules.push(excel::parse_color_rule(spec)?);
+    }
     for spec in &color_rules {
         parsed_rules.push(excel::parse_color_rule(spec)?);
     }
@@ -1882,9 +2250,9 @@ fn cmd_excel(
         font,
         font_size,
         col_formats,
-        bold_cols,
-        italic_cols,
-        wrap_cols,
+        bold_cols: merge_vecs(preset_config.bold_cols, bold_cols),
+        italic_cols: merge_vecs(preset_config.italic_cols, italic_cols),
+        wrap_cols: merge_vecs(preset_config.wrap_cols, wrap_cols),
         fg_colors: fg_map,
         bg_colors: bg_map,
         align_overrides,
@@ -2124,12 +2492,40 @@ fn cmd_history(command: HistoryCommand) -> Result<(), Box<dyn std::error::Error>
             let entry = store.record(pb_type, &data, source_app, policy)?;
             print_history_entries(vec![entry], json)?;
         }
-        HistoryCommand::List { limit, json } => {
-            let entries = store.list()?.into_iter().take(limit).collect();
+        HistoryCommand::List {
+            limit,
+            source_app,
+            r#type,
+            from,
+            to,
+            json,
+        } => {
+            let filter = build_history_filter(source_app, r#type, from, to)?;
+            let entries = store
+                .list_filtered(&filter)?
+                .into_iter()
+                .take(limit)
+                .collect();
             print_history_entries(entries, json)?;
         }
-        HistoryCommand::Search { query, limit, json } => {
-            let entries = store.search(&query)?.into_iter().take(limit).collect();
+        HistoryCommand::Search {
+            query,
+            limit,
+            source_app,
+            r#type,
+            from,
+            to,
+            json,
+        } => {
+            let filter = build_history_filter(source_app, r#type, from, to)?;
+            let entries = if filter.is_empty() {
+                store.search(&query)?
+            } else {
+                store.search_filtered(&query, &filter)?
+            }
+            .into_iter()
+            .take(limit)
+            .collect();
             print_history_entries(entries, json)?;
         }
         HistoryCommand::Show { id, content, json } => {
@@ -2194,6 +2590,41 @@ fn cmd_history(command: HistoryCommand) -> Result<(), Box<dyn std::error::Error>
                 );
             }
         }
+        HistoryCommand::Prune {
+            keep_latest,
+            before,
+            source_app,
+            r#type,
+            from,
+            to,
+            dry_run,
+            json,
+        } => {
+            let effective_to = before.or(to);
+            let filter = build_history_filter(source_app, r#type, from, effective_to)?;
+            let result = store.prune(&filter, keep_latest, dry_run)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "ok": true,
+                        "result": result,
+                    }))?
+                );
+            } else {
+                println!(
+                    "{} history entr{} {} ({} kept)",
+                    result.removed,
+                    if result.removed == 1 { "y" } else { "ies" },
+                    if dry_run {
+                        "would be removed"
+                    } else {
+                        "removed"
+                    },
+                    result.kept
+                );
+            }
+        }
     }
     Ok(())
 }
@@ -2202,6 +2633,7 @@ fn cmd_watch(
     once: bool,
     max_items: Option<usize>,
     interval_ms: u64,
+    max_history: Option<usize>,
     sensitive: String,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -2226,6 +2658,10 @@ fn cmd_watch(
                     eprintln!("recorded history entry {}", saved.id);
                 }
                 recorded.push(saved);
+                if let Some(keep) = max_history {
+                    let filter = history::HistoryFilter::default();
+                    let _ = store.prune(&filter, Some(keep), false)?;
+                }
             }
         }
 
@@ -2459,6 +2895,31 @@ fn templates_dir() -> PathBuf {
     config_dir().join("templates")
 }
 
+fn preview_dir() -> PathBuf {
+    config_dir().join("previews")
+}
+
+fn write_preview_file(
+    prefix: &str,
+    html: &str,
+    output: Option<PathBuf>,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let path = if let Some(path) = output {
+        path
+    } else {
+        std::fs::create_dir_all(preview_dir())?;
+        let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%S%3fZ");
+        preview_dir().join(format!("{prefix}-{stamp}.html"))
+    };
+    if let Some(parent) = path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+    std::fs::write(&path, html)?;
+    Ok(path)
+}
+
 /// Map a type string to PbType.
 fn parse_pb_type(s: &str) -> Result<PbType, Box<dyn std::error::Error>> {
     match s.to_ascii_lowercase().as_str() {
@@ -2481,6 +2942,45 @@ fn parse_sensitive_policy(
     value: &str,
 ) -> Result<history::SensitivePolicy, Box<dyn std::error::Error>> {
     history::SensitivePolicy::parse(value).map_err(Into::into)
+}
+
+fn build_history_filter(
+    source_app: Option<String>,
+    pb_type: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
+) -> Result<history::HistoryFilter, Box<dyn std::error::Error>> {
+    Ok(history::HistoryFilter {
+        source_app,
+        pb_type: pb_type.map(|value| parse_pb_type(&value)).transpose()?,
+        from: from
+            .as_deref()
+            .map(|value| parse_history_datetime(value, false))
+            .transpose()?,
+        to: to
+            .as_deref()
+            .map(|value| parse_history_datetime(value, true))
+            .transpose()?,
+    })
+}
+
+fn parse_history_datetime(
+    value: &str,
+    end_of_day: bool,
+) -> Result<chrono::DateTime<chrono::Utc>, Box<dyn std::error::Error>> {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(value) {
+        return Ok(dt.with_timezone(&chrono::Utc));
+    }
+    let date = chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")?;
+    let time = if end_of_day {
+        chrono::NaiveTime::from_hms_milli_opt(23, 59, 59, 999).unwrap()
+    } else {
+        chrono::NaiveTime::from_hms_opt(0, 0, 0).unwrap()
+    };
+    Ok(chrono::DateTime::<chrono::Utc>::from_naive_utc_and_offset(
+        date.and_time(time),
+        chrono::Utc,
+    ))
 }
 
 fn print_history_entries(

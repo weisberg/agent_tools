@@ -405,6 +405,31 @@ clipli paste --from-table [OPTIONS]
 
 ---
 
+#### `clipli preview`
+
+Render a template or explicit HTML input to a preview file without touching the clipboard.
+
+```
+clipli preview [NAME] [OPTIONS]
+```
+
+If `<NAME>` is provided, `clipli` renders the stored template with `--data` or `--data-file`. If `--input` is provided, `clipli` previews that HTML file. If neither `<NAME>` nor `--input` is provided, HTML is read from stdin.
+
+Preview files are written under the clipli config directory in `previews/` unless `--output` is provided. `--open` opens the generated file in the default browser.
+
+**Flags:**
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `<NAME>` | positional | none | Template name to render |
+| `--input` / `-i` | path | none | HTML input file to preview instead of a stored template |
+| `--data` / `-D` | string | none | Inline JSON data for template rendering |
+| `--data-file` | path | none | JSON data file for template rendering |
+| `--open` | bool | false | Open the generated preview file |
+| `--output` / `-o` | path | config preview cache | Write preview HTML to a specific path |
+| `--json` | bool | false | JSON output with the written preview path |
+
+---
+
 #### `clipli list`
 
 List all saved templates.
@@ -418,7 +443,7 @@ clipli list [OPTIONS]
 |------|------|---------|-------------|
 | `--tag` | string | none | Filter by tag |
 | `--json` | bool | false | JSON output |
-| `--verbose` / `-v` | bool | false | Include variable names and descriptions |
+| `--detail` / `-d` | bool | false | Include variable names and descriptions |
 
 **Output (default):**
 ```
@@ -657,7 +682,7 @@ clipli import <FILE> [--force] [--name NAME]
 
 #### `clipli excel`
 
-Generate an Excel-style table from a CSV file and write it to the clipboard as editable HTML, SVG, or PNG. The default `html` mode uses the `table_excel.html.j2` template internally, producing Office-native HTML with `mso-*` properties that Excel recognizes on paste. The `svg` and `png` modes copy image artifacts instead of editable HTML.
+Generate an Excel-style table from CSV or JSON and write it to the clipboard as editable HTML, SVG, or PNG. The default `html` mode produces Office-native HTML with `mso-*` properties that Excel recognizes on paste. The `svg` and `png` modes copy image artifacts instead of editable HTML.
 
 ```
 clipli excel <FILE> [OPTIONS]
@@ -666,11 +691,13 @@ clipli excel <FILE> [OPTIONS]
 **Flags:**
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `<FILE>` | positional | **required** | CSV file path (or `-` for stdin) |
-| `--style` | enum | `table` | Table style: `table` (banded rows) or `plain` (thick borders) |
-| `--header-bg` | string | `#4472C4` | Header background color |
-| `--header-fg` | string | `#FFFFFF` | Header text color |
-| `--band-bg` | string | `#D9E1F2` | Banded row background color (table style only) |
+| `<FILE>` | positional | **required** | CSV/JSON file path (or `-` for stdin) |
+| `--input-format` | enum | `csv` | Input format: `csv`, `json`, or `auto` |
+| `--preset` | enum | none | Named preset: `default`, `finance`, `executive`, `minimal`, or `status` |
+| `--style` | enum | preset/default | Table style: `table` (banded rows) or `plain` (thick borders) |
+| `--header-bg` | string | preset/default | Header background color |
+| `--header-fg` | string | preset/default | Header text color |
+| `--band-bg` | string | preset/default | Banded row background color (table style only) |
 | `--font` | string | from config | Font family |
 | `--font-size` | string | from config | Font size in pt |
 | `--col NAME:FMT[:ALIGN]` | repeatable | none | Column format (e.g. `Revenue:currency:right`) |
@@ -695,6 +722,8 @@ clipli excel <FILE> [OPTIONS]
 | `--rename OLD:NEW` | repeatable | none | Rename a column header |
 | `--col-font-size NAME:SIZE` | repeatable | none | Column font size override |
 | `--dry-run` | bool | false | Print or write the generated artifact instead of writing to clipboard |
+
+JSON input supports a `TableInput` object, a simplified `{ "headers": [...], "rows": [[...]] }` object, or an array of objects. Explicit CLI style and column flags are applied after the selected preset, so they override preset defaults.
 
 ---
 
@@ -736,6 +765,7 @@ clipli watch [OPTIONS]
 | `--once` | bool | false | Capture one current clipboard snapshot and exit |
 | `--max-items` | usize | none | Maximum new entries to record before exiting |
 | `--interval-ms` | u64 | `1000` | Polling interval in milliseconds |
+| `--max-history` | usize | none | Prune history after each recorded item, keeping newest N entries |
 | `--sensitive` | enum | `skip` | Sensitive payload policy: `skip`, `redact`, or `allow` |
 | `--json` | bool | false | JSON output |
 
@@ -743,7 +773,7 @@ clipli watch [OPTIONS]
 
 #### `clipli history`
 
-List, search, inspect, record, or restore local clipboard history entries.
+List, search, inspect, record, prune, or restore local clipboard history entries.
 
 ```
 clipli history <SUBCOMMAND> [OPTIONS]
@@ -757,6 +787,7 @@ clipli history <SUBCOMMAND> [OPTIONS]
 | `search <QUERY>` | Search metadata and stored text payloads |
 | `show <ID>` | Show one entry, optionally with text content |
 | `restore <ID>` | Restore one entry to the clipboard or dry-run output |
+| `prune` | Remove old matching entries and payloads |
 
 **Key flags:**
 | Flag | Applies to | Description |
@@ -766,10 +797,19 @@ clipli history <SUBCOMMAND> [OPTIONS]
 | `--source-app` | `record` | Source app label for file-based records |
 | `--sensitive` | `record` | Sensitive payload policy: `skip`, `redact`, or `allow` |
 | `--limit` | `list`, `search` | Maximum entries to print |
+| `--source-app` | `list`, `search`, `prune` | Filter by source app substring |
+| `--type` | `list`, `search`, `prune` | Filter by pasteboard type |
+| `--from` | `list`, `search`, `prune` | Filter entries captured at or after a date/time |
+| `--to` | `list`, `search`, `prune` | Filter entries captured at or before a date/time |
 | `--content` | `show` | Include text payload content when available |
 | `--dry-run` | `restore` | Print or write payload instead of mutating the clipboard |
 | `--output` / `-o` | `restore` | Write dry-run payload to a file |
+| `--keep-latest` | `prune` | Keep newest N matching entries |
+| `--before` | `prune` | Prune entries captured before a date/time |
+| `--dry-run` | `prune` | Report what would be removed without deleting payloads |
 | `--json` | all | JSON output |
+
+Date filters accept RFC3339 timestamps or `YYYY-MM-DD`. History writes use a single-writer lock file beside `index.jsonl`.
 
 ---
 
@@ -1320,19 +1360,20 @@ target_app = "generic"                   # excel | powerpoint | google_sheets | 
 
 [templatize]
 default_strategy = "heuristic"           # heuristic | agent | manual
+
+[agent]
+command = "claude-code"                  # optional command for capture --strategy agent
+args = ["--prompt-file", "/dev/stdin"]    # optional shell-free arguments
+timeout_secs = 30
 ```
 
 The `capture --strategy` flag defaults to `[templatize] default_strategy` when not explicitly provided. The `excel` command reads `[defaults] font` and `[defaults] font_size_pt` as fallbacks when `--font` / `--font-size` are omitted.
 
+`[agent]` is optional. When present, it provides defaults for `capture --strategy agent` so agent templatization can launch an external command directly.
+
 **Future (not yet wired):**
 
 ```toml
-[agent]
-# For --strategy agent: how to invoke the external agent
-# clipli pipes JSON to this command's stdin and reads JSON from stdout.
-command = "claude-code"
-args = ["--prompt-file", "/dev/stdin"]
-
 [editor]
 command = "$EDITOR"    # for `clipli edit`
 ```
@@ -1344,7 +1385,7 @@ command = "$EDITOR"    # for `clipli edit`
 ```toml
 [package]
 name = "clipli"
-version = "0.4.0"
+version = "1.0.0"
 edition = "2021"
 rust-version = "1.75"
 
@@ -1360,7 +1401,7 @@ serde_json = "1"
 # macOS pasteboard FFI
 objc2 = "0.5"
 objc2-foundation = { version = "0.2", features = ["NSString", "NSData", "NSArray"] }
-objc2-app-kit = { version = "0.2", features = ["NSPasteboard", "NSWorkspace"] }
+objc2-app-kit = { version = "0.2", features = ["NSPasteboard", "NSWorkspace", "NSRunningApplication"] }
 
 # HTML processing
 lol_html = "2"
@@ -1370,10 +1411,15 @@ minijinja = { version = "2", features = ["loader", "builtins"] }
 
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
+csv = "1"
 thiserror = "1"
 dirs = "5"               # XDG / macOS config dirs
 toml = "0.8"             # config file parsing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 regex = "1"              # heuristic templatizer patterns
+zip = "2"                # template import/export bundles
+resvg = "0.45"           # SVG-to-PNG rendering for image clipboard output
 sha2 = "0.10"            # history content fingerprints
 
 [dev-dependencies]
@@ -1466,10 +1512,13 @@ clipli capture --name temp_report --templatize --strategy heuristic --json | \
 ### 11.2 Agent-Assisted Templatization
 
 ```bash
-# Capture raw, send to agent for smart templatization:
-clipli capture --name slide_deck --strategy agent 2>&1 | \
-  claude-code --stdin | \
-  clipli capture --name slide_deck --force --stdin-template
+# Capture HTML, invoke an external agent command, validate, and save:
+clipli capture --name slide_deck \
+  --templatize \
+  --strategy agent \
+  --agent-command my-agent \
+  --agent-timeout 60 \
+  --json
 ```
 
 ### 11.3 Programmatic Use (as a Library)
@@ -1489,21 +1538,30 @@ pb::write(&[(PbType::Html, rendered.html.as_bytes()), (PbType::PlainText, render
 
 ---
 
-## 12. Future Extensions (Out of Scope for v1)
+## 12. Release And Stability Contract
+
+`clipli` 1.0 declares the macOS clipboard/template core stable: inspect/read/write, capture/paste/render/preview, conversion, lint/search/versioned templates, Excel HTML/SVG/PNG generation from CSV or JSON, history record/list/search/show/restore/prune, completions, doctor, and top-level JSON error envelopes.
+
+Release artifacts are created by `tools/clipli/scripts/package_release.sh` and by the tag-based GitHub Actions release workflow for tags matching `clipli-v*`. Archives include the binary, bash/zsh/fish completions, release docs, and SHA-256 checksum files.
+
+Advanced workflows that remain intentionally labeled as such are external agent templatization and long-running watch processes. They are implemented and tested, but automation should prefer explicit input files, `--dry-run`, `lint`, `--json`, and bounded retention.
+
+---
+
+## 13. Future Extensions (Out of Scope for v1)
 
 | Extension | Description |
 |-----------|-------------|
 | **Cross-platform pasteboard** | Linux (xclip/wl-copy/xsel), Windows (clipboard API) |
 | **Image template capture** | Capture `public.png`/`public.tiff`, use as template backgrounds |
 | **RTF rendering** | Full RTF round-trip (RTF → HTML is done via `textutil`; HTML → RTF rendering is not yet supported) |
-| **History retention and advanced filters** | Retention policies plus source-app, type, and date filters for `clipli history` |
 | **MCP server** | Expose clipli as an MCP tool server for direct agent integration |
 | **clipli-core crate** | Extract library crate for programmatic use without CLI overhead |
 | **Embedded preview server** | `clipli serve` — local HTTP server to preview templates in browser with hot reload |
 
 ---
 
-## 13. Development Roadmap
+## 14. Development Roadmap
 
 ### Phase 1: Foundation (MVP)
 - [x] `pb.rs` — read/write pasteboard (HTML + plain text)
@@ -1542,11 +1600,12 @@ pb::write(&[(PbType::Html, rendered.html.as_bytes()), (PbType::PlainText, render
 - [x] README.md
 - [ ] Man page
 - [x] CI (GitHub Actions, macOS runner)
-- [ ] Homebrew formula
+- [x] Release archive script and tag-based release workflow
+- [ ] Homebrew formula, if a tap becomes useful
 
 ---
 
-## 14. Platform Conformance
+## 15. Platform Conformance
 
 `clipli` is at maturity level 5 against
 [`docs/AGENT_TOOLS_PLATFORM_SPEC.md`](../../docs/AGENT_TOOLS_PLATFORM_SPEC.md):
