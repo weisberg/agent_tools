@@ -459,6 +459,8 @@ xli create report.xlsx --from-csv data.csv \
   --col Account \
   --col Revenue:currency:right \
   --hide InternalNotes \
+  --link Account:https://crm.example/customers/{} \
+  --cf Revenue:gt:100000:C6EFCE:006100 \
   --rename Account:Customer \
   --total-row
 
@@ -970,7 +972,7 @@ XLI uses the best tool for each job:
 
 **The OOXML patch engine is the target architecture.** It opens the ZIP, streams unchanged entries through, rewrites only the affected XML parts using `quick-xml`'s high-performance pull parser/writer, and writes a new ZIP. This avoids loading the entire workbook into a DOM, avoids the roundtrip corruption risks of general-purpose read-write libraries, and is naturally fast for surgical edits.
 
-**Phase 1 reality:** The OOXML patch engine's initial coverage will be: cell values/formulas, shared strings, styles/number formats, defined names, sheet add/rename/delete, workbook metadata, and macro part pass-through. For operations outside that coverage (charts, conditional formatting, data validation, comments), Phase 1 falls back to `umya-spreadsheet` with explicit warnings in the response. As the patch engine gains coverage in Phase 2 and 3, operations graduate off umya one by one until it can be removed.
+**Phase 1 reality:** The OOXML patch engine currently covers plain cell value writes by rewriting only the affected worksheet XML while stream-copying unchanged ZIP parts. Formula writes, formatting, sheet operations, batches, and template application can still fall back to `umya-spreadsheet` with explicit warnings in the response. As the patch engine gains coverage in Phase 2 and 3, operations graduate off umya one by one until it can be removed.
 
 ### 7.3 Key Implementation Details
 

@@ -56,6 +56,57 @@ fn write_and_read_cell_round_trip() {
 }
 
 #[test]
+fn value_write_preserves_chart_artifacts() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("chart.xlsx");
+    let mut workbook = rust_xlsxwriter::Workbook::new();
+    let worksheet = workbook.add_worksheet();
+    worksheet.write_string(0, 0, "Month").expect("write");
+    worksheet.write_string(1, 0, "Jan").expect("write");
+    worksheet.write_number(1, 1, 10).expect("write");
+    worksheet.write_string(2, 0, "Feb").expect("write");
+    worksheet.write_number(2, 1, 20).expect("write");
+    let mut chart = rust_xlsxwriter::Chart::new(rust_xlsxwriter::ChartType::Column);
+    chart
+        .add_series()
+        .set_categories("Sheet1!$A$2:$A$3")
+        .set_values("Sheet1!$B$2:$B$3");
+    worksheet.insert_chart(0, 3, &chart).expect("chart");
+    workbook.save(&path).expect("save");
+
+    let drawing_before = read_zip_part(&path, "xl/drawings/drawing1.xml");
+    let chart_before = read_zip_part(&path, "xl/charts/chart1.xml");
+    let rels_before = read_zip_part(&path, "xl/worksheets/_rels/sheet1.xml.rels");
+
+    let write = run_json([
+        "write",
+        path.to_str().expect("path"),
+        "Sheet1!C2",
+        "--value",
+        "\"patched\"",
+    ]);
+    assert_eq!(write["status"], "ok");
+    assert_eq!(
+        write["warnings"].as_array().expect("warnings").len(),
+        0,
+        "artifact-preserving value writes should not warn"
+    );
+
+    assert_eq!(
+        drawing_before,
+        read_zip_part(&path, "xl/drawings/drawing1.xml")
+    );
+    assert_eq!(chart_before, read_zip_part(&path, "xl/charts/chart1.xml"));
+    assert_eq!(
+        rels_before,
+        read_zip_part(&path, "xl/worksheets/_rels/sheet1.xml.rels")
+    );
+
+    let read = run_json(["read", path.to_str().expect("path"), "Sheet1!C2"]);
+    assert_eq!(read["output"]["value"], "patched");
+}
+
+#[test]
 fn batch_writes_multiple_cells_atomically() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("test.xlsx");
@@ -336,6 +387,15 @@ fn read_styles_xml(path: &std::path::Path) -> String {
     let mut xml = String::new();
     styles.read_to_string(&mut xml).expect("read styles.xml");
     xml
+}
+
+fn read_zip_part(path: &std::path::Path, part: &str) -> Vec<u8> {
+    let file = std::fs::File::open(path).expect("open workbook");
+    let mut archive = zip::ZipArchive::new(file).expect("open xlsx archive");
+    let mut item = archive.by_name(part).expect("zip part");
+    let mut bytes = Vec::new();
+    item.read_to_end(&mut bytes).expect("read zip part");
+    bytes
 }
 
 fn run_output<const N: usize>(args: [&str; N]) -> Output {

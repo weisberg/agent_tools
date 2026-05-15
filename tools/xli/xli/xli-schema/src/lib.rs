@@ -143,7 +143,7 @@ fn command_schema(command: &str) -> Value {
             json!({"type":"object","required":["file","template"],"properties":{"file":{"type":"string"},"template":{"type":"string"},"param":{"type":"array","items":{"type":"string"}},"expect_fingerprint":{"type":"string"},"dry_run":{"type":"boolean"}}})
         }
         "create" => {
-            json!({"type":"object","required":["name"],"properties":{"name":{"type":"string"},"sheets":{"type":"string"},"from_csv":{"type":"string"},"from_markdown":{"type":"string"},"from_json":{"type":"string"}}})
+            json!({"type":"object","required":["name"],"properties":{"name":{"type":"string"},"sheets":{"type":"string"},"from_csv":{"type":"string"},"from_markdown":{"type":"string"},"from_json":{"type":"string"},"columns":{"type":"array","items":{"type":"string"},"description":"CSV report columns as NAME[:FORMAT[:ALIGN]]. Number formats accept Excel format strings or aliases."},"hidden_columns":{"type":"array","items":{"type":"string"}},"renames":{"type":"array","items":{"type":"string"},"description":"CSV header rename specs as FROM:TO."},"links":{"type":"array","items":{"type":"string"},"description":"CSV hyperlink specs as COLUMN:URL_PATTERN. Use {} as the cell-value placeholder; patterns without {} append the cell value."},"conditional_formats":{"type":"array","items":{"type":"string"},"description":"CSV conditional format specs as COLUMN:OP:VALUE:BG_HEX:FG_HEX. OP supports eq, ne, gt, gte, lt, and lte."},"title":{"type":"string"},"total_row":{"type":"boolean"}}})
         }
         "lint" => {
             json!({"type":"object","required":["file"],"properties":{"file":{"type":"string"},"rules":{"type":"string"},"severity":{"type":"string"}}})

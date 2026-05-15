@@ -38,15 +38,25 @@ impl WorkbookPatcher {
     where
         F: FnOnce(XmlReader<'_>, &mut XmlWriter) -> Result<(), XliError>,
     {
-        let mut file = self.reader.by_name(part).map_err(zip_error)?;
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes).map_err(io_error)?;
+        let bytes = self.read_part(part)?;
         let reader = Reader::from_reader(Cursor::new(bytes.as_slice()));
         let mut writer = Writer::new(Vec::new());
         f(reader, &mut writer)?;
         self.patched.insert(part.to_string(), writer.into_inner());
         self.touched.insert(part.to_string());
         Ok(())
+    }
+
+    pub fn read_part(&mut self, part: &str) -> Result<Vec<u8>, XliError> {
+        let mut file = self.reader.by_name(part).map_err(zip_error)?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).map_err(io_error)?;
+        Ok(bytes)
+    }
+
+    pub fn patch_part_bytes(&mut self, part: &str, bytes: Vec<u8>) {
+        self.patched.insert(part.to_string(), bytes);
+        self.touched.insert(part.to_string());
     }
 
     pub fn finalize(mut self) -> Result<(), XliError> {

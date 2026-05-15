@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use xli_new::{ColumnFormat, CsvCreateOptions};
+use xli_new::{ColumnFormat, ConditionalFormatSpec, CsvCreateOptions};
 
 use crate::output;
 
@@ -25,6 +25,10 @@ pub struct CreateArgs {
     pub hidden_columns: Vec<String>,
     #[arg(long = "rename")]
     pub renames: Vec<String>,
+    #[arg(long = "link")]
+    pub links: Vec<String>,
+    #[arg(long = "cf")]
+    pub conditional_formats: Vec<String>,
     #[arg(long)]
     pub title: Option<String>,
     #[arg(long)]
@@ -47,6 +51,8 @@ pub fn run(args: CreateArgs, human: bool) -> Result<bool> {
         "columns": args.columns,
         "hidden_columns": args.hidden_columns,
         "renames": args.renames,
+        "links": args.links,
+        "conditional_formats": args.conditional_formats,
         "title": args.title,
         "total_row": args.total_row,
     });
@@ -125,6 +131,21 @@ fn csv_options(args: &CreateArgs) -> CsvCreateOptions {
         })
         .collect();
 
+    let links = args
+        .links
+        .iter()
+        .filter_map(|spec| {
+            spec.split_once(':')
+                .map(|(column, pattern)| (column.to_string(), pattern.to_string()))
+        })
+        .collect();
+
+    let conditional_formats = args
+        .conditional_formats
+        .iter()
+        .filter_map(|spec| parse_conditional_format(spec))
+        .collect();
+
     CsvCreateOptions {
         columns: if selected.is_empty() {
             None
@@ -134,7 +155,23 @@ fn csv_options(args: &CreateArgs) -> CsvCreateOptions {
         hidden_columns: args.hidden_columns.clone(),
         renames,
         formats,
+        links,
+        conditional_formats,
         title: args.title.clone(),
         total_row: args.total_row,
     }
+}
+
+fn parse_conditional_format(spec: &str) -> Option<ConditionalFormatSpec> {
+    let parts = spec.split(':').collect::<Vec<_>>();
+    if parts.len() != 5 {
+        return None;
+    }
+    Some(ConditionalFormatSpec {
+        column: parts[0].to_string(),
+        op: parts[1].to_string(),
+        value: parts[2].to_string(),
+        background_color: parts[3].to_string(),
+        font_color: parts[4].to_string(),
+    })
 }

@@ -183,6 +183,10 @@ struct AuthLogin {
     method: AuthMethod,
     #[arg(long)]
     site_url: Option<String>,
+    #[arg(long)]
+    cloud_id: Option<String>,
+    #[arg(long)]
+    gateway: bool,
     #[arg(long, env = "JIRALI_EMAIL")]
     email: Option<String>,
     #[arg(long, env = "JIRALI_API_TOKEN")]
@@ -1161,6 +1165,8 @@ struct Config {
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]
 struct Profile {
     site_url: Option<String>,
+    cloud_id: Option<String>,
+    use_gateway: Option<bool>,
     email: Option<String>,
     auth_method: Option<AuthMethod>,
     api_token: Option<String>,
@@ -1435,6 +1441,66 @@ fn normalize_site_url(raw: &str) -> String {
     url
 }
 
+fn parse_gateway_cloud_id(site_url: &str) -> Option<String> {
+    let marker = "/ex/jira/";
+    let tail = site_url.split_once(marker)?.1;
+    tail.split('/')
+        .next()
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+}
+
+fn is_gateway_site(site_url: &str) -> bool {
+    parse_gateway_cloud_id(site_url).is_some()
+}
+
+fn jira_base_url(profile: &Profile) -> Result<String> {
+    let site = profile
+        .site_url
+        .as_ref()
+        .ok_or_else(|| JiraliError::Usage("profile is missing site_url".into()))?;
+    let site = normalize_site_url(site);
+    if is_gateway_site(&site) {
+        return Ok(site);
+    }
+    if profile.use_gateway.unwrap_or(false) {
+        let cloud_id = profile.cloud_id.as_ref().ok_or_else(|| {
+            JiraliError::Usage("profile is missing cloud_id for gateway mode".into())
+        })?;
+        return Ok(format!("https://api.atlassian.com/ex/jira/{cloud_id}"));
+    }
+    Ok(site)
+}
+
+fn discover_cloud_id(site_url: &str) -> Result<String> {
+    let site = normalize_site_url(site_url);
+    if let Some(cloud_id) = parse_gateway_cloud_id(&site) {
+        return Ok(cloud_id);
+    }
+    let url = format!("{}/_edge/tenant_info", site.trim_end_matches('/'));
+    let value: Value = Client::new()
+        .get(&url)
+        .header("Accept", "application/json")
+        .send()
+        .map_err(|e| {
+            if e.is_timeout() {
+                JiraliError::Timeout(e.to_string())
+            } else {
+                JiraliError::Api(e.to_string())
+            }
+        })?
+        .json()
+        .map_err(|e| JiraliError::Api(e.to_string()))?;
+    value
+        .get("cloudId")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| {
+            JiraliError::Validation("tenant_info response did not include cloudId".into())
+        })
+}
+
 fn jira_request(
     ctx: &Context,
     profile: &Profile,
@@ -1442,11 +1508,7 @@ fn jira_request(
     path: &str,
     body: Option<Value>,
 ) -> Result<Value> {
-    let site = profile
-        .site_url
-        .as_ref()
-        .ok_or_else(|| JiraliError::Usage("profile is missing site_url".into()))?;
-    let site = normalize_site_url(site);
+    let site = jira_base_url(profile)?;
     let url = if path.starts_with("http://") || path.starts_with("https://") {
         path.to_string()
     } else {
@@ -1610,6 +1672,24 @@ fn auth(ctx: &Context, cmd: AuthCommand) -> Result<Value> {
                 .as_deref()
                 .map(normalize_site_url)
                 .or(profile.site_url.clone());
+            if let Some(site_url) = profile.site_url.clone() {
+                profile.cloud_id = args
+                    .cloud_id
+                    .clone()
+                    .or_else(|| parse_gateway_cloud_id(&site_url))
+                    .or(profile.cloud_id.clone());
+                profile.use_gateway = Some(
+                    args.gateway
+                        || profile.use_gateway.unwrap_or(false)
+                        || is_gateway_site(&site_url),
+                );
+                if profile.use_gateway == Some(true) && profile.cloud_id.is_none() {
+                    profile.cloud_id = Some(discover_cloud_id(&site_url)?);
+                }
+            } else if let Some(cloud_id) = args.cloud_id {
+                profile.cloud_id = Some(cloud_id);
+                profile.use_gateway = Some(args.gateway || profile.use_gateway.unwrap_or(false));
+            }
             profile.email = args.email.or(profile.email.clone());
             profile.auth_method = Some(args.method.clone());
             let mut secret_stored = profile.api_token.is_some() || profile.pat.is_some();
@@ -1657,10 +1737,12 @@ fn auth(ctx: &Context, cmd: AuthCommand) -> Result<Value> {
                 ));
             }
             let site_url = profile.site_url.clone();
+            let cloud_id = profile.cloud_id.clone();
+            let use_gateway = profile.use_gateway.unwrap_or(false);
             let email = profile.email.clone();
             save_config(ctx, &config)?;
             Ok(
-                json!({"profile": ctx.profile, "auth_method": args.method, "site_url": site_url, "email": email, "secret_stored": secret_stored}),
+                json!({"profile": ctx.profile, "auth_method": args.method, "site_url": site_url, "cloud_id": cloud_id, "use_gateway": use_gateway, "email": email, "secret_stored": secret_stored}),
             )
         }
         AuthCommand::Logout => {
@@ -1726,6 +1808,21 @@ fn config_cmd(ctx: &Context, cmd: ConfigCommand) -> Result<Value> {
                     .entry(ctx.profile.clone())
                     .or_default()
                     .site_url = Some(value);
+            } else if key == "cloud_id" {
+                config
+                    .profiles
+                    .entry(ctx.profile.clone())
+                    .or_default()
+                    .cloud_id = Some(value);
+            } else if key == "use_gateway" {
+                let use_gateway = value
+                    .parse::<bool>()
+                    .map_err(|_| JiraliError::Usage("use_gateway must be true or false".into()))?;
+                config
+                    .profiles
+                    .entry(ctx.profile.clone())
+                    .or_default()
+                    .use_gateway = Some(use_gateway);
             } else if key == "email" {
                 config
                     .profiles
@@ -3128,11 +3225,7 @@ fn api(ctx: &Context, args: ApiArgs) -> Result<Value> {
         .profiles
         .get(&ctx.profile)
         .ok_or_else(|| JiraliError::Usage(format!("profile {} is not configured", ctx.profile)))?;
-    let site = profile
-        .site_url
-        .as_ref()
-        .ok_or_else(|| JiraliError::Usage("profile is missing site_url".into()))?;
-    let site = normalize_site_url(site);
+    let site = jira_base_url(profile)?;
     let url = if args.path.starts_with("http") {
         args.path.clone()
     } else {
@@ -3974,4 +4067,64 @@ fn tools_schema() -> Value {
             "reports_cross_product_jsm_automation": "schema-stable command surfaces; live endpoint wiring pending per command"
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_cloud_id_from_gateway_url() {
+        assert_eq!(
+            parse_gateway_cloud_id(
+                "https://api.atlassian.com/ex/jira/cloud-123/rest/api/3/issue/ENG-1"
+            ),
+            Some("cloud-123".to_string())
+        );
+        assert_eq!(
+            parse_gateway_cloud_id("https://example.atlassian.net"),
+            None
+        );
+    }
+
+    #[test]
+    fn jira_base_url_uses_gateway_when_configured() {
+        let profile = Profile {
+            site_url: Some("https://example.atlassian.net/jira/".to_string()),
+            cloud_id: Some("cloud-123".to_string()),
+            use_gateway: Some(true),
+            ..Profile::default()
+        };
+
+        assert_eq!(
+            jira_base_url(&profile).unwrap(),
+            "https://api.atlassian.com/ex/jira/cloud-123"
+        );
+    }
+
+    #[test]
+    fn jira_base_url_preserves_direct_site_by_default() {
+        let profile = Profile {
+            site_url: Some("https://example.atlassian.net/jira/".to_string()),
+            ..Profile::default()
+        };
+
+        assert_eq!(
+            jira_base_url(&profile).unwrap(),
+            "https://example.atlassian.net"
+        );
+    }
+
+    #[test]
+    fn jira_base_url_accepts_gateway_site_url_directly() {
+        let profile = Profile {
+            site_url: Some("https://api.atlassian.com/ex/jira/cloud-123".to_string()),
+            ..Profile::default()
+        };
+
+        assert_eq!(
+            jira_base_url(&profile).unwrap(),
+            "https://api.atlassian.com/ex/jira/cloud-123"
+        );
+    }
 }

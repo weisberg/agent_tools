@@ -3072,7 +3072,7 @@ case "$method $url" in
     printf '{"object":"list","results":[{"object":"block","id":"new-decision","type":"paragraph","paragraph":{"rich_text":[{"plain_text":"New decision."}]},"has_children":false}],"has_more":false}\n200'
     ;;
   PATCH*\ */blocks/old-decision)
-    printf '{"object":"block","id":"old-decision","archived":true}\n200'
+    printf '{"object":"block","id":"old-decision","in_trash":true}\n200'
     ;;
   *)
     printf '{"message":"unexpected request","method":"%s","url":"%s"}\n500' "$method" "$url"
@@ -3115,7 +3115,9 @@ esac
     let log = fs::read_to_string(format!("{home}/curl-log")).unwrap();
     assert!(log.contains("/blocks/16d8004e-5f6a-42a6-9811-51c22ddada12/children"));
     assert!(log.contains("PATCH https://api.notion.com/v1/blocks/old-decision"));
-    assert!(log.contains("\"after\":\"heading-decisions\""));
+    assert!(log.contains(
+        "\"position\":{\"type\":\"after_block\",\"after_block\":{\"id\":\"heading-decisions\"}}"
+    ));
     assert!(!log.contains("/pages/16d8004e-5f6a-42a6-9811-51c22ddada12/markdown"));
 }
 
@@ -3246,7 +3248,7 @@ case "$method $url" in
     printf '{"object":"list","results":[{"object":"block","id":"old-heading","type":"heading_1","heading_1":{"rich_text":[{"plain_text":"Roadmap"}]},"has_children":false},{"object":"block","id":"old-body","type":"paragraph","paragraph":{"rich_text":[{"plain_text":"Old body."}]},"has_children":false}],"has_more":false}\n200'
     ;;
   PATCH*\ */blocks/old-heading|PATCH*\ */blocks/old-body)
-    printf '{"object":"block","archived":true}\n200'
+    printf '{"object":"block","in_trash":true}\n200'
     ;;
   PATCH*\ */blocks/*/children)
     printf '{"object":"list","results":[{"object":"block","id":"new-heading","type":"heading_1","heading_1":{"rich_text":[{"plain_text":"Roadmap"}]},"has_children":false}],"has_more":false}\n200'

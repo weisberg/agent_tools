@@ -1,4 +1,6 @@
-use rust_xlsxwriter::{Format, FormatAlign, Workbook};
+use rust_xlsxwriter::{
+    ConditionalFormatCell, ConditionalFormatCellRule, Format, FormatAlign, Workbook,
+};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -36,6 +38,8 @@ pub struct CsvCreateOptions {
     pub hidden_columns: Vec<String>,
     pub renames: HashMap<String, String>,
     pub formats: HashMap<String, ColumnFormat>,
+    pub links: HashMap<String, String>,
+    pub conditional_formats: Vec<ConditionalFormatSpec>,
     pub title: Option<String>,
     pub total_row: bool,
 }
@@ -44,6 +48,15 @@ pub struct CsvCreateOptions {
 pub struct ColumnFormat {
     pub number_format: Option<String>,
     pub alignment: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConditionalFormatSpec {
+    pub column: String,
+    pub op: String,
+    pub value: String,
+    pub background_color: String,
+    pub font_color: String,
 }
 
 pub fn create_from_csv_with_options(
@@ -149,9 +162,29 @@ pub fn create_from_csv_with_options(
                 .formats
                 .get(&headers[source_col])
                 .map(column_format_to_xlsx);
-            write_csv_cell(worksheet, row_num, col_num, value, format.as_ref())?;
+            let link = options
+                .links
+                .get(&headers[source_col])
+                .map(|pattern| expand_link_pattern(pattern, value));
+            write_csv_cell(
+                worksheet,
+                row_num,
+                col_num,
+                value,
+                format.as_ref(),
+                link.as_deref(),
+            )?;
         }
     }
+
+    apply_conditional_formats(
+        worksheet,
+        &headers,
+        &column_indices,
+        rows.len(),
+        row_offset,
+        options,
+    )?;
 
     if options.total_row {
         let total_row = row_offset + 1 + rows.len() as u32;
@@ -237,14 +270,199 @@ fn column_format_to_xlsx(format: &ColumnFormat) -> Format {
     xlsx
 }
 
+fn apply_conditional_formats(
+    worksheet: &mut rust_xlsxwriter::Worksheet,
+    headers: &[String],
+    column_indices: &[usize],
+    row_count: usize,
+    row_offset: u32,
+    options: &CsvCreateOptions,
+) -> Result<(), XliError> {
+    if row_count == 0 {
+        return Ok(());
+    }
+
+    for spec in &options.conditional_formats {
+        let Some(out_col) = column_indices
+            .iter()
+            .position(|source_col| headers[*source_col] == spec.column)
+        else {
+            continue;
+        };
+        let first_row = row_offset + 1;
+        let last_row = row_offset + row_count as u32;
+        let format = Format::new()
+            .set_background_color(normalize_hex_color(&spec.background_color))
+            .set_font_color(normalize_hex_color(&spec.font_color));
+        add_conditional_format(
+            worksheet,
+            first_row,
+            out_col as u16,
+            last_row,
+            out_col as u16,
+            spec,
+            format,
+        )?;
+    }
+
+    Ok(())
+}
+
+fn add_conditional_format(
+    worksheet: &mut rust_xlsxwriter::Worksheet,
+    first_row: u32,
+    first_col: u16,
+    last_row: u32,
+    last_col: u16,
+    spec: &ConditionalFormatSpec,
+    format: Format,
+) -> Result<(), XliError> {
+    let op = spec.op.to_ascii_lowercase();
+    let value = spec.value.parse::<f64>();
+    match (op.as_str(), value) {
+        ("eq" | "=" | "==", Ok(value)) => add_numeric_rule(
+            worksheet,
+            first_row,
+            first_col,
+            last_row,
+            last_col,
+            format,
+            ConditionalFormatCellRule::EqualTo(value),
+        ),
+        ("ne" | "!=" | "<>", Ok(value)) => add_numeric_rule(
+            worksheet,
+            first_row,
+            first_col,
+            last_row,
+            last_col,
+            format,
+            ConditionalFormatCellRule::NotEqualTo(value),
+        ),
+        ("gt" | ">", Ok(value)) => add_numeric_rule(
+            worksheet,
+            first_row,
+            first_col,
+            last_row,
+            last_col,
+            format,
+            ConditionalFormatCellRule::GreaterThan(value),
+        ),
+        ("gte" | ">=", Ok(value)) => add_numeric_rule(
+            worksheet,
+            first_row,
+            first_col,
+            last_row,
+            last_col,
+            format,
+            ConditionalFormatCellRule::GreaterThanOrEqualTo(value),
+        ),
+        ("lt" | "<", Ok(value)) => add_numeric_rule(
+            worksheet,
+            first_row,
+            first_col,
+            last_row,
+            last_col,
+            format,
+            ConditionalFormatCellRule::LessThan(value),
+        ),
+        ("lte" | "<=", Ok(value)) => add_numeric_rule(
+            worksheet,
+            first_row,
+            first_col,
+            last_row,
+            last_col,
+            format,
+            ConditionalFormatCellRule::LessThanOrEqualTo(value),
+        ),
+        ("eq" | "=" | "==", Err(_)) => add_string_rule(
+            worksheet,
+            first_row,
+            first_col,
+            last_row,
+            last_col,
+            format,
+            ConditionalFormatCellRule::EqualTo(spec.value.clone()),
+        ),
+        ("ne" | "!=" | "<>", Err(_)) => add_string_rule(
+            worksheet,
+            first_row,
+            first_col,
+            last_row,
+            last_col,
+            format,
+            ConditionalFormatCellRule::NotEqualTo(spec.value.clone()),
+        ),
+        _ => Ok(()),
+    }
+}
+
+fn add_numeric_rule(
+    worksheet: &mut rust_xlsxwriter::Worksheet,
+    first_row: u32,
+    first_col: u16,
+    last_row: u32,
+    last_col: u16,
+    format: Format,
+    rule: ConditionalFormatCellRule<f64>,
+) -> Result<(), XliError> {
+    let conditional_format = ConditionalFormatCell::new()
+        .set_rule(rule)
+        .set_format(format);
+    worksheet
+        .add_conditional_format(
+            first_row,
+            first_col,
+            last_row,
+            last_col,
+            &conditional_format,
+        )
+        .map(|_| ())
+        .map_err(|error| XliError::OoxmlCorrupt {
+            details: error.to_string(),
+        })
+}
+
+fn add_string_rule(
+    worksheet: &mut rust_xlsxwriter::Worksheet,
+    first_row: u32,
+    first_col: u16,
+    last_row: u32,
+    last_col: u16,
+    format: Format,
+    rule: ConditionalFormatCellRule<String>,
+) -> Result<(), XliError> {
+    let conditional_format = ConditionalFormatCell::new()
+        .set_rule(rule)
+        .set_format(format);
+    worksheet
+        .add_conditional_format(
+            first_row,
+            first_col,
+            last_row,
+            last_col,
+            &conditional_format,
+        )
+        .map(|_| ())
+        .map_err(|error| XliError::OoxmlCorrupt {
+            details: error.to_string(),
+        })
+}
+
+fn normalize_hex_color(value: &str) -> &str {
+    value.strip_prefix('#').unwrap_or(value)
+}
+
 fn write_csv_cell(
     worksheet: &mut rust_xlsxwriter::Worksheet,
     row: u32,
     col: u16,
     value: &str,
     format: Option<&Format>,
+    link: Option<&str>,
 ) -> Result<(), XliError> {
-    if let Ok(number) = value.parse::<f64>() {
+    if let Some(link) = link.filter(|_| !value.is_empty()) {
+        worksheet.write_url_with_options(row, col, link, value, "", format)
+    } else if let Ok(number) = value.parse::<f64>() {
         if let Some(format) = format {
             worksheet.write_number_with_format(row, col, number, format)
         } else {
@@ -259,6 +477,14 @@ fn write_csv_cell(
     .map_err(|error| XliError::OoxmlCorrupt {
         details: error.to_string(),
     })
+}
+
+fn expand_link_pattern(pattern: &str, value: &str) -> String {
+    if pattern.contains("{}") {
+        pattern.replace("{}", value)
+    } else {
+        format!("{pattern}{value}")
+    }
 }
 
 pub fn create_from_markdown(

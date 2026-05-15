@@ -81,6 +81,7 @@ require_package_file "SKILL.md"
 require_package_file "scripts/live_smoke.sh"
 require_package_file "scripts/fake_notion_curl.sh"
 require_package_file "scripts/release_audit.sh"
+require_package_file "tests/live.rs"
 
 socket_tests="skipped"
 if [[ "${NOTIONLI_RUN_SOCKET_TESTS:-0}" == "1" ]]; then
@@ -105,6 +106,14 @@ else
   echo "live smoke skipped: set NOTION_API_KEY or ~/.config/NOTION_API_KEY, NOTIONLI_SMOKE_PARENT_PAGE, and NOTIONLI_RUN_LIVE_SMOKE=1 to run it." >&2
 fi
 
+live_tests=skipped
+if [[ "$token_available" == "true" && -n "${NOTIONLI_LIVE_DATA_SOURCE:-}" && "${NOTIONLI_RUN_LIVE_TESTS:-0}" == "1" ]]; then
+  run cargo test --test live -- --ignored --nocapture
+  live_tests=run
+else
+  echo "live Rust tests skipped: set NOTION_API_KEY or ~/.config/NOTION_API_KEY, NOTIONLI_LIVE_DATA_SOURCE, and NOTIONLI_RUN_LIVE_TESTS=1 to run them." >&2
+fi
+
 cat <<JSON
 {
   "ok": true,
@@ -119,6 +128,7 @@ cat <<JSON
     "cargo package --allow-dirty --list"
   ],
   "socket_tests": "$socket_tests",
-  "live_smoke": "$([[ "$token_available" == "true" && -n "${NOTIONLI_SMOKE_PARENT_PAGE:-}" && "${NOTIONLI_RUN_LIVE_SMOKE:-0}" == "1" ]] && printf run || printf skipped)"
+  "live_smoke": "$([[ "$token_available" == "true" && -n "${NOTIONLI_SMOKE_PARENT_PAGE:-}" && "${NOTIONLI_RUN_LIVE_SMOKE:-0}" == "1" ]] && printf run || printf skipped)",
+  "live_tests": "$live_tests"
 }
 JSON

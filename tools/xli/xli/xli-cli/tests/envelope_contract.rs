@@ -124,7 +124,7 @@ fn error_envelope_structure() {
 }
 
 #[test]
-fn write_includes_umya_warning() {
+fn value_write_does_not_include_umya_warning() {
     let dir = tempdir().expect("tempdir");
     let path = dir.path().join("test.xlsx");
     create_workbook(&path);
@@ -137,13 +137,36 @@ fn write_includes_umya_warning() {
         "hello",
     ]);
     let warnings = json["warnings"].as_array().expect("warnings array");
-    let has_umya_warning = warnings.iter().any(|w| {
-        let msg = w.as_str().unwrap_or_default();
-        msg.contains("umya")
-    });
     assert!(
-        has_umya_warning,
-        "expected umya fallback warning in warnings array, got: {:?}",
+        warnings.iter().all(|w| {
+            let msg = w.as_str().unwrap_or_default();
+            !msg.contains("umya")
+        }),
+        "value writes should use the OOXML patch path, got warnings: {:?}",
+        warnings
+    );
+}
+
+#[test]
+fn formula_write_includes_explicit_umya_warning() {
+    let dir = tempdir().expect("tempdir");
+    let path = dir.path().join("test.xlsx");
+    create_workbook(&path);
+
+    let json = xli_json(&[
+        "write",
+        path.to_str().unwrap(),
+        "Sheet1!A1",
+        "--formula",
+        "=1+1",
+    ]);
+    let warnings = json["warnings"].as_array().expect("warnings array");
+    assert!(
+        warnings.iter().any(|w| {
+            let msg = w.as_str().unwrap_or_default();
+            msg.contains("umya")
+        }),
+        "formula writes should still disclose fallback usage, got: {:?}",
         warnings
     );
 }

@@ -17,10 +17,9 @@ Implemented today:
 
 Still planned or partial:
 
-- Native OOXML mutation for all edit paths. The current mutation path uses `umya-spreadsheet` and reports that warning in JSON envelopes.
+- Native OOXML mutation for all edit paths. `write --value` uses the artifact-preserving OOXML patch path; formula writes, formatting, sheet operations, batches, and template application can still use the explicit `umya-spreadsheet` fallback warning.
 - First-class `profile`, `diff`, `chart`, `table`, `repair`, and `ooxml` command families.
-- Rich report-table ergonomics beyond number-format aliases, CSV report options,
-  and the basic table template.
+- Rich report-table ergonomics beyond number-format aliases, CSV report options, conditional formats, hyperlinks, and the basic table template.
 
 ## Build
 
@@ -85,6 +84,8 @@ cargo run -p xli-cli -- create /tmp/report.xlsx \
   --col Account \
   --col Revenue:currency:right \
   --hide InternalNotes \
+  --link Account:https://crm.example/customers/{} \
+  --cf Revenue:gt:100000:C6EFCE:006100 \
   --rename Account:Customer \
   --total-row
 ```
@@ -154,7 +155,7 @@ Use `xli-companion` when you need Python's ecosystem: dataframe validation, reco
 | `batch` | Implemented | NDJSON micro-ops in one atomic commit |
 | `apply` | Implemented minimal | Built-in template expansion into batch ops |
 | `template` | Implemented minimal | List, preview, and validate built-in templates |
-| `create` | Implemented | Blank, CSV, Markdown table, JSON, and CSV report-table options |
+| `create` | Implemented | Blank, CSV, Markdown table, JSON, and CSV report-table options including titles, selected/hidden/renamed columns, hyperlinks, conditional formats, number formats, and total rows |
 | `lint` | Implemented MVP | Fast structural/formula checks |
 | `recalc` | Implemented | LibreOffice subprocess path |
 | `validate` | Implemented MVP | Post-edit workbook validation checks |
@@ -169,6 +170,6 @@ Use `xli-companion` when you need Python's ecosystem: dataframe validation, reco
 
 ## Known Limitations
 
-- Mutating commands currently emit the `umya-spreadsheet` fallback warning. Treat that as a signal to verify artifact-sensitive workbooks that contain charts, drawings, macros, data validation, or complex tables.
+- Mutating commands that use the `umya-spreadsheet` fallback emit a warning. Treat that as a signal to verify artifact-sensitive workbooks that contain charts, drawings, macros, data validation, or complex tables. Plain value writes now avoid that fallback.
 - `xli-spec.md` is broader than the current MVP. The parity matrix above is the operational source of truth for what the CLI exposes today.
 - Formula recalculation depends on LibreOffice being available on the machine.

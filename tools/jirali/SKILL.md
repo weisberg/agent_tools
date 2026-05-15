@@ -81,7 +81,18 @@ scoped-token Jira gateway base is:
 https://api.atlassian.com/ex/jira/{cloudId}/rest/api/3/...
 ```
 
-Find the `cloudId` with:
+Configure gateway mode with:
+
+```bash
+jirali auth login \
+  --method api-token \
+  --site-url https://example.atlassian.net \
+  --gateway \
+  --email you@example.com
+```
+
+`--gateway` discovers the `cloudId`. Agents can pass `--cloud-id` directly when
+it is already known. The discovery endpoint is:
 
 ```bash
 curl https://example.atlassian.net/_edge/tenant_info

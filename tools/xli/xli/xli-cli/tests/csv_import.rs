@@ -1,5 +1,6 @@
 use serde_json::Value;
 use std::fs;
+use std::io::Read;
 use std::process::{Command, Output};
 use tempfile::tempdir;
 
@@ -92,6 +93,85 @@ fn csv_import_supports_report_table_options() {
     assert_eq!(rows[1]["A"], "Account");
     assert_eq!(rows[1]["B"], "revenue");
     assert_eq!(rows[4]["A"], "Total");
+}
+
+#[test]
+fn csv_import_supports_hyperlink_patterns() {
+    let dir = tempdir().expect("tempdir");
+    let csv_path = dir.path().join("data.csv");
+    let xlsx_path = dir.path().join("out.xlsx");
+    fs::write(&csv_path, "account,url_slug\nAcme,acme-co\n").expect("write csv");
+
+    let json = xli_json(&[
+        "create",
+        xlsx_path.to_str().expect("xlsx path"),
+        "--from-csv",
+        csv_path.to_str().expect("csv path"),
+        "--link",
+        "url_slug:https://example.test/accounts/{}",
+    ]);
+    assert_eq!(json["status"], "ok");
+
+    let read = xli_json(&["read", xlsx_path.to_str().expect("path"), "Sheet1!B2"]);
+    assert_eq!(read["status"], "ok");
+    assert_eq!(read["output"]["value"], "acme-co");
+
+    let file = fs::File::open(&xlsx_path).expect("xlsx file");
+    let mut archive = zip::ZipArchive::new(file).expect("xlsx zip");
+    let mut rels = String::new();
+    archive
+        .by_name("xl/worksheets/_rels/sheet1.xml.rels")
+        .expect("sheet relationship file")
+        .read_to_string(&mut rels)
+        .expect("read rels");
+    assert!(rels.contains("https://example.test/accounts/acme-co"));
+
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")
+        .expect("sheet xml")
+        .read_to_string(&mut sheet_xml)
+        .expect("read sheet xml");
+    assert!(sheet_xml.contains("<hyperlink ref=\"B2\""));
+}
+
+#[test]
+fn csv_import_supports_conditional_format_rules() {
+    let dir = tempdir().expect("tempdir");
+    let csv_path = dir.path().join("data.csv");
+    let xlsx_path = dir.path().join("out.xlsx");
+    fs::write(&csv_path, "account,revenue\nAcme,100\nBeacon,250\n").expect("write csv");
+
+    let json = xli_json(&[
+        "create",
+        xlsx_path.to_str().expect("xlsx path"),
+        "--from-csv",
+        csv_path.to_str().expect("csv path"),
+        "--cf",
+        "revenue:gt:150:C6EFCE:006100",
+    ]);
+    assert_eq!(json["status"], "ok");
+
+    let file = fs::File::open(&xlsx_path).expect("xlsx file");
+    let mut archive = zip::ZipArchive::new(file).expect("xlsx zip");
+    let mut sheet_xml = String::new();
+    archive
+        .by_name("xl/worksheets/sheet1.xml")
+        .expect("sheet xml")
+        .read_to_string(&mut sheet_xml)
+        .expect("read sheet xml");
+    assert!(sheet_xml.contains("<conditionalFormatting sqref=\"B2:B3\""));
+    assert!(sheet_xml.contains("operator=\"greaterThan\""));
+    assert!(sheet_xml.contains("<formula>150</formula>"));
+
+    let mut styles_xml = String::new();
+    archive
+        .by_name("xl/styles.xml")
+        .expect("styles xml")
+        .read_to_string(&mut styles_xml)
+        .expect("read styles xml");
+    assert!(styles_xml.contains("rgb=\"FFC6EFCE\""));
+    assert!(styles_xml.contains("rgb=\"FF006100\""));
 }
 
 #[test]

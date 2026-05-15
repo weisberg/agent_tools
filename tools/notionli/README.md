@@ -181,8 +181,8 @@ cargo package --allow-dirty
 
 Live Notion verification requires a workspace shared with the integration and a
 real token from `NOTION_API_KEY` or `~/.config/NOTION_API_KEY`. Use a disposable
-page/data source because the smoke commands create, update, relate, attach,
-archive, and trash objects.
+page/data source because the smoke commands and live integration tests create,
+update, patch, query, attach, archive, and trash objects.
 
 ```bash
 export NOTIONLI_HOME="$(mktemp -d)"
@@ -200,6 +200,14 @@ export NOTIONLI_SMOKE_PARENT_PAGE=<shared-page-id>
 ./scripts/live_smoke.sh
 ```
 
+Run the Rust live integration tests against a real shared data source with:
+
+```bash
+export NOTIONLI_RUN_LIVE_TESTS=1
+export NOTIONLI_LIVE_DATA_SOURCE=<shared-data-source-id>
+cargo test --test live -- --ignored --nocapture
+```
+
 For CI or offline release checks, point `NOTIONLI_CURL` at
 `scripts/fake_notion_curl.sh` to validate the smoke command sequence without
 touching a real workspace.
@@ -209,4 +217,5 @@ JSON status object. To include the localhost socket mock integration, run with
 `NOTIONLI_RUN_SOCKET_TESTS=1` in an environment where port binding is allowed.
 To include a real workspace smoke in that bundle, set `NOTIONLI_RUN_LIVE_SMOKE=1`
 along with the parent page variable and a token in either `NOTION_API_KEY` or
-`~/.config/NOTION_API_KEY`.
+`~/.config/NOTION_API_KEY`. To include the Rust live integration tests, set
+`NOTIONLI_RUN_LIVE_TESTS=1` and `NOTIONLI_LIVE_DATA_SOURCE`.

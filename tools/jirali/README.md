@@ -56,7 +56,21 @@ Atlassian scoped API tokens may require the gateway base instead:
 https://api.atlassian.com/ex/jira/{cloudId}/rest/api/3/...
 ```
 
-The `cloudId` can be discovered without credentials:
+Use gateway mode when a scoped token requires the Atlassian API gateway:
+
+```bash
+cargo run -- auth login \
+  --method api-token \
+  --site-url https://example.atlassian.net \
+  --gateway \
+  --email you@example.com \
+  --token "$JIRALI_API_TOKEN"
+```
+
+`--gateway` discovers and stores the `cloudId` from the site root. You can also
+provide it explicitly with `--cloud-id`, or configure `--site-url` directly as
+`https://api.atlassian.com/ex/jira/{cloudId}`. The `cloudId` discovery endpoint
+is:
 
 ```bash
 curl https://example.atlassian.net/_edge/tenant_info

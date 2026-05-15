@@ -34,8 +34,10 @@ Live testing on 2026-04-24 against an Atlassian Cloud site showed:
   tokens may require
   `https://api.atlassian.com/ex/jira/{cloudId}/rest/api/3/...` rather than the
   site-hosted REST URL.
-- The Cloud ID can be discovered from
-  `https://<site>.atlassian.net/_edge/tenant_info`.
+- Jirali supports gateway profiles with `auth login --gateway`. This discovers
+  and stores the Cloud ID from `https://<site>.atlassian.net/_edge/tenant_info`.
+  Agents may also provide `--cloud-id` explicitly or set `--site-url` to an
+  existing `https://api.atlassian.com/ex/jira/{cloudId}` gateway base.
 - A symptom set of `/myself` returning `Client must be authenticated to access
   this resource` while project search is empty often means the wrong URL family
   or auth scheme is being used, not necessarily that the token is revoked.
@@ -66,6 +68,7 @@ The contract and productionization tests verify:
 - mock Jira HTTP response mapping
 - live-profile issue view cache population
 - `/jira/` web UI URL normalization for Atlassian Cloud profiles
+- gateway profile Cloud ID discovery and request-base handling
 
 ## Live vs Local Status
 

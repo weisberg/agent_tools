@@ -264,7 +264,7 @@ fn apply_page_patch(
                 ctx,
                 "PATCH",
                 &format!("/blocks/{block_id}"),
-                Some(json!({ "archived": true })),
+                Some(json!({ "in_trash": true })),
             )?;
             Ok(json!({ "mode": "remove_block", "block_id": block_id, "result": result }))
         }
@@ -379,7 +379,7 @@ fn archive_blocks(ctx: &Context, block_ids: &[String]) -> Result<Vec<Value>, Not
             ctx,
             "PATCH",
             &format!("/blocks/{block_id}"),
-            Some(json!({ "archived": true })),
+            Some(json!({ "in_trash": true })),
         )?;
         archived.push(json!({ "block_id": block_id, "result": result }));
     }
@@ -400,7 +400,10 @@ fn append_blocks(
     }
     let mut payload = json!({ "children": blocks });
     if let Some(after) = after {
-        payload["after"] = json!(after);
+        payload["position"] = json!({
+            "type": "after_block",
+            "after_block": { "id": after },
+        });
     }
     let result = notion_request(
         ctx,

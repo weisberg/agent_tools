@@ -191,6 +191,68 @@ fn auth_login_normalizes_jira_web_ui_site_url() {
 }
 
 #[test]
+fn auth_login_discovers_cloud_id_for_gateway_profiles() {
+    let home = TempDir::new().unwrap();
+    let base = mock_once(200, r#"{"cloudId":"cloud-123"}"#);
+    let login = stdout_json(
+        jirali(&home)
+            .args([
+                "auth",
+                "login",
+                "--method",
+                "api-token",
+                "--site-url",
+                &base,
+                "--gateway",
+                "--email",
+                "agent@example.com",
+                "--token",
+                "secret-token",
+            ])
+            .assert(),
+    );
+    assert_eq!(login["cloud_id"], "cloud-123");
+    assert_eq!(login["use_gateway"], true);
+
+    let config = stdout_json(jirali(&home).args(["config", "show"]).assert());
+    assert_eq!(config["profiles"]["default"]["cloud_id"], "cloud-123");
+    assert_eq!(config["profiles"]["default"]["use_gateway"], true);
+}
+
+#[test]
+fn gateway_site_url_is_used_for_live_requests() {
+    let home = TempDir::new().unwrap();
+    let base = mock_once(
+        200,
+        r#"{"key":"ENG-88","fields":{"summary":"From gateway Jira","status":{"name":"Done"}}}"#,
+    );
+    let gateway_base = format!("{base}/ex/jira/cloud-456");
+
+    let login = stdout_json(
+        jirali(&home)
+            .args([
+                "auth",
+                "login",
+                "--method",
+                "api-token",
+                "--site-url",
+                &gateway_base,
+                "--email",
+                "agent@example.com",
+                "--token",
+                "secret-token",
+            ])
+            .assert(),
+    );
+    assert_eq!(login["cloud_id"], "cloud-456");
+    assert_eq!(login["use_gateway"], true);
+
+    let viewed = stdout_json(jirali(&home).args(["issue", "view", "ENG-88"]).assert());
+    assert_eq!(viewed["key"], "ENG-88");
+    assert_eq!(viewed["fields"]["summary"], "From gateway Jira");
+}
+
+#[test]
 fn parser_backed_jql_reports_errors_with_rule_ids() {
     let home = TempDir::new().unwrap();
     let lint = stdout_json(

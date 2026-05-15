@@ -70,7 +70,11 @@ pub fn run(args: WriteArgs, human: bool) -> Result<bool> {
                     cells: vec![address],
                     formulas_written: u32::from(write_result.needs_recalc),
                 },
-                vec![UMYA_FALLBACK_WARNING.to_string()],
+                if write_result.used_fallback {
+                    vec![UMYA_FALLBACK_WARNING.to_string()]
+                } else {
+                    Vec::new()
+                },
                 write_result.needs_recalc,
                 if args.dry_run {
                     xli_core::CommitMode::DryRun
