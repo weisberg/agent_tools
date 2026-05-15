@@ -259,7 +259,7 @@ fn remove_style_prop(style: &mut String, prop: &str) {
 
 fn rebuild_html(original: &str, cells: &[CellInfo]) -> String {
     let mut sorted: Vec<&CellInfo> = cells.iter().collect();
-    sorted.sort_by(|a, b| b.start.cmp(&a.start));
+    sorted.sort_by_key(|cell| std::cmp::Reverse(cell.start));
 
     let mut result = original.to_string();
 

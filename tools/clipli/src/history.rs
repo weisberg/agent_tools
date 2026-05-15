@@ -42,6 +42,60 @@ pub struct HistoryEntry {
     pub privacy_reason: Option<String>,
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct HistoryFilter {
+    pub source_app: Option<String>,
+    pub pb_type: Option<PbType>,
+    pub from: Option<DateTime<Utc>>,
+    pub to: Option<DateTime<Utc>>,
+}
+
+impl HistoryFilter {
+    pub fn is_empty(&self) -> bool {
+        self.source_app.is_none()
+            && self.pb_type.is_none()
+            && self.from.is_none()
+            && self.to.is_none()
+    }
+
+    pub fn matches(&self, entry: &HistoryEntry) -> bool {
+        if let Some(ref source_app) = self.source_app {
+            let haystack = entry
+                .source_app
+                .as_deref()
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if !haystack.contains(&source_app.to_ascii_lowercase()) {
+                return false;
+            }
+        }
+        if let Some(pb_type) = self.pb_type {
+            if entry.pb_type != pb_type {
+                return false;
+            }
+        }
+        if let Some(from) = self.from {
+            if entry.captured_at < from {
+                return false;
+            }
+        }
+        if let Some(to) = self.to {
+            if entry.captured_at > to {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct PruneResult {
+    pub removed: usize,
+    pub kept: usize,
+    pub dry_run: bool,
+    pub removed_entries: Vec<HistoryEntry>,
+}
+
 #[derive(Debug)]
 pub struct HistoryStore {
     root: PathBuf,
@@ -100,6 +154,7 @@ impl HistoryStore {
             redacted,
             privacy_reason,
         };
+        let _lock = self.acquire_lock()?;
         self.append_entry(&entry)?;
         Ok(entry)
     }
@@ -114,7 +169,7 @@ impl HistoryStore {
         for line in contents.lines().filter(|line| !line.trim().is_empty()) {
             entries.push(serde_json::from_str::<HistoryEntry>(line)?);
         }
-        entries.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+        entries.sort_by_key(|entry| std::cmp::Reverse(entry.captured_at));
         Ok(entries)
     }
 
@@ -122,6 +177,32 @@ impl HistoryStore {
         let needle = query.to_ascii_lowercase();
         let mut matches = Vec::new();
         for entry in self.list()? {
+            if self.entry_matches(&entry, &needle)? {
+                matches.push(entry);
+            }
+        }
+        Ok(matches)
+    }
+
+    pub fn list_filtered(
+        &self,
+        filter: &HistoryFilter,
+    ) -> Result<Vec<HistoryEntry>, Box<dyn std::error::Error>> {
+        Ok(self
+            .list()?
+            .into_iter()
+            .filter(|entry| filter.matches(entry))
+            .collect())
+    }
+
+    pub fn search_filtered(
+        &self,
+        query: &str,
+        filter: &HistoryFilter,
+    ) -> Result<Vec<HistoryEntry>, Box<dyn std::error::Error>> {
+        let needle = query.to_ascii_lowercase();
+        let mut matches = Vec::new();
+        for entry in self.list_filtered(filter)? {
             if self.entry_matches(&entry, &needle)? {
                 matches.push(entry);
             }
@@ -142,6 +223,62 @@ impl HistoryStore {
             .as_ref()
             .ok_or_else(|| format!("history entry '{}' has no stored payload", entry.id))?;
         Ok(fs::read(self.root.join(rel))?)
+    }
+
+    pub fn prune(
+        &self,
+        filter: &HistoryFilter,
+        keep_latest: Option<usize>,
+        dry_run: bool,
+    ) -> Result<PruneResult, Box<dyn std::error::Error>> {
+        if filter.is_empty() && keep_latest.is_none() {
+            return Err("history prune requires at least one filter or --keep-latest".into());
+        }
+
+        let _lock = if dry_run {
+            None
+        } else {
+            Some(self.acquire_lock()?)
+        };
+        let entries = self.list()?;
+        let mut kept = Vec::new();
+        let mut removed = Vec::new();
+        let mut matching_seen = 0usize;
+
+        for entry in entries {
+            if filter.matches(&entry) {
+                matching_seen += 1;
+                if keep_latest
+                    .map(|keep| matching_seen <= keep)
+                    .unwrap_or(false)
+                {
+                    kept.push(entry);
+                } else {
+                    removed.push(entry);
+                }
+            } else {
+                kept.push(entry);
+            }
+        }
+
+        if !dry_run {
+            self.write_index(&kept)?;
+            for entry in &removed {
+                if let Some(ref rel) = entry.payload_path {
+                    let path = self.root.join(rel);
+                    if path.exists() {
+                        fs::remove_file(path)?;
+                    }
+                }
+            }
+        }
+
+        Ok(PruneResult {
+            removed: removed.len(),
+            kept: kept.len(),
+            dry_run,
+            removed_entries: removed,
+        })
     }
 
     fn entry_matches(
@@ -184,12 +321,55 @@ impl HistoryStore {
         Ok(())
     }
 
+    fn write_index(&self, entries: &[HistoryEntry]) -> Result<(), Box<dyn std::error::Error>> {
+        fs::create_dir_all(&self.root)?;
+        let tmp = self.root.join("index.jsonl.tmp");
+        let mut file = fs::File::create(&tmp)?;
+        for entry in entries {
+            writeln!(file, "{}", serde_json::to_string(entry)?)?;
+        }
+        fs::rename(tmp, self.index_path())?;
+        Ok(())
+    }
+
     fn index_path(&self) -> PathBuf {
         self.root.join("index.jsonl")
     }
 
     fn payloads_dir(&self) -> PathBuf {
         self.root.join("payloads")
+    }
+
+    fn lock_path(&self) -> PathBuf {
+        self.root.join(".history.lock")
+    }
+
+    fn acquire_lock(&self) -> Result<HistoryLock, Box<dyn std::error::Error>> {
+        fs::create_dir_all(&self.root)?;
+        let path = self.lock_path();
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file) => {
+                writeln!(file, "pid={}", std::process::id())?;
+                Ok(HistoryLock { path })
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(format!(
+                "history store is locked at {}; another clipli history/watch process may be running",
+                path.display()
+            )
+            .into()),
+            Err(e) => Err(e.into()),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct HistoryLock {
+    path: PathBuf,
+}
+
+impl Drop for HistoryLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
     }
 }
 

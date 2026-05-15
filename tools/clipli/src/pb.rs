@@ -223,11 +223,19 @@ pub fn source_app() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    static PB_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn pasteboard_test_lock() -> MutexGuard<'static, ()> {
+        PB_TEST_LOCK.lock().expect("pasteboard test lock poisoned")
+    }
 
     /// Basic round-trip: write plain text, read it back.
     #[test]
     #[ignore = "requires macOS GUI session with pasteboard access"]
     fn test_roundtrip_plain_text() {
+        let _guard = pasteboard_test_lock();
         let text = "clipli test: hello world";
         write(&[(PbType::PlainText, text.as_bytes())]).expect("write failed");
         let data = read_type(PbType::PlainText).expect("read failed");
@@ -238,6 +246,7 @@ mod tests {
     #[test]
     #[ignore = "requires macOS GUI session with pasteboard access"]
     fn test_roundtrip_html() {
+        let _guard = pasteboard_test_lock();
         let html = "<b>clipli</b> <em>test</em>";
         write(&[(PbType::Html, html.as_bytes())]).expect("write html failed");
         let data = read_type(PbType::Html).expect("read html failed");
@@ -248,6 +257,7 @@ mod tests {
     #[test]
     #[ignore = "requires macOS GUI session with pasteboard access"]
     fn test_write_html_with_plain() {
+        let _guard = pasteboard_test_lock();
         write_html("<p>Hello</p>", Some("Hello")).expect("write_html failed");
         let html_data = read_type(PbType::Html).expect("html not found");
         let plain_data = read_type(PbType::PlainText).expect("plain not found");
@@ -259,6 +269,7 @@ mod tests {
     #[test]
     #[ignore = "requires macOS GUI session with pasteboard access"]
     fn test_read_all() {
+        let _guard = pasteboard_test_lock();
         write(&[(PbType::PlainText, b"test content")]).expect("write failed");
         let snap = read_all().expect("read_all failed");
         assert!(!snap.types.is_empty());
@@ -269,6 +280,7 @@ mod tests {
     #[test]
     #[ignore = "requires macOS GUI session with pasteboard access"]
     fn test_type_not_found() {
+        let _guard = pasteboard_test_lock();
         // Write only plain text, then ask for PDF.
         write(&[(PbType::PlainText, b"no pdf here")]).expect("write failed");
         let result = read_type(PbType::Pdf);

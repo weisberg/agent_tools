@@ -38,7 +38,7 @@ fn test_version_output() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("clipli 0.4.0"));
+        .stdout(predicate::str::contains("clipli 1.0.0"));
 }
 
 // ---------------------------------------------------------------------------
@@ -288,6 +288,45 @@ fn test_excel_png_dry_run_writes_png_file() {
 }
 
 #[test]
+fn test_excel_json_input_with_preset_dry_run() {
+    clipli()
+        .args([
+            "excel",
+            "-",
+            "--input-format",
+            "json",
+            "--preset",
+            "finance",
+            "--copy-as",
+            "svg",
+            "--dry-run",
+        ])
+        .write_stdin(r#"[{"Name":"Alice","Revenue":1200,"Margin":0.42}]"#)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<svg"))
+        .stdout(predicate::str::contains("Alice"))
+        .stdout(predicate::str::contains("Revenue"));
+}
+
+#[test]
+fn test_preview_stdin_writes_json_path_without_clipboard() {
+    let home = tempfile::TempDir::new().unwrap();
+    let out_dir = tempfile::TempDir::new().unwrap();
+    let out = out_dir.path().join("preview.html");
+
+    let output = isolated_clipli(&home)
+        .args(["preview", "--output", out.to_str().unwrap(), "--json"])
+        .write_stdin("<p>Preview me</p>")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let json: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["ok"], true);
+    assert_eq!(std::fs::read_to_string(out).unwrap(), "<p>Preview me</p>");
+}
+
+#[test]
 fn test_completions_emit_shell_script() {
     clipli()
         .args(["completions", "zsh"])
@@ -349,6 +388,85 @@ fn test_history_record_search_show_restore_dry_run() {
     let json: Value = serde_json::from_slice(&restore_json.stdout).unwrap();
     assert_eq!(json["ok"], true);
     assert_eq!(json["id"], id);
+}
+
+#[test]
+fn test_history_filters_and_prune() {
+    let home = tempfile::TempDir::new().unwrap();
+    let input_dir = tempfile::TempDir::new().unwrap();
+    let alpha = input_dir.path().join("alpha.txt");
+    let beta = input_dir.path().join("beta.txt");
+    let gamma = input_dir.path().join("gamma.html");
+    std::fs::write(&alpha, "Alpha launch notes").unwrap();
+    std::fs::write(&beta, "Beta launch notes").unwrap();
+    std::fs::write(&gamma, "<p>Gamma launch notes</p>").unwrap();
+
+    for (path, pb_type, source) in [
+        (&alpha, "plain", "alpha.app"),
+        (&beta, "plain", "beta.app"),
+        (&gamma, "html", "alpha.app"),
+    ] {
+        isolated_clipli(&home)
+            .args([
+                "history",
+                "record",
+                "--type",
+                pb_type,
+                "--input",
+                path.to_str().unwrap(),
+                "--source-app",
+                source,
+                "--sensitive",
+                "allow",
+                "--json",
+            ])
+            .assert()
+            .success();
+    }
+
+    isolated_clipli(&home)
+        .args(["history", "list", "--source-app", "alpha", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("alpha.app"))
+        .stdout(predicate::str::contains("Gamma launch notes").not());
+
+    isolated_clipli(&home)
+        .args(["history", "search", "launch", "--type", "html", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("public.html"))
+        .stdout(predicate::str::contains("public.utf8-plain-text").not());
+
+    let dry_run = isolated_clipli(&home)
+        .args([
+            "history",
+            "prune",
+            "--keep-latest",
+            "2",
+            "--dry-run",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(dry_run.status.success());
+    let json: Value = serde_json::from_slice(&dry_run.stdout).unwrap();
+    assert_eq!(json["result"]["removed"], 1);
+    assert_eq!(json["result"]["dry_run"], true);
+
+    isolated_clipli(&home)
+        .args(["history", "prune", "--keep-latest", "2", "--json"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""removed": 1"#));
+
+    let list = isolated_clipli(&home)
+        .args(["history", "list", "--limit", "10", "--json"])
+        .output()
+        .unwrap();
+    assert!(list.status.success());
+    let json: Value = serde_json::from_slice(&list.stdout).unwrap();
+    assert_eq!(json["entries"].as_array().unwrap().len(), 2);
 }
 
 #[test]

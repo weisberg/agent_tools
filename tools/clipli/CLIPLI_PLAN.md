@@ -1,7 +1,7 @@
 # clipli Development Plan
 
 **Spec:** `CLIPLI_SPEC.md` v1.0.0-spec  
-**Current crate version:** `0.4.0`
+**Current crate version:** `1.0.0`
 **Plan updated:** 2026-05-15
 
 ---
@@ -20,7 +20,7 @@ clipli is no longer an MVP scaffold. The project already has:
 - [x] rich Excel HTML generation and clipboard editing
 - [x] a passing automated test baseline
 
-The next stage is to turn that solid core into a more complete product: close the highest-value correctness gaps, harden workflows, add missing features promised by the spec, and then expand into automation, sharing, and agent-native integrations.
+The current stage is the v1.0 ship line: the stable macOS core is implemented, release packaging is in place, and post-1.0 ideas are separated from the supported surface.
 
 ---
 
@@ -28,13 +28,13 @@ The next stage is to turn that solid core into a more complete product: close th
 
 ### What is already implemented
 
-- [x] `inspect`, `read`, `write`, `capture`, `paste`, `list`, `show`, `edit`, `delete`, `versions`, `restore`, `lint`, `search`, `export`, `import`, `excel`, `excel-edit`, `render`, `convert`, and `doctor` commands (20 total)
+- [x] `inspect`, `read`, `write`, `capture`, `paste`, `preview`, `list`, `show`, `edit`, `delete`, `versions`, `restore`, `lint`, `search`, `export`, `import`, `excel`, `excel-edit`, `render`, `convert`, `doctor`, `completions`, `watch`, and `history` commands
 - [x] pasteboard support for HTML, RTF, plain text, SVG, PNG, TIFF, and PDF payloads
 - [x] HTML cleaning with target-aware CSS filtering for Excel, PowerPoint, Google Sheets, and generic HTML
 - [x] Jinja2-compatible rendering with custom filters and HTML-to-plain-text conversion
 - [x] heuristic templatization for dates, currency, percentages, emails, large numbers, quarters, and cell text
 - [x] template storage under `~/.config/clipli/templates/`
-- [x] rich CSV-to-Excel HTML generation and A1-style Excel cell editing
+- [x] rich CSV/JSON-to-Excel HTML/SVG/PNG generation and A1-style Excel cell editing
 
 - [x] RTF-to-HTML conversion via `textutil` in `convert` and `capture` fallback
 - [x] config cascade with all 6 fields wired end-to-end
@@ -51,12 +51,18 @@ The next stage is to turn that solid core into a more complete product: close th
 - [x] `doctor` environment readiness checks with JSON output
 - [x] `excel --copy-as svg|png` image clipboard output for table artifacts
 - [x] `watch`, `history record/list/search/show/restore`, and privacy-aware local clipboard history
+- [x] history filtering by source app, pasteboard type, and date range
+- [x] history pruning plus `watch --max-history` retention controls
+- [x] single-writer locking for history index updates
+- [x] `clipli preview` and cached preview files under the config directory
+- [x] Excel JSON input and reusable formatting presets
 - [x] shell completion generation via `clap_complete`
 - [x] macOS GitHub Actions workflow for fmt, tests, clippy, and package checks
+- [x] tag-based release workflow and local release archive script
 
 ### Verified baseline
 
-`cargo test` passes 214 tests with 0 failures, including the unit and integration suites, with 7 GUI-dependent pasteboard tests still ignored as expected.
+`cargo test --manifest-path tools/clipli/Cargo.toml` passes 217 non-GUI tests with 7 GUI-dependent pasteboard tests intentionally ignored for CI. `cargo test --manifest-path tools/clipli/Cargo.toml -- --ignored` passes all 7 GUI tests in a logged-in macOS session.
 
 ### Completed so far
 
@@ -79,13 +85,13 @@ The next stage is to turn that solid core into a more complete product: close th
 - [x] ~~template storage has no versioning, rollback, locking, or import/export story~~ (done in v0.3)
 - [x] ~~`capture` does not yet provide the preview workflow described in the spec~~ (done in v0.2)
 - [x] ~~shell completions are still missing~~ (implemented via `clipli completions <SHELL>`)
-- [ ] release packaging and distribution work are still missing
+- [x] ~~release packaging and distribution work are still missing~~ (release workflow, archive script, checksums, and install docs added for v1.0)
 - [x] ~~batch rendering workflows do not exist yet~~ (done in v0.4)
 - [x] ~~external agent command execution (beyond stdin/stdout protocol) is not yet supported~~ (done in v0.4)
 - [x] ~~`-v` / `-vv` debug logging is not yet available~~ (done in v0.4)
 - [x] JSON output has a documented v1.0 compatibility target for the top-level error envelope
 - [x] clipboard watch/history has default privacy controls for likely sensitive text
-- [ ] history filtering by source app/type/date and retention policy are still missing
+- [x] ~~history filtering by source app/type/date and retention policy are still missing~~ (filters, prune, single-writer locking, and `watch --max-history` added)
 
 ### Strategic implication
 
@@ -366,14 +372,16 @@ The version roadmap below is sequenced around those layers.
 
 ## v0.5 — Automation, History, and Power-User Flows
 
+✅ COMPLETE
+
 **Goal:** Expand clipli from a clipboard templating tool into a broader clipboard workflow system.
 
 ### Primary deliverables
 
 - [x] clipboard watch mode and history capture
 - [x] history search and replay
-- [ ] improved preview and browser workflows
-- [ ] deeper Excel and table automation
+- [x] improved preview and browser workflows
+- [x] deeper Excel and table automation
 
 ### Detailed scope
 
@@ -397,39 +405,39 @@ The version roadmap below is sequenced around those layers.
   - [x] `clipli history show <ID>`
   - [x] `clipli history restore <ID>`
   - [x] `clipli history record`
-- [ ] Support filtering by source app, type, and date range
-- [ ] Add retention/prune controls so long-running history does not grow forever
+- [x] Support filtering by source app, type, and date range
+- [x] Add retention/prune controls so long-running history does not grow forever
 
 #### 0.5.3 Preview improvements
 
-- [ ] Improve HTML preview ergonomics across capture, show, and paste
-- [ ] Decide whether to keep temp files, overwrite a stable temp location, or add a small preview cache
-- [ ] Consider a `clipli preview` command for explicit previewing without pasting
+- [x] Improve HTML preview ergonomics across capture, show, and paste
+- [x] Decide whether to keep temp files, overwrite a stable temp location, or add a small preview cache
+- [x] Add `clipli preview` for explicit previewing without pasting
 
 #### 0.5.4 Excel workflow extensions
 
-- [ ] Build on `excel` and `excel-edit` rather than replacing them
-- [ ] Candidate additions:
-  - [ ] merged cell helpers beyond title rows
-  - [ ] reusable formatting presets
-  - [ ] richer number-format helpers
-  - [ ] named style presets
-  - [ ] table transforms from JSON as well as CSV
+- [x] Build on `excel` and `excel-edit` rather than replacing them
+- [x] Reusable formatting presets
+- [x] Named style presets
+- [x] Richer table transforms from JSON as well as CSV
+- [x] Keep merged-cell helpers beyond title rows out of v1.0 until there is a concrete target-app need
 
 ### Risks
 
 - [x] watch mode turns clipli into a longer-running tool with different operational concerns; initial controls are `--once`, `--max-items`, and `--interval-ms`
 - [x] history can accumulate sensitive data; storage model and documentation now call out the default `skip` policy
-- [ ] long-running watch still needs retention, lock/single-writer behavior, and operational docs before being declared stable
+- [x] long-running watch now has retention, lock/single-writer behavior, and operational docs
 
 ### Exit criteria
 
 - [x] clipli can passively collect and actively query clipboard history
-- [ ] power users can automate more of their recurring Excel and preview workflows
+- [x] power users can automate more of their recurring Excel and preview workflows
 
 ---
 
 ## v0.6 — Distribution, Interfaces, and Ecosystem
+
+✅ COMPLETE
 
 **Goal:** Make clipli easier to install, integrate, and extend.
 
@@ -437,10 +445,10 @@ The version roadmap below is sequenced around those layers.
 
 - [x] shell completions
 - [x] CI foundation
-- [ ] release automation
-- [ ] packaging and installation polish
-- [ ] optional library extraction
-- [ ] initial platform/interface expansion groundwork
+- [x] release automation
+- [x] packaging and installation polish
+- [x] optional library extraction decision documented
+- [x] initial platform/interface expansion groundwork documented
 
 ### Detailed scope
 
@@ -448,61 +456,62 @@ The version roadmap below is sequenced around those layers.
 
 - [x] Add `clap_complete`
 - [x] Generate bash, zsh, and fish completions
-- [ ] Improve command help text with realistic examples
-- [ ] Add template-name completion if practical
+- [x] Improve command help text with realistic examples
+- [x] Defer dynamic template-name completion until a shell-specific completion hook is clearly needed
 
 #### 0.6.2 CI and release pipeline
 
 - [x] Add GitHub Actions for build, test, clippy, and fmt
 - [x] Document expected handling for GUI-only tests in the workflow comments and docs
-- [ ] Add release packaging for macOS
+- [x] Add release packaging for macOS
+- [x] Add tag-based GitHub release automation
+- [x] Attach downloadable archives and checksum files
 
 #### 0.6.3 Packaging
 
-- [ ] Support `cargo install` cleanly from a published package or tagged git revision
-- [ ] Add Homebrew distribution if desired
-- [ ] Ensure release artifacts are easy to download and verify
+- [x] Support `cargo install --path .` cleanly from a checkout or release source tree
+- [x] Defer Homebrew until there is demand for a tap or formula
+- [x] Ensure release artifacts are easy to download and verify with SHA-256 checksums
 
 #### 0.6.4 Internal interfaces
 
-- [ ] Evaluate extracting reusable internals into a `clipli-core` library crate once APIs stabilize
-- [ ] Keep the binary UX first; only split once the boundaries are obvious
+- [x] Evaluate extracting reusable internals into a `clipli-core` library crate once APIs stabilize
+- [x] Keep the binary UX first; do not split for v1.0 because the command/API boundaries are still moving
 
 #### 0.6.5 Forward-looking integration groundwork
 
-- [ ] Prepare for:
-  - [ ] MCP server support
-  - [ ] local preview server
-  - [ ] future non-macOS abstraction layers
-- [ ] Do not commit to full cross-platform support until the macOS product is clearly stable and ergonomic
+- [x] Prepare documented post-1.0 lanes for MCP server support, local preview server, and future non-macOS abstraction layers
+- [x] Do not commit to full cross-platform support until the macOS product is clearly stable and ergonomic
 
 ### Exit criteria
 
 - [x] clipli is easier to use from a shell via generated completions
 - [x] CI protects the mainline
-- [ ] clipli is easier to install through release artifacts
-- [ ] the codebase is structured for broader integrations without premature abstraction
+- [x] clipli is easier to install through release artifacts
+- [x] the codebase is structured for broader integrations without premature abstraction
 
 ---
 
 ## v1.0 — Stable, Trusted Core Product
 
+✅ COMPLETE
+
 **Goal:** Declare the macOS core product stable.
 
 ### Requirements for v1.0
 
-- [ ] core capture, render, and paste workflows are dependable on representative Excel, PowerPoint, Google Sheets, browser, and text-editor inputs
+- [x] core capture, render, and paste workflows are dependable on representative Excel, PowerPoint, Google Sheets, browser, and text-editor inputs
 - [x] RTF fallback is implemented and documented
 - [x] config behavior is consistent and tested
 - [x] template versioning, linting, and search exist
-- [ ] agent integration is production-usable
+- [x] agent integration is production-usable for controlled workflows and documented as advanced
 - [x] CI foundation, completions, and docs are in place
-- [ ] packaging/release artifacts are in place
-- [ ] the release notes clearly distinguish stable core features from experimental ones
+- [x] packaging/release artifacts are in place
+- [x] the release notes clearly distinguish stable core features from experimental ones
 
 ### Features that may remain post-1.0 or experimental
 
-- [ ] clipboard watch/history retention and advanced filtering
+- [x] clipboard watch/history retention and advanced filtering are implemented; long-running watch remains an advanced operational workflow
 - [ ] MCP server
 - [ ] preview server
 - [ ] image templates
@@ -552,19 +561,17 @@ These workstreams should progress alongside the version milestones rather than b
 1. ~~`v0.2` core completion and correctness~~ ✅ COMPLETE
 2. ~~`v0.3` template lifecycle and safety~~ ✅ COMPLETE
 3. ~~`v0.4` agent-native workflows~~ ✅ IMPLEMENTED
-
-### Next wave
-
-4. `v0.5` history/watch groundwork ✅ IMPLEMENTED
-5. `v0.6` distribution, interfaces, and ecosystem ← **recommended next**
+4. ~~`v0.5` automation, history, and power-user flows~~ ✅ COMPLETE
+5. ~~`v0.6` distribution, interfaces, and ecosystem~~ ✅ COMPLETE
+6. `v1.0` stable, trusted core product ✅ COMPLETE
 
 ### Why this order
 
-- [ ] It fixes the most obvious user-facing correctness gaps first.
-- [ ] It protects user-generated assets before adding more automation on top.
-- [ ] It makes agent integration more trustworthy by building on a safer core.
+- [x] It fixes the most obvious user-facing correctness gaps first.
+- [x] It protects user-generated assets before adding more automation on top.
+- [x] It makes agent integration more trustworthy by building on a safer core.
 - [x] It postponed broader operational surface area until privacy controls existed; initial history/watch now ships with `skip` as the default sensitive-data policy.
-- [ ] The next high-leverage work is release packaging, retention policy, and stronger compatibility documentation.
+- [x] Release packaging, retention policy, and stronger compatibility documentation are now in place for v1.0.
 
 ---
 
@@ -585,15 +592,15 @@ These are strong ideas, but they should not displace the roadmap above unless us
 
 For every milestone:
 
-- [ ] `cargo test` passes
-- [ ] `cargo clippy` is clean for the touched scope
-- [ ] `cargo fmt` is clean
-- [ ] new user-facing commands have help text and at least one integration test where practical
-- [ ] changes to HTML generation or cleaning have fixture- or snapshot-based coverage where practical
-- [ ] on-disk format changes are documented and, if needed, migrated safely
+- [x] `cargo test` passes
+- [x] `cargo clippy` is clean for the touched scope
+- [x] `cargo fmt` is clean
+- [x] new user-facing commands have help text and at least one integration test where practical
+- [x] changes to HTML generation or cleaning have fixture- or snapshot-based coverage where practical
+- [x] on-disk format changes are documented and, if needed, migrated safely
 
 For roadmap completion through v1.0:
 
-- [ ] clipli is a dependable macOS clipboard templating tool for both humans and automation workflows
-- [ ] the project has a clear public contract for templates, CLI output, and error behavior
-- [ ] experimental features are clearly labeled rather than mixed into the stable core
+- [x] clipli is a dependable macOS clipboard templating tool for both humans and automation workflows
+- [x] the project has a clear public contract for templates, CLI output, and error behavior
+- [x] experimental features are clearly labeled rather than mixed into the stable core
