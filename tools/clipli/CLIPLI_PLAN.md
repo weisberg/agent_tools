@@ -28,7 +28,7 @@ The current stage is the v1.0 ship line: the stable macOS core is implemented, r
 
 ### What is already implemented
 
-- [x] `inspect`, `read`, `write`, `capture`, `paste`, `preview`, `list`, `show`, `edit`, `delete`, `versions`, `restore`, `lint`, `search`, `export`, `import`, `excel`, `excel-edit`, `render`, `convert`, `doctor`, `completions`, `watch`, and `history` commands
+- [x] `inspect`, `read`, `write`, `capture`, `paste`, `preview`, `list`, `show`, `edit`, `delete`, `versions`, `restore`, `lint`, `search`, `export`, `import`, `excel`, `excel-edit`, `list-build`, `list-edit`, `render`, `convert`, `doctor`, `completions`, `watch`, and `history` commands
 - [x] pasteboard support for HTML, RTF, plain text, SVG, PNG, TIFF, and PDF payloads
 - [x] HTML cleaning with target-aware CSS filtering for Excel, PowerPoint, Google Sheets, and generic HTML
 - [x] Jinja2-compatible rendering with custom filters and HTML-to-plain-text conversion
@@ -56,13 +56,15 @@ The current stage is the v1.0 ship line: the stable macOS core is implemented, r
 - [x] single-writer locking for history index updates
 - [x] `clipli preview` and cached preview files under the config directory
 - [x] Excel JSON input and reusable formatting presets
+- [x] one-shot `clipli excel` stdin workflow so generated CSV/JSON can be piped or heredoc'd without temporary files
+- [x] nested list generation and path-based list editing as HTML or Markdown clipboard artifacts
 - [x] shell completion generation via `clap_complete`
 - [x] macOS GitHub Actions workflow for fmt, tests, clippy, and package checks
 - [x] tag-based release workflow and local release archive script
 
 ### Verified baseline
 
-`cargo test --manifest-path tools/clipli/Cargo.toml` passes 217 non-GUI tests with 7 GUI-dependent pasteboard tests intentionally ignored for CI. `cargo test --manifest-path tools/clipli/Cargo.toml -- --ignored` passes all 7 GUI tests in a logged-in macOS session.
+`cargo test --manifest-path tools/clipli/Cargo.toml` passes 228 non-GUI tests with 7 GUI-dependent pasteboard tests intentionally ignored for CI. `cargo test --manifest-path tools/clipli/Cargo.toml -- --ignored` passes all 7 GUI tests in a logged-in macOS session.
 
 ### Completed so far
 

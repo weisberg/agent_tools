@@ -31,7 +31,7 @@ Copy from App → clipli capture → templatize → agent fills data → clipli 
 
 ### 2.1 Crate Layout
 
-Single crate, binary target, eleven modules:
+Single crate, binary target, twelve modules:
 
 ```
 clipli/
@@ -46,8 +46,9 @@ clipli/
 │   ├── model.rs             # Shared data types
 │   ├── rtf.rs               # RTF → HTML conversion via macOS textutil
 │   ├── lint.rs              # Template linter (variable/schema consistency)
-│   ├── excel.rs             # CSV → Excel-style HTML/SVG/PNG pipeline
+│   ├── excel.rs             # CSV/JSON → Excel-style HTML/SVG/PNG pipeline
 │   ├── excel_edit.rs        # In-place cell editing of clipboard Excel HTML
+│   ├── lists.rs             # Nested list build/edit/render pipeline
 │   └── history.rs           # Privacy-aware clipboard history store
 ├── templates/
 │   ├── _base.html.j2        # Base template with common boilerplate
@@ -74,8 +75,9 @@ main.rs
   ├── model      (shared types, used by all)
   ├── rtf        (RTF → HTML via textutil)
   ├── lint       (template variable/schema validation)
-  ├── excel      (CSV → Excel-style HTML/SVG/PNG)
+  ├── excel      (CSV/JSON → Excel-style HTML/SVG/PNG)
   ├── excel_edit (cell-level editing of clipboard HTML)
+  ├── lists      (nested list HTML/Markdown build/edit/render)
   └── history    (JSONL history index + payload storage)
 ```
 
@@ -684,15 +686,17 @@ clipli import <FILE> [--force] [--name NAME]
 
 Generate an Excel-style table from CSV or JSON and write it to the clipboard as editable HTML, SVG, or PNG. The default `html` mode produces Office-native HTML with `mso-*` properties that Excel recognizes on paste. The `svg` and `png` modes copy image artifacts instead of editable HTML.
 
+For agent-generated data, stdin is the default workflow: pipe or heredoc CSV/JSON directly into `clipli excel` instead of creating a temporary file first. File input remains available when the data already exists on disk.
+
 ```
-clipli excel <FILE> [OPTIONS]
+clipli excel [FILE] [OPTIONS]
 ```
 
 **Flags:**
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `<FILE>` | positional | **required** | CSV/JSON file path (or `-` for stdin) |
-| `--input-format` | enum | `csv` | Input format: `csv`, `json`, or `auto` |
+| `[FILE]` | positional | stdin | Optional CSV/JSON file path. Omit for one-shot piped/heredoc stdin, or pass `-` explicitly for stdin. |
+| `--input-format` | enum | `auto` | Input format: `csv`, `json`, or `auto` |
 | `--preset` | enum | none | Named preset: `default`, `finance`, `executive`, `minimal`, or `status` |
 | `--style` | enum | preset/default | Table style: `table` (banded rows) or `plain` (thick borders) |
 | `--header-bg` | string | preset/default | Header background color |
@@ -723,7 +727,20 @@ clipli excel <FILE> [OPTIONS]
 | `--col-font-size NAME:SIZE` | repeatable | none | Column font size override |
 | `--dry-run` | bool | false | Print or write the generated artifact instead of writing to clipboard |
 
-JSON input supports a `TableInput` object, a simplified `{ "headers": [...], "rows": [[...]] }` object, or an array of objects. Explicit CLI style and column flags are applied after the selected preset, so they override preset defaults.
+CSV and JSON are auto-detected from stdin and file contents when `--input-format auto` is used. JSON input supports a `TableInput` object, a simplified `{ "headers": [...], "rows": [[...]] }` object, or an array of objects. Explicit CLI style and column flags are applied after the selected preset, so they override preset defaults.
+
+**One-shot examples:**
+
+```bash
+clipli excel --title "Q1 Report" --col "Revenue:currency:right" <<'CSV'
+Name,Revenue
+Alice,1200
+CSV
+
+clipli excel --preset finance --copy-as svg <<'JSON'
+[{"Name":"Alice","Revenue":1200,"Margin":0.42}]
+JSON
+```
 
 ---
 
@@ -748,6 +765,99 @@ clipli excel-edit [OPTIONS]
 | `--set-italic CELL` | repeatable | none | Make cell italic |
 | `--set-wrap CELL` | repeatable | none | Enable word wrap on cell |
 | `--dry-run` | bool | false | Print modified HTML to stdout instead of writing to clipboard |
+
+---
+
+#### `clipli list-build`
+
+Build a nested list from JSON, Markdown, indented lines, or repeatable item paths, then write it to the clipboard as HTML by default or Markdown when requested.
+
+```
+clipli list-build [FILE] [OPTIONS]
+```
+
+**Flags:**
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `[FILE]` | positional | stdin/none | Optional JSON, Markdown, HTML, or indented-lines input. Pass `-` for stdin. |
+| `--input-format` | enum | `auto` | Input format: `auto`, `json`, `markdown`, `lines`, or `html` |
+| `--item PATH` | repeatable | none | Add an item path such as `Launch > [x] QA`; missing parent items are created |
+| `--kind` | enum | parsed/`unordered` | List kind: `unordered` or `ordered` |
+| `--ordered` | bool | false | Shortcut for `--kind ordered` |
+| `--title TEXT` | string | none | Heading rendered above the list |
+| `--copy-as` | enum | `html` | Clipboard artifact: `html` or `markdown` |
+| `--font` | string | config default | Font family for HTML output |
+| `--font-size` | string | config default | Font size in pt for HTML output |
+| `--class` | string | none | CSS class on the HTML wrapper |
+| `--tight` | bool | false | Compact HTML spacing |
+| `--sort` | bool | false | Sort items alphabetically at every level |
+| `--dedupe` | bool | false | Remove duplicate sibling items |
+| `--dry-run` | bool | false | Print or write the generated artifact instead of touching the clipboard |
+| `--out-file` / `-o` | path | none | Write dry-run output to a file |
+| `--json` | bool | false | JSON summary after clipboard writes |
+
+**Input forms:**
+
+- JSON document: `{ "title": "...", "kind": "ordered", "items": [{ "text": "A", "items": ["B"], "checked": true }] }`
+- Markdown/task list: `- [x] Parent` with indented sub-items
+- Indented lines: `Parent\n  Child`
+- Item flags: `--item "Parent > Child > [ ] Task"`
+
+**Examples:**
+
+```bash
+clipli list-build --title "Launch Plan" \
+  --item "Prep > [x] QA pass" \
+  --item "Prep > Docs" \
+  --item "Ship > Announce"
+
+clipli list-build --copy-as markdown --ordered <<'LIST'
+Phase 1
+  QA
+  Docs
+Phase 2
+LIST
+```
+
+---
+
+#### `clipli list-edit`
+
+Edit a nested list from stdin, file, or the clipboard using 1-based paths such as `1`, `1.2`, and `2.1.3`, then copy the result as HTML or Markdown. Generated HTML carries hidden `clipli` metadata so `list-edit --input-format html` can round-trip the structured list.
+
+```
+clipli list-edit [FILE] [OPTIONS]
+```
+
+**Flags:**
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `[FILE]` | positional | stdin/clipboard | Optional existing list input. If omitted, reads stdin first and then the clipboard. |
+| `--input-format` | enum | `auto` | Input format: `auto`, `json`, `markdown`, `lines`, or `html` |
+| `--set PATH:TEXT` | repeatable | none | Replace item text; `[x]` or `[ ]` prefixes also set task state |
+| `--append [PATH:]TEXT` | repeatable | none | Append to root or to parent `PATH` |
+| `--insert-before PATH:TEXT` | repeatable | none | Insert a sibling before `PATH` |
+| `--insert-after PATH:TEXT` | repeatable | none | Insert a sibling after `PATH` |
+| `--remove PATH` | repeatable | none | Remove an item |
+| `--check PATH` / `--uncheck PATH` / `--toggle PATH` | repeatable | none | Edit task-list state |
+| `--indent PATH` / `--outdent PATH` | repeatable | none | Move an item one level deeper or shallower |
+| `--sort PATH` | repeatable | none | Sort children at `PATH`; use `root` for top-level items |
+| `--dedupe` | bool | false | Remove duplicate sibling items at every level |
+| `--kind` / `--ordered` | enum/bool | parsed | Change list kind |
+| `--title TEXT` | string | existing | Replace or set the heading |
+| `--copy-as` | enum | `html` | Clipboard artifact: `html` or `markdown` |
+| `--dry-run` | bool | false | Print or write the modified artifact instead of touching the clipboard |
+| `--out-file` / `-o` | path | none | Write dry-run output to a file |
+| `--json` | bool | false | JSON summary after clipboard writes |
+
+**Example:**
+
+```bash
+clipli list-edit --set "1.1:Regression QA" --append "1:[ ] Docs" --dry-run <<'LIST'
+- Prep
+  - QA
+LIST
+```
 
 ---
 
@@ -1474,12 +1584,14 @@ Each module has co-located tests using captured HTML fixtures from real applicat
 - **`templatize_tests.rs`** — Verify heuristic extraction on sample HTML. Assert correct variable names, types, and that re-rendering with default values produces original content.
 - **`store_tests.rs`** — CRUD operations on a tempdir store.
 - **`history.rs` co-located tests** — Sensitive text detection and privacy policy behavior.
+- **`lists.rs` co-located tests** — Nested Markdown parsing, HTML metadata round-tripping, and path-based list edits.
 
 ### 10.2 Integration Tests
 
 - **Full round-trip:** Capture fixture HTML → clean → templatize → save → load → render with new data → verify HTML is valid and formatted.
 - **CLI smoke tests:** `assert_cmd` tests for each subcommand with expected exit codes and output patterns.
 - **History workflow tests:** file-backed `history record/search/show/restore` flows under an isolated temp home.
+- **List workflow tests:** one-shot list build/edit commands for HTML, Markdown, JSON input, task-list state, and generated-HTML metadata round-trips.
 - **Pasteboard tests:** Marked `#[ignore]` by default (require macOS GUI session). Run manually with `cargo test -- --ignored`.
 
 ### 10.3 Fixtures
@@ -1540,7 +1652,7 @@ pb::write(&[(PbType::Html, rendered.html.as_bytes()), (PbType::PlainText, render
 
 ## 12. Release And Stability Contract
 
-`clipli` 1.0 declares the macOS clipboard/template core stable: inspect/read/write, capture/paste/render/preview, conversion, lint/search/versioned templates, Excel HTML/SVG/PNG generation from CSV or JSON, history record/list/search/show/restore/prune, completions, doctor, and top-level JSON error envelopes.
+`clipli` 1.0 declares the macOS clipboard/template core stable: inspect/read/write, capture/paste/render/preview, conversion, lint/search/versioned templates, Excel HTML/SVG/PNG generation from CSV or JSON, nested list HTML/Markdown generation and editing, history record/list/search/show/restore/prune, completions, doctor, and top-level JSON error envelopes.
 
 Release artifacts are created by `tools/clipli/scripts/package_release.sh` and by the tag-based GitHub Actions release workflow for tags matching `clipli-v*`. Archives include the binary, bash/zsh/fish completions, release docs, and SHA-256 checksum files.
 

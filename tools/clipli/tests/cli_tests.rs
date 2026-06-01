@@ -255,6 +255,56 @@ fn test_excel_svg_dry_run() {
 }
 
 #[test]
+fn test_excel_stdin_is_default_when_file_omitted() {
+    clipli()
+        .args([
+            "excel",
+            "--dry-run",
+            "--col",
+            "Revenue:currency:right",
+            "--bold",
+            "Name",
+        ])
+        .write_stdin("Name,Revenue\nAlice,1200\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Alice"))
+        .stdout(predicate::str::contains("Revenue"))
+        .stdout(predicate::str::contains("mso-number-format"));
+}
+
+#[test]
+fn test_excel_auto_detects_json_from_stdin_without_file() {
+    clipli()
+        .args([
+            "excel",
+            "--preset",
+            "finance",
+            "--copy-as",
+            "svg",
+            "--dry-run",
+        ])
+        .write_stdin(r#"[{"Name":"Alice","Revenue":1200,"Margin":0.42}]"#)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("<svg"))
+        .stdout(predicate::str::contains("Alice"))
+        .stdout(predicate::str::contains("Revenue"));
+}
+
+#[test]
+fn test_excel_without_file_or_stdin_reports_actionable_error() {
+    clipli()
+        .args(["excel", "--dry-run"])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("pipe CSV/JSON")
+                .or(predicate::str::contains("received empty stdin")),
+        );
+}
+
+#[test]
 fn test_excel_png_dry_run_requires_output_file() {
     clipli()
         .args(["excel", "-", "--copy-as", "png", "--dry-run"])
@@ -307,6 +357,114 @@ fn test_excel_json_input_with_preset_dry_run() {
         .stdout(predicate::str::contains("<svg"))
         .stdout(predicate::str::contains("Alice"))
         .stdout(predicate::str::contains("Revenue"));
+}
+
+#[test]
+fn test_list_build_items_default_html_dry_run() {
+    clipli()
+        .args([
+            "list-build",
+            "--title",
+            "Launch Plan",
+            "--item",
+            "Launch > [x] QA",
+            "--item",
+            "Launch > Docs",
+            "--dry-run",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Launch Plan"))
+        .stdout(predicate::str::contains("<ul"))
+        .stdout(predicate::str::contains("Launch"))
+        .stdout(predicate::str::contains("QA"))
+        .stdout(predicate::str::contains("checkbox"))
+        .stdout(predicate::str::contains("clipli-list-json-hex"));
+}
+
+#[test]
+fn test_list_build_json_to_markdown_dry_run() {
+    clipli()
+        .args(["list-build", "--copy-as", "markdown", "--dry-run"])
+        .write_stdin(
+            r#"{"title":"Plan","items":[{"text":"Launch","items":[{"text":"QA","checked":true}]}]}"#,
+        )
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("# Plan"))
+        .stdout(predicate::str::contains("- Launch"))
+        .stdout(predicate::str::contains("  - [x] QA"));
+}
+
+#[test]
+fn test_list_build_ordered_markdown_from_lines() {
+    clipli()
+        .args([
+            "list-build",
+            "--ordered",
+            "--copy-as",
+            "markdown",
+            "--dry-run",
+        ])
+        .write_stdin("Phase 1\n  Milestone A\nPhase 2\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1. Phase 1"))
+        .stdout(predicate::str::contains("  1. Milestone A"))
+        .stdout(predicate::str::contains("2. Phase 2"));
+}
+
+#[test]
+fn test_list_edit_path_operations_to_markdown() {
+    clipli()
+        .args([
+            "list-edit",
+            "--copy-as",
+            "markdown",
+            "--set",
+            "1.1:Regression",
+            "--check",
+            "1.1",
+            "--append",
+            "1:[ ] Docs",
+            "--insert-after",
+            "1:Measure",
+            "--dry-run",
+        ])
+        .write_stdin("- Launch\n  - QA\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("- Launch"))
+        .stdout(predicate::str::contains("  - [x] Regression"))
+        .stdout(predicate::str::contains("  - [ ] Docs"))
+        .stdout(predicate::str::contains("- Measure"));
+}
+
+#[test]
+fn test_list_edit_round_trips_generated_html_metadata() {
+    let build = clipli()
+        .args(["list-build", "--item", "Launch > QA", "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(build.status.success());
+
+    clipli()
+        .args([
+            "list-edit",
+            "--input-format",
+            "html",
+            "--copy-as",
+            "markdown",
+            "--append",
+            "1:Docs",
+            "--dry-run",
+        ])
+        .write_stdin(String::from_utf8(build.stdout).unwrap())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("- Launch"))
+        .stdout(predicate::str::contains("  - QA"))
+        .stdout(predicate::str::contains("  - Docs"));
 }
 
 #[test]

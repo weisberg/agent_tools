@@ -3,6 +3,7 @@ mod excel;
 mod excel_edit;
 mod history;
 mod lint;
+mod lists;
 mod model;
 mod pb;
 mod render;
@@ -151,7 +152,7 @@ fn load_config() -> Config {
     name = "clipli",
     version,
     about = "Clipboard intelligence CLI — template-driven pasteboard for agents and power users",
-    after_help = "Examples:\n  clipli inspect --json\n  clipli capture --name quarterly_report --templatize\n  clipli paste quarterly_report -D '{\"quarter\":\"Q2\"}'\n  clipli preview quarterly_report -D '{\"quarter\":\"Q2\"}' --open\n  clipli excel rows.json --input-format json --preset finance --copy-as svg\n  clipli history prune --keep-latest 200 --dry-run --json"
+    after_help = "Examples:\n  clipli inspect --json\n  clipli capture --name quarterly_report --templatize\n  clipli paste quarterly_report -D '{\"quarter\":\"Q2\"}'\n  clipli preview quarterly_report -D '{\"quarter\":\"Q2\"}' --open\n  printf 'Name,Revenue\\nAlice,1200\\n' | clipli excel --preset finance --copy-as svg\n  clipli list-build --item 'Launch > QA' --item 'Launch > Docs'\n  clipli history prune --keep-latest 200 --dry-run --json"
 )]
 struct Cli {
     /// Increase verbosity (-v info, -vv debug, -vvv trace)
@@ -353,12 +354,12 @@ enum Commands {
         #[arg(long)]
         name: Option<String>,
     },
-    /// Generate an Excel-style table from CSV as HTML, SVG, or PNG
+    /// Generate an Excel-style table from CSV/JSON stdin or a file as HTML, SVG, or PNG
     Excel {
-        /// CSV file path (or - for stdin)
-        file: PathBuf,
+        /// CSV/JSON file path. Omit to read one-shot input from stdin.
+        file: Option<PathBuf>,
         /// Input format: csv, json, or auto
-        #[arg(long = "input-format", default_value = "csv", value_parser = ["csv", "json", "auto"])]
+        #[arg(long = "input-format", default_value = "auto", value_parser = ["csv", "json", "auto"])]
         input_format: String,
         /// Named formatting preset: default, finance, executive, minimal, or status
         #[arg(long, value_parser = ["default", "finance", "executive", "minimal", "status"])]
@@ -485,6 +486,133 @@ enum Commands {
         #[arg(long = "set-wrap", value_name = "CELL")]
         set_wraps: Vec<String>,
         /// Print modified HTML to stdout instead of writing to clipboard
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Build a nested list and copy it as HTML or Markdown
+    #[command(name = "list-build")]
+    ListBuild {
+        /// JSON, Markdown, HTML, or indented-lines input. Omit to use --item flags or stdin.
+        file: Option<PathBuf>,
+        /// Input format: auto, json, markdown, lines, or html
+        #[arg(long = "input-format", default_value = "auto", value_parser = ["auto", "json", "markdown", "lines", "html"])]
+        input_format: String,
+        /// Add an item path, e.g. "Launch > [x] QA" (repeatable)
+        #[arg(long = "item", value_name = "PATH")]
+        item_specs: Vec<String>,
+        /// List kind: unordered or ordered
+        #[arg(long, value_parser = ["unordered", "ordered"])]
+        kind: Option<String>,
+        /// Shortcut for --kind ordered
+        #[arg(long)]
+        ordered: bool,
+        /// Optional heading rendered above the list
+        #[arg(long)]
+        title: Option<String>,
+        /// Clipboard artifact to generate: html or markdown
+        #[arg(long, default_value = "html", value_parser = ["html", "markdown"])]
+        copy_as: String,
+        /// Write dry-run output to a file
+        #[arg(long, short = 'o')]
+        out_file: Option<PathBuf>,
+        /// Font family for HTML output
+        #[arg(long)]
+        font: Option<String>,
+        /// Font size in pt for HTML output
+        #[arg(long)]
+        font_size: Option<String>,
+        /// CSS class for the HTML wrapper
+        #[arg(long = "class")]
+        class_name: Option<String>,
+        /// Render compact list spacing in HTML
+        #[arg(long)]
+        tight: bool,
+        /// Sort items alphabetically at every level before rendering
+        #[arg(long)]
+        sort: bool,
+        /// Remove duplicate sibling items before rendering
+        #[arg(long)]
+        dedupe: bool,
+        /// Print or write the generated list instead of writing to clipboard
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Edit a nested list from clipboard, stdin, or file, then copy it as HTML or Markdown
+    #[command(name = "list-edit")]
+    ListEdit {
+        /// Existing list input. Omit to read stdin, then fall back to clipboard.
+        file: Option<PathBuf>,
+        /// Input format: auto, json, markdown, lines, or html
+        #[arg(long = "input-format", default_value = "auto", value_parser = ["auto", "json", "markdown", "lines", "html"])]
+        input_format: String,
+        /// List kind: unordered or ordered
+        #[arg(long, value_parser = ["unordered", "ordered"])]
+        kind: Option<String>,
+        /// Shortcut for --kind ordered
+        #[arg(long)]
+        ordered: bool,
+        /// Replace or set the heading rendered above the list
+        #[arg(long)]
+        title: Option<String>,
+        /// Set item text: PATH:TEXT (e.g. 1.2:Updated)
+        #[arg(long = "set", value_name = "PATH:TEXT")]
+        set_values: Vec<String>,
+        /// Append item to root or parent path: [PATH:]TEXT
+        #[arg(long = "append", value_name = "[PATH:]TEXT")]
+        append_items: Vec<String>,
+        /// Insert item before path: PATH:TEXT
+        #[arg(long = "insert-before", value_name = "PATH:TEXT")]
+        insert_before: Vec<String>,
+        /// Insert item after path: PATH:TEXT
+        #[arg(long = "insert-after", value_name = "PATH:TEXT")]
+        insert_after: Vec<String>,
+        /// Remove item by path (repeatable)
+        #[arg(long = "remove", value_name = "PATH")]
+        remove_paths: Vec<String>,
+        /// Mark item checked by path (repeatable)
+        #[arg(long = "check", value_name = "PATH")]
+        check_paths: Vec<String>,
+        /// Mark item unchecked by path (repeatable)
+        #[arg(long = "uncheck", value_name = "PATH")]
+        uncheck_paths: Vec<String>,
+        /// Toggle item checked state by path (repeatable)
+        #[arg(long = "toggle", value_name = "PATH")]
+        toggle_paths: Vec<String>,
+        /// Move item under its previous sibling (repeatable)
+        #[arg(long = "indent", value_name = "PATH")]
+        indent_paths: Vec<String>,
+        /// Move item one level up after its parent (repeatable)
+        #[arg(long = "outdent", value_name = "PATH")]
+        outdent_paths: Vec<String>,
+        /// Sort children at PATH; use root for the top level (repeatable)
+        #[arg(long = "sort", value_name = "PATH")]
+        sort_paths: Vec<String>,
+        /// Remove duplicate sibling items at every level
+        #[arg(long)]
+        dedupe: bool,
+        /// Clipboard artifact to generate: html or markdown
+        #[arg(long, default_value = "html", value_parser = ["html", "markdown"])]
+        copy_as: String,
+        /// Write dry-run output to a file
+        #[arg(long, short = 'o')]
+        out_file: Option<PathBuf>,
+        /// Font family for HTML output
+        #[arg(long)]
+        font: Option<String>,
+        /// Font size in pt for HTML output
+        #[arg(long)]
+        font_size: Option<String>,
+        /// CSS class for the HTML wrapper
+        #[arg(long = "class")]
+        class_name: Option<String>,
+        /// Render compact list spacing in HTML
+        #[arg(long)]
+        tight: bool,
+        /// Print or write the modified list instead of writing to clipboard
         #[arg(long)]
         dry_run: bool,
         #[arg(long)]
@@ -714,6 +842,8 @@ fn main() {
             | Commands::Search { json: true, .. }
             | Commands::Excel { json: true, .. }
             | Commands::ExcelEdit { json: true, .. }
+            | Commands::ListBuild { json: true, .. }
+            | Commands::ListEdit { json: true, .. }
             | Commands::Render { json: true, .. }
             | Commands::Convert { json: true, .. }
             | Commands::Doctor { json: true, .. }
@@ -921,6 +1051,96 @@ fn run(cmd: Commands, config: &Config) -> Result<(), Box<dyn std::error::Error>>
             set_wraps,
             dry_run,
             json,
+        ),
+        Commands::ListBuild {
+            file,
+            input_format,
+            item_specs,
+            kind,
+            ordered,
+            title,
+            copy_as,
+            out_file,
+            font,
+            font_size,
+            class_name,
+            tight,
+            sort,
+            dedupe,
+            dry_run,
+            json,
+        } => cmd_list_build(
+            file,
+            input_format,
+            item_specs,
+            kind,
+            ordered,
+            title,
+            copy_as,
+            out_file,
+            font,
+            font_size,
+            class_name,
+            tight,
+            sort,
+            dedupe,
+            dry_run,
+            json,
+            config,
+        ),
+        Commands::ListEdit {
+            file,
+            input_format,
+            kind,
+            ordered,
+            title,
+            set_values,
+            append_items,
+            insert_before,
+            insert_after,
+            remove_paths,
+            check_paths,
+            uncheck_paths,
+            toggle_paths,
+            indent_paths,
+            outdent_paths,
+            sort_paths,
+            dedupe,
+            copy_as,
+            out_file,
+            font,
+            font_size,
+            class_name,
+            tight,
+            dry_run,
+            json,
+        } => cmd_list_edit(
+            file,
+            input_format,
+            kind,
+            ordered,
+            title,
+            set_values,
+            append_items,
+            insert_before,
+            insert_after,
+            remove_paths,
+            check_paths,
+            uncheck_paths,
+            toggle_paths,
+            indent_paths,
+            outdent_paths,
+            sort_paths,
+            dedupe,
+            copy_as,
+            out_file,
+            font,
+            font_size,
+            class_name,
+            tight,
+            dry_run,
+            json,
+            config,
         ),
         Commands::Render {
             name,
@@ -1912,6 +2132,298 @@ fn cmd_excel_edit(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn cmd_list_build(
+    file: Option<PathBuf>,
+    input_format: String,
+    item_specs: Vec<String>,
+    kind: Option<String>,
+    ordered: bool,
+    title: Option<String>,
+    copy_as: String,
+    out_file: Option<PathBuf>,
+    font: Option<String>,
+    font_size: Option<String>,
+    class_name: Option<String>,
+    tight: bool,
+    sort: bool,
+    dedupe: bool,
+    dry_run: bool,
+    json: bool,
+    config: &Config,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let input_format = lists::InputFormat::parse(&input_format)?;
+    let input = read_optional_text_input(file.as_ref())?;
+    let fallback_kind = parse_list_kind(kind.as_deref(), ordered, lists::ListKind::Unordered)?;
+
+    let mut doc = if let Some(input) = input {
+        let mut parsed = lists::parse_document(&input, input_format)?;
+        parsed.kind = parse_list_kind(kind.as_deref(), ordered, parsed.kind)?;
+        parsed
+    } else if !item_specs.is_empty() {
+        lists::ListDocument::new(fallback_kind)
+    } else {
+        return Err(
+            "list-build needs input: pipe Markdown/JSON/lines, pass a file, or use --item".into(),
+        );
+    };
+
+    for spec in &item_specs {
+        doc.add_path_item(spec)?;
+    }
+    if let Some(title) = title {
+        doc.title = Some(title);
+    }
+    if sort {
+        doc.sort_recursive();
+    }
+    if dedupe {
+        doc.dedupe_recursive();
+    }
+
+    finish_list_output(
+        &doc,
+        ListOutputOptions {
+            copy_as,
+            out_file,
+            font,
+            font_size,
+            class_name,
+            tight,
+            dry_run,
+            json,
+        },
+        config,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cmd_list_edit(
+    file: Option<PathBuf>,
+    input_format: String,
+    kind: Option<String>,
+    ordered: bool,
+    title: Option<String>,
+    set_values: Vec<String>,
+    append_items: Vec<String>,
+    insert_before: Vec<String>,
+    insert_after: Vec<String>,
+    remove_paths: Vec<String>,
+    check_paths: Vec<String>,
+    uncheck_paths: Vec<String>,
+    toggle_paths: Vec<String>,
+    indent_paths: Vec<String>,
+    outdent_paths: Vec<String>,
+    sort_paths: Vec<String>,
+    dedupe: bool,
+    copy_as: String,
+    out_file: Option<PathBuf>,
+    font: Option<String>,
+    font_size: Option<String>,
+    class_name: Option<String>,
+    tight: bool,
+    dry_run: bool,
+    json: bool,
+    config: &Config,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let input_format = lists::InputFormat::parse(&input_format)?;
+    let input = match read_optional_text_input(file.as_ref())? {
+        Some(input) => input,
+        None => read_list_from_clipboard(input_format)?,
+    };
+    let mut doc = lists::parse_document(&input, input_format)?;
+
+    doc.kind = parse_list_kind(kind.as_deref(), ordered, doc.kind)?;
+    if let Some(title) = title {
+        doc.title = Some(title);
+    }
+
+    for spec in &set_values {
+        lists::set_text(&mut doc, spec)?;
+    }
+    for spec in &append_items {
+        lists::append_item(&mut doc, spec)?;
+    }
+    for spec in &insert_before {
+        lists::insert_before(&mut doc, spec)?;
+    }
+    for spec in &insert_after {
+        lists::insert_after(&mut doc, spec)?;
+    }
+    for path in &remove_paths {
+        lists::remove_item(&mut doc, path)?;
+    }
+    for path in &check_paths {
+        lists::set_checked(&mut doc, path, true)?;
+    }
+    for path in &uncheck_paths {
+        lists::set_checked(&mut doc, path, false)?;
+    }
+    for path in &toggle_paths {
+        lists::toggle_checked(&mut doc, path)?;
+    }
+    for path in &indent_paths {
+        lists::indent_item(&mut doc, path)?;
+    }
+    for path in &outdent_paths {
+        lists::outdent_item(&mut doc, path)?;
+    }
+    for path in &sort_paths {
+        lists::sort_at(&mut doc, path)?;
+    }
+    if dedupe {
+        doc.dedupe_recursive();
+    }
+
+    finish_list_output(
+        &doc,
+        ListOutputOptions {
+            copy_as,
+            out_file,
+            font,
+            font_size,
+            class_name,
+            tight,
+            dry_run,
+            json,
+        },
+        config,
+    )
+}
+
+struct ListOutputOptions {
+    copy_as: String,
+    out_file: Option<PathBuf>,
+    font: Option<String>,
+    font_size: Option<String>,
+    class_name: Option<String>,
+    tight: bool,
+    dry_run: bool,
+    json: bool,
+}
+
+fn finish_list_output(
+    doc: &lists::ListDocument,
+    options: ListOutputOptions,
+    config: &Config,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let output_format = lists::OutputFormat::parse(&options.copy_as)?;
+    let render_options = lists::RenderOptions {
+        font: options.font.unwrap_or_else(|| config.defaults.font.clone()),
+        font_size: options
+            .font_size
+            .unwrap_or_else(|| format!("{}", config.defaults.font_size_pt)),
+        class_name: options.class_name,
+        tight: options.tight,
+        include_metadata: true,
+    };
+
+    let markdown = lists::render_markdown(doc)?;
+    let payload = match output_format {
+        lists::OutputFormat::Html => lists::render_html(doc, &render_options)?,
+        lists::OutputFormat::Markdown => markdown.clone(),
+    };
+
+    if options.dry_run {
+        if let Some(path) = options.out_file {
+            std::fs::write(&path, payload.as_bytes())?;
+        } else {
+            print!("{}", payload);
+        }
+        return Ok(());
+    }
+
+    match output_format {
+        lists::OutputFormat::Html => pb::write_html(&payload, Some(&markdown))?,
+        lists::OutputFormat::Markdown => pb::write(&[(PbType::PlainText, payload.as_bytes())])?,
+    }
+
+    if options.json {
+        println!(
+            "{}",
+            serde_json::json!({
+                "ok": true,
+                "items": doc.item_count(),
+                "max_depth": doc.max_depth(),
+                "format": options.copy_as.to_ascii_lowercase(),
+                "bytes": payload.len(),
+            })
+        );
+    } else {
+        eprintln!(
+            "Wrote {} list item{} as {} to clipboard",
+            doc.item_count(),
+            if doc.item_count() == 1 { "" } else { "s" },
+            options.copy_as.to_ascii_lowercase()
+        );
+    }
+    Ok(())
+}
+
+fn read_optional_text_input(
+    file: Option<&PathBuf>,
+) -> Result<Option<String>, Box<dyn std::error::Error>> {
+    match file {
+        Some(path) if path.to_str() != Some("-") => Ok(Some(std::fs::read_to_string(path)?)),
+        Some(_) => {
+            use std::io::Read;
+            let mut buf = String::new();
+            std::io::stdin().read_to_string(&mut buf)?;
+            if buf.trim().is_empty() {
+                Err("stdin input is empty".into())
+            } else {
+                Ok(Some(buf))
+            }
+        }
+        None => {
+            use std::io::{IsTerminal, Read};
+            let mut stdin = std::io::stdin();
+            if stdin.is_terminal() {
+                return Ok(None);
+            }
+            let mut buf = String::new();
+            stdin.read_to_string(&mut buf)?;
+            if buf.trim().is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(buf))
+            }
+        }
+    }
+}
+
+fn read_list_from_clipboard(
+    input_format: lists::InputFormat,
+) -> Result<String, Box<dyn std::error::Error>> {
+    match input_format {
+        lists::InputFormat::Html | lists::InputFormat::Auto => {
+            if let Ok(data) = pb::read_type(PbType::Html) {
+                return Ok(String::from_utf8(data)?);
+            }
+            Ok(String::from_utf8(pb::read_type(PbType::PlainText)?)?)
+        }
+        _ => Ok(String::from_utf8(pb::read_type(PbType::PlainText)?)?),
+    }
+}
+
+fn parse_list_kind(
+    value: Option<&str>,
+    ordered: bool,
+    fallback: lists::ListKind,
+) -> Result<lists::ListKind, Box<dyn std::error::Error>> {
+    if ordered {
+        return Ok(lists::ListKind::Ordered);
+    }
+    match value {
+        Some("ordered") => Ok(lists::ListKind::Ordered),
+        Some("unordered") => Ok(lists::ListKind::Unordered),
+        Some(other) => {
+            Err(format!("unknown list kind '{other}': expected ordered or unordered").into())
+        }
+        None => Ok(fallback),
+    }
+}
+
 #[derive(Debug, Default)]
 struct ExcelPresetConfig {
     style: Option<String>,
@@ -1987,20 +2499,38 @@ fn merge_vecs(mut base: Vec<String>, mut extra: Vec<String>) -> Vec<String> {
 }
 
 fn read_tabular_input(
-    file: &PathBuf,
+    file: Option<&PathBuf>,
     input_format: &str,
 ) -> Result<excel::CsvData, Box<dyn std::error::Error>> {
-    if input_format == "csv" && file.to_str() != Some("-") {
-        return excel::read_csv(file);
+    if let Some(path) = file {
+        if input_format == "csv" && path.to_str() != Some("-") {
+            return excel::read_csv(path);
+        }
     }
 
-    let raw = if file.to_str() == Some("-") {
-        use std::io::Read;
-        let mut buf = String::new();
-        std::io::stdin().read_to_string(&mut buf)?;
-        buf
-    } else {
-        std::fs::read_to_string(file)?
+    let raw = match file {
+        Some(path) if path.to_str() != Some("-") => std::fs::read_to_string(path)?,
+        _ => {
+            use std::io::{IsTerminal, Read};
+
+            let mut stdin = std::io::stdin();
+            if stdin.is_terminal() {
+                return Err(
+                    "clipli excel needs input: pipe CSV/JSON, use a heredoc, pass a file path, or pass - for stdin"
+                        .into(),
+                );
+            }
+
+            let mut buf = String::new();
+            stdin.read_to_string(&mut buf)?;
+            if buf.trim().is_empty() {
+                return Err(
+                    "clipli excel received empty stdin; pipe CSV/JSON, use a heredoc, or pass a file path"
+                        .into(),
+                );
+            }
+            buf
+        }
     };
 
     let format = match input_format {
@@ -2110,7 +2640,7 @@ fn json_cell_to_string(value: &serde_json::Value) -> String {
 
 #[allow(clippy::too_many_arguments)]
 fn cmd_excel(
-    file: PathBuf,
+    file: Option<PathBuf>,
     input_format: String,
     preset: Option<String>,
     style: Option<String>,
@@ -2162,7 +2692,7 @@ fn cmd_excel(
     let band_bg = band_bg
         .or_else(|| preset_config.band_bg.clone())
         .unwrap_or_else(|| "#D9E1F2".to_string());
-    let (headers, rows) = read_tabular_input(&file, &input_format)?;
+    let (headers, rows) = read_tabular_input(file.as_ref(), &input_format)?;
 
     // Build config
     let table_style = match style.as_str() {

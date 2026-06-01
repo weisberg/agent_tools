@@ -2,7 +2,7 @@
 
 `clipli` is a macOS clipboard intelligence CLI for agents and power users.
 
-It turns rich clipboard content into something programmable: you can inspect what is on the clipboard, capture formatted content as reusable templates, render those templates with fresh data, convert between formats like RTF and HTML, keep a privacy-aware clipboard history, and generate Excel-friendly clipboard payloads from CSV.
+It turns rich clipboard content into something programmable: you can inspect what is on the clipboard, capture formatted content as reusable templates, render those templates with fresh data, convert between formats like RTF and HTML, keep a privacy-aware clipboard history, and generate Excel-friendly clipboard payloads from CSV or JSON.
 
 Current release line: `1.0.0`.
 
@@ -23,6 +23,7 @@ That makes it useful for workflows like:
 - previewing rendered HTML without touching the clipboard
 - generating Excel-style tables from CSV or JSON as editable HTML or copied SVG/PNG images
 - making targeted edits to clipboard table cells without rebuilding the whole artifact
+- building and editing nested lists, including task lists, as clipboard-ready HTML or Markdown
 
 ## Core Capabilities
 
@@ -109,17 +110,52 @@ clipli convert --from j2 --to html -D '{"name":"Alice"}' -i template.j2
 
 Use the default `html` mode when the table should remain editable after pasting into Excel. Use `--copy-as svg` or `--copy-as png` when the user explicitly asks for an image artifact; those modes copy only the requested image format to the clipboard.
 
+For one-shot agent workflows, stream generated CSV or JSON directly to `clipli excel`; do not create a temporary CSV file unless another tool genuinely needs that file.
+
 Typical commands:
 
 ```bash
-clipli excel data.csv --col "Revenue:currency:right"
-clipli excel rows.json --input-format json --preset finance
+printf 'Name,Revenue\nAlice,1200\n' | clipli excel --col "Revenue:currency:right"
+clipli excel --preset finance <<'JSON'
+[{"Name":"Alice","Revenue":1200,"Margin":0.42}]
+JSON
 clipli excel data.csv --preset executive --title "Board Update"
-clipli excel data.csv --copy-as svg
-clipli excel data.csv --copy-as png
-clipli excel data.csv --copy-as svg --dry-run > preview.svg
-clipli excel data.csv --copy-as png --dry-run --out-file preview.png
+clipli excel --copy-as svg <<'CSV'
+Name,Revenue
+Alice,1200
+CSV
+clipli excel --copy-as png --dry-run --out-file preview.png <<'CSV'
+Name,Revenue
+Alice,1200
+CSV
 clipli excel-edit --set-bg "D4:#A0D771" --set-fg "D4:#628048"
+```
+
+### List-focused workflows
+
+`clipli` can build nested lists from JSON, Markdown, indented lines, or repeatable `--item` path flags, then copy the result as HTML by default or Markdown when requested. It can also edit an existing list using stable 1-based paths like `1.2`.
+
+Use `html` when the list should paste richly into apps like Mail, Docs, Word, or browser editors. Use `--copy-as markdown` when the target app expects plain Markdown.
+
+Typical commands:
+
+```bash
+clipli list-build --title "Launch Plan" \
+  --item "Prep > [x] QA pass" \
+  --item "Prep > Docs" \
+  --item "Ship > Announce"
+
+clipli list-build --copy-as markdown --ordered <<'LIST'
+Phase 1
+  QA
+  Docs
+Phase 2
+LIST
+
+clipli list-edit --set "1.1:Regression QA" --append "1:[ ] Docs" --dry-run <<'LIST'
+- Prep
+  - QA
+LIST
 ```
 
 ### Shell integration
@@ -148,6 +184,7 @@ Current top-level commands:
 - `lint`, `search` — validate and discover templates
 - `export`, `import` — move templates between machines
 - `excel`, `excel-edit` — build Excel-style clipboard content as editable HTML or SVG/PNG images, then tweak editable HTML tables
+- `list-build`, `list-edit` — build and edit nested lists as HTML or Markdown clipboard content
 - `render` — render a template to files or stdout without touching the clipboard
 - `preview` — render a template or HTML input to a preview file without touching the clipboard
 - `convert` — convert between supported formats
@@ -187,7 +224,7 @@ The agent response shape is:
 
 `clipli` validates agent responses before saving them, including Jinja syntax, variable names, basic HTML structure preservation, and suspicious content such as scripts, event handlers, iframes, and `javascript:` URLs.
 
-The v1.0 stable surface is the macOS clipboard/template core: inspect/read/write, capture/paste/render/preview, conversion, lint/search/versioned templates, Excel HTML/SVG/PNG generation, history record/list/search/show/restore/prune, completions, doctor, and JSON error envelopes. Agent-command templatization, long-running watch, and history retention are implemented and tested, but should still be treated as advanced operational workflows that deserve a quick `--dry-run` or `--json` check before automation.
+The v1.0 stable surface is the macOS clipboard/template core: inspect/read/write, capture/paste/render/preview, conversion, lint/search/versioned templates, Excel HTML/SVG/PNG generation, list HTML/Markdown generation and editing, history record/list/search/show/restore/prune, completions, doctor, and JSON error envelopes. Agent-command templatization, long-running watch, and history retention are implemented and tested, but should still be treated as advanced operational workflows that deserve a quick `--dry-run` or `--json` check before automation.
 
 ## Platform Notes
 

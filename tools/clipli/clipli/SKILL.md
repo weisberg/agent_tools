@@ -3,9 +3,10 @@ name: clipli
 description: |
   macOS clipboard intelligence CLI for agents and power users. Use when working with
   the system clipboard, generating formatted Excel tables from CSV or JSON, editing
-  clipboard table cells, managing reusable HTML templates, or converting between RTF,
-  HTML, plain text, and Jinja2. Triggers on clipboard read/write/inspect operations,
-  Excel-pasteable HTML/SVG/PNG table generation, reusable template capture/render/paste,
+  clipboard table cells, building or editing nested HTML/Markdown lists, managing
+  reusable HTML templates, or converting between RTF, HTML, plain text, and Jinja2.
+  Triggers on clipboard read/write/inspect operations, Excel-pasteable HTML/SVG/PNG
+  table generation, nested list generation/editing, reusable template capture/render/paste,
   privacy-aware clipboard history/watch/filter/prune/restore workflows, previewing
   rendered HTML without touching the clipboard, shell completions, doctor readiness
   checks, and agent-command templatization or batch rendering.
@@ -22,7 +23,7 @@ Binary in this repo: `tools/clipli/target/release/clipli`
 
 Current binary version: `clipli 1.0.0`
 
-All clipboard operations require a macOS GUI session. Non-clipboard commands (`doctor --skip-clipboard`, `convert`, `lint`, `render`, `preview`, `history record --input`, `history list/search/show/prune`, `excel --dry-run`) work in automation and CI-like contexts.
+All clipboard operations require a macOS GUI session. Non-clipboard commands (`doctor --skip-clipboard`, `convert`, `lint`, `render`, `preview`, `history record --input`, `history list/search/show/prune`, `excel --dry-run`, `list-build --dry-run`, `list-edit --dry-run`) work in automation and CI-like contexts.
 
 ## Readiness Check
 
@@ -42,18 +43,20 @@ In sandboxed agent environments, `doctor` may report the template store as not w
 
 If a new agent is handed `clipli` as a skill, the main thing to understand is that it mixes safe inspection commands with commands that mutate live user state.
 
-- `write`, `capture`, `paste`, `excel`, and `excel-edit` change the current macOS clipboard.
+- `write`, `capture`, `paste`, `excel`, `excel-edit`, `list-build`, and `list-edit` change the current macOS clipboard.
 - `watch`, `history record`, and `history restore` can persist or replay clipboard data. Treat them as privacy-sensitive.
 - `capture`, `edit`, `delete`, `restore`, and `import` persist changes under the clipli config store, typically `~/Library/Application Support/clipli/templates/` on macOS.
 - `history` persists entries under the clipli config store, typically `~/Library/Application Support/clipli/history/` on macOS.
 - `doctor`, `inspect`, `read`, `convert`, `search`, `show`, `lint`, and `render` are the safest first moves.
-- `excel --dry-run`, `excel-edit --dry-run`, and `paste --dry-run` let you preview output before touching the clipboard.
+- `excel --dry-run`, `excel-edit --dry-run`, `list-build --dry-run`, `list-edit --dry-run`, and `paste --dry-run` let you preview output before touching the clipboard.
 - `preview` writes rendered HTML to a preview file and never touches the clipboard.
 - `capture` reads whatever is on the clipboard right now. It does not capture from a file path.
 - `paste` renders from stored template data. It does not use the current clipboard as input.
 - `render` writes files or stdout only. It does not touch the clipboard.
 - `capture --strategy agent --agent-command <cmd>` invokes an external process directly, passes a JSON request on stdin, and validates JSON from stdout.
 - If the user asks for an Excel table copied as SVG or PNG, use `clipli excel --copy-as svg` or `clipli excel --copy-as png`; do not use the default editable HTML clipboard path for that request.
+- For generated Excel-style table data, prefer one-shot stdin commands. Pipe or heredoc CSV/JSON directly into `clipli excel`; do not write a temporary CSV/JSON file first unless the user also needs that file.
+- For nested lists, use `clipli list-build` for new lists and `clipli list-edit` for path-based edits. Default to HTML unless the user asks for Markdown.
 - `watch` and `history record` default to `--sensitive skip`, which stores metadata only if common secret markers are detected. Use `--sensitive allow` only when the user explicitly wants payload retention.
 - If the clipboard format is unknown, start with `inspect`.
 
@@ -62,8 +65,8 @@ If a new agent is handed `clipli` as a skill, the main thing to understand is th
 | Command family | Side effect |
 |---|---|
 | `doctor`, `inspect`, `read`, `convert`, `list`, `show`, `search`, `versions`, `lint`, `render`, `preview`, `history list`, `history search`, `history show` | Safe read/preview operations |
-| `excel --dry-run`, `excel-edit --dry-run`, `paste --dry-run`, `history restore --dry-run` | Safe preview operations |
-| `write`, `paste`, `excel`, `excel-edit` | Mutate the live clipboard |
+| `excel --dry-run`, `excel-edit --dry-run`, `list-build --dry-run`, `list-edit --dry-run`, `paste --dry-run`, `history restore --dry-run` | Safe preview operations |
+| `write`, `paste`, `excel`, `excel-edit`, `list-build`, `list-edit` | Mutate the live clipboard |
 | `capture`, `edit`, `delete`, `restore`, `import` | Change the persistent template store |
 | `watch`, `history record` | Change the persistent history store |
 | `history prune` | Removes matching persistent history entries unless `--dry-run` is used |
@@ -75,7 +78,7 @@ When the user has not explicitly asked you to overwrite the clipboard, the safes
 
 1. Use `inspect` to see what is on the clipboard now.
 2. Use `read`, `show`, `search`, or `lint` to understand the existing content or template.
-3. Use `convert`, `render`, `excel --dry-run`, `excel-edit --dry-run`, or `paste --dry-run` to preview the exact output.
+3. Use `convert`, `render`, `excel --dry-run`, `excel-edit --dry-run`, `list-build --dry-run`, `list-edit --dry-run`, or `paste --dry-run` to preview the exact output.
 4. Only then use a clipboard-mutating command.
 
 If the environment itself is uncertain, run `clipli doctor --json --skip-clipboard` before step 1.
@@ -89,19 +92,28 @@ Copy from App  →  clipli capture  →  reusable template  →  clipli paste  �
 Alternatively, for structured data without capturing:
 
 ```
-CSV file  →  clipli excel  →  clipboard  →  Cmd+V into Excel
-            clipli excel-edit  →  refine formatting  →  Cmd+V
+CSV/JSON data  →  clipli excel  →  clipboard  →  Cmd+V into Excel
+                clipli excel-edit  →  refine formatting  →  Cmd+V
+```
+
+For agent-generated tables, the preferred loop is one shot:
+
+```
+CSV or JSON heredoc  →  clipli excel  →  clipboard  →  Cmd+V into Excel
 ```
 
 ## Choosing the Right Command
 
 | I want to... | Use |
 |---|---|
-| Turn a CSV into a formatted Excel table | `clipli excel data.csv` |
-| Turn JSON rows into a formatted Excel table | `clipli excel rows.json --input-format json --preset finance` |
-| Copy an Excel-style table as SVG | `clipli excel data.csv --copy-as svg` |
-| Copy an Excel-style table as PNG | `clipli excel data.csv --copy-as png` |
+| Turn generated CSV into a formatted Excel table | `printf 'Name,Revenue\nAlice,1200\n' | clipli excel` |
+| Turn generated JSON rows into a formatted Excel table | `clipli excel --preset finance <<'JSON' ... JSON` |
+| Copy an Excel-style table as SVG | `clipli excel --copy-as svg <<'CSV' ... CSV` |
+| Copy an Excel-style table as PNG | `clipli excel --copy-as png <<'CSV' ... CSV` |
 | Tweak colors/values on an existing clipboard table | `clipli excel-edit --set-bg "C3:#A0D771"` |
+| Build a nested list as HTML | `clipli list-build --item "Launch > [x] QA"` |
+| Build a nested list as Markdown | `clipli list-build --copy-as markdown <<'LIST' ... LIST` |
+| Edit a nested list by path | `clipli list-edit --set "1.2:Updated" --append "1:[ ] Follow-up"` |
 | Put arbitrary HTML on the clipboard | `clipli write --type html -i file.html` |
 | Generate a table from JSON with a Jinja2 template | `clipli paste --from-table` |
 | Save clipboard content for reuse later | `clipli capture --name my_template` |
@@ -125,28 +137,44 @@ Reads CSV or JSON, generates Excel-native HTML by default, and writes it to the 
 When the user asks for SVG or PNG, pass `--copy-as svg` or `--copy-as png`. In those modes, `clipli` copies the requested image artifact to the clipboard instead of HTML.
 
 ```bash
-# Simplest — default formatting, all columns
-clipli excel data.csv
+# Simplest one-shot command — no temp file
+clipli excel <<'CSV'
+Name,Revenue
+Alice,1200
+CSV
 
-# JSON input with a reusable formatting preset
-clipli excel rows.json --input-format json --preset finance
-clipli excel rows.json --input-format json --preset status --copy-as svg
+# JSON input with a reusable formatting preset; auto-detected from stdin
+clipli excel --preset finance <<'JSON'
+[{"Name":"Alice","Revenue":1200,"Margin":0.42}]
+JSON
+clipli excel --preset status --copy-as svg <<'JSON'
+[{"Task":"Launch","Status":"Done"}]
+JSON
 
 # Copy an image artifact instead of editable Excel HTML
-clipli excel data.csv --copy-as svg
-clipli excel data.csv --copy-as png
+clipli excel --copy-as svg <<'CSV'
+Name,Revenue
+Alice,1200
+CSV
+clipli excel --copy-as png <<'CSV'
+Name,Revenue
+Alice,1200
+CSV
 
 # With column formatting (repeatable flag: NAME:FORMAT[:ALIGN])
-clipli excel data.csv \
+clipli excel \
   --col "Revenue:currency:right" \
   --col "Margin:percent_int:center" \
   --col "SKU:text" \
   --bold "SKU" \
   --header-bg "#007873" \
-  --font "Aptos Display"
+  --font "Aptos Display" <<'CSV'
+SKU,Revenue,Margin
+A-1,1200,42
+CSV
 
 # Kitchen sink
-clipli excel data.csv \
+clipli excel \
   --title "Q1 2026 Product Report" \
   --col "Revenue:currency:right" \
   --col "Margin:percent_int:center" \
@@ -161,16 +189,27 @@ clipli excel data.csv \
   --rename "Units Sold:Units" \
   --columns "SKU,Product Name,Revenue,Margin,Status" \
   --hide "Internal ID" \
-  --row-height 24 --header-height 28
+  --row-height 24 --header-height 28 <<'CSV'
+SKU,Product Name,Revenue,Margin,Status,Internal ID
+A-1,Widget,1200,42,Done,secret-1
+CSV
 
 # Preview without copying to clipboard
-clipli excel data.csv --col "Revenue:currency" --dry-run > preview.html
-clipli excel data.csv --copy-as svg --dry-run > preview.svg
-clipli excel data.csv --copy-as png --dry-run --out-file preview.png
+clipli excel --col "Revenue:currency" --dry-run > preview.html <<'CSV'
+Name,Revenue
+Alice,1200
+CSV
+clipli excel --copy-as svg --dry-run > preview.svg <<'CSV'
+Name,Revenue
+Alice,1200
+CSV
+clipli excel --copy-as png --dry-run --out-file preview.png <<'CSV'
+Name,Revenue
+Alice,1200
+CSV
 
-# Pipe from stdin
-cat data.csv | clipli excel -
-cat rows.json | clipli excel - --input-format json --preset executive
+# File input still works when a durable file already exists
+clipli excel data.csv
 ```
 
 **`--col` format syntax:** `COLUMN_NAME:FORMAT[:ALIGNMENT]`
@@ -201,7 +240,7 @@ Column widths are controlled by Excel on paste (auto-fit) — cannot be set via 
 
 ## 2. Edit Clipboard Cells
 
-Reads the current clipboard HTML, modifies specific cells by A1 reference, writes it back. Use after `clipli excel` to refine formatting without regenerating from CSV.
+Reads the current clipboard HTML, modifies specific cells by A1 reference, writes it back. Use after `clipli excel` to refine formatting without regenerating from CSV or JSON.
 
 Cell references: `A1` = row 1 col 1 (header row), `B2` = row 2 col 2 (first data cell), `AA5` works for columns beyond Z.
 
@@ -232,7 +271,62 @@ clipli excel-edit --set-bg "D4:#A0D771" --dry-run
 
 Edits are cumulative — run `excel-edit` multiple times to build up formatting.
 
-## 3. Clipboard Inspection and I/O
+## 3. Nested Lists
+
+Build nested lists from JSON, Markdown, indented lines, or repeatable item paths. HTML is the default clipboard format because it pastes richly into Mail, Word, Docs, browser editors, and many note apps. Use `--copy-as markdown` when the destination explicitly wants Markdown/plain text.
+
+```bash
+# One-shot path flags; ">" creates parent/sub-item structure
+clipli list-build --title "Launch Plan" \
+  --item "Prep > [x] QA pass" \
+  --item "Prep > [ ] Docs" \
+  --item "Ship > Announce"
+
+# Markdown/plain indented input; ordered output
+clipli list-build --ordered --copy-as markdown <<'LIST'
+Phase 1
+  QA
+  Docs
+Phase 2
+LIST
+
+# JSON input; accepts items/children/subitems aliases
+clipli list-build --copy-as markdown <<'JSON'
+{"title":"Plan","items":[{"text":"Launch","items":[{"text":"QA","checked":true}]}]}
+JSON
+
+# Preview without touching the clipboard
+clipli list-build --item "Launch > QA" --dry-run
+clipli list-build --item "Launch > QA" --copy-as markdown --dry-run
+```
+
+Task-list state uses `[x]` and `[ ]` prefixes in Markdown, indented lines, or `--item` paths. Generated HTML includes hidden `clipli` metadata so `list-edit --input-format html` can recover the structured list for later edits.
+
+Use `list-edit` for deterministic edits. Paths are 1-based and dot-separated: `1` is the first top-level item, `1.2` is its second child.
+
+```bash
+# Edit from stdin, preview as Markdown
+clipli list-edit \
+  --set "1.1:Regression QA" \
+  --check "1.1" \
+  --append "1:[ ] Docs" \
+  --insert-after "1:Measure" \
+  --copy-as markdown \
+  --dry-run <<'LIST'
+- Prep
+  - QA
+LIST
+
+# Edit the current clipboard list and write HTML back to the clipboard
+clipli list-edit --append "1:Follow-up" --check "1.1"
+
+# Structural edits
+clipli list-edit --indent "2" --outdent "1.2" --sort "root" --dedupe --dry-run
+```
+
+Common edit flags: `--set PATH:TEXT`, `--append [PATH:]TEXT`, `--insert-before PATH:TEXT`, `--insert-after PATH:TEXT`, `--remove PATH`, `--check PATH`, `--uncheck PATH`, `--toggle PATH`, `--indent PATH`, `--outdent PATH`, `--sort PATH`, `--dedupe`, `--title TEXT`, `--kind ordered|unordered`, `--copy-as html|markdown`.
+
+## 4. Clipboard Inspection and I/O
 
 **Inspect** — see what types and sizes are on the clipboard:
 
@@ -268,7 +362,7 @@ clipli write --type png -i image.png        # binary content
 
 When writing HTML, `--with-plain` (default: true) auto-generates a plain-text fallback so apps that don't accept HTML still get content.
 
-## 4. Clipboard History and Watch
+## 5. Clipboard History and Watch
 
 History is local and privacy-sensitive. Prefer bounded commands in agent workflows.
 
@@ -307,7 +401,7 @@ Default sensitive policy is `skip`: if text contains common secret markers such 
 
 History metadata includes ID, timestamp, source app when available, pasteboard type, UTI, byte size, SHA-256, payload path, and redaction status. Payloads live under the clipli config directory in `history/payloads/`. History writes use a single-writer lock file to avoid corrupting `index.jsonl`.
 
-## 5. Format Conversion
+## 6. Format Conversion
 
 Reads from stdin (or `-i file`), converts, outputs to stdout (or `-o file`). Does not touch the clipboard.
 
@@ -327,7 +421,7 @@ clipli convert --from html --to j2 --strategy heuristic < table.html
 clipli convert --from j2 --to html -D '{"name":"Alice","revenue":"$5.2M"}' -i template.j2
 ```
 
-## 6. Capture Clipboard as Template
+## 7. Capture Clipboard as Template
 
 Copy formatted content in any app (Excel, PowerPoint, Word, browser), then run:
 
@@ -387,7 +481,7 @@ Expected agent response:
 
 Validation rejects invalid Jinja, invalid variable names, structural mismatches, scripts, iframes, event handlers, and `javascript:` URLs.
 
-## 7. Render and Paste Templates
+## 8. Render and Paste Templates
 
 Fill a saved template with data, write the rendered HTML + plain-text fallback to the clipboard.
 
@@ -443,7 +537,7 @@ printf '<p>Hello</p>' | clipli preview --json
 
 `preview` writes a standalone HTML file under the clipli config directory, or to `--output`, and never copies to the clipboard.
 
-## 8. Template Lifecycle
+## 9. Template Lifecycle
 
 **Find templates:**
 
@@ -531,8 +625,8 @@ Optional config file, typically `~/Library/Application Support/clipli/config.tom
 
 ```toml
 [defaults]
-font = "Aptos Display"      # default font for clipli excel (--font overrides)
-font_size_pt = 12.0          # default size for clipli excel (--font-size overrides)
+font = "Aptos Display"      # default font for clipli excel/list HTML (--font overrides)
+font_size_pt = 12.0          # default size for clipli excel/list HTML (--font-size overrides)
 plain_text_strategy = "tab-delimited"  # paste --plain-text auto uses this
 
 [clean]
@@ -552,12 +646,12 @@ timeout_secs = 30
 
 Without `--json`: errors go to stderr as plain text, exit code 1.
 
-With `--json`, errors go to stdout as `{"ok":false,"error":"...","code":"STORE_NOT_FOUND"}`. JSON mode is available on the automation-oriented commands, including `inspect`, `capture`, `paste`, `list`, `show`, `delete`, `versions`, `lint`, `search`, `excel`, `excel-edit`, `render`, `convert`, `doctor`, `watch`, and `history`.
+With `--json`, errors go to stdout as `{"ok":false,"error":"...","code":"STORE_NOT_FOUND"}`. JSON mode is available on the automation-oriented commands, including `inspect`, `capture`, `paste`, `list`, `show`, `delete`, `versions`, `lint`, `search`, `excel`, `excel-edit`, `list-build`, `list-edit`, `render`, `convert`, `doctor`, `watch`, and `history`.
 
 Error code prefixes: `PB_` (pasteboard), `STORE_` (template store), `RENDER_` (template engine), `CLEAN_` (HTML cleaner), `TEMPLATIZE_` (variable extraction), `RTF_` (conversion).
 
 ## v1.0 Stability Notes
 
-The stable v1.0 surface is the macOS clipboard/template core: inspect/read/write, capture/paste/render/preview, conversion, lint/search/versioned templates, Excel HTML/SVG/PNG generation, history record/list/search/show/restore/prune, completions, doctor, and JSON error envelopes.
+The stable v1.0 surface is the macOS clipboard/template core: inspect/read/write, capture/paste/render/preview, conversion, lint/search/versioned templates, Excel HTML/SVG/PNG generation, list HTML/Markdown generation and editing, history record/list/search/show/restore/prune, completions, doctor, and JSON error envelopes.
 
 Agent-command templatization and long-running watch are implemented and tested, but should still be treated as advanced workflows. Prefer explicit data files, `--dry-run`, `lint`, and bounded retention when automating them.

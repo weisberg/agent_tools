@@ -1,6 +1,6 @@
 # clipli 1.0 Release Notes
 
-`clipli` 1.0 is the stable macOS release line for clipboard inspection, rich-format clipboard I/O, reusable HTML templates, Excel-style table generation, privacy-aware clipboard history, and agent-friendly automation.
+`clipli` 1.0 is the stable macOS release line for clipboard inspection, rich-format clipboard I/O, reusable HTML templates, Excel-style table and nested-list generation, privacy-aware clipboard history, and agent-friendly automation.
 
 ## Stable In 1.0
 
@@ -8,6 +8,7 @@
 - Template capture, paste, render, preview, list/show/edit/delete, lint, search, export/import, and version restore.
 - Format conversion between RTF, HTML, plain text, and Jinja2-compatible templates.
 - Excel-style table generation from CSV or JSON as editable HTML, SVG, or PNG.
+- Nested list generation and path-based editing from JSON, Markdown, HTML, indented lines, or item flags as HTML or Markdown.
 - Excel presets: `default`, `finance`, `executive`, `minimal`, and `status`.
 - Clipboard history record/list/search/show/restore/prune with source app, type, and date filters.
 - Long-running `watch` with deduplication, privacy defaults, and `--max-history` retention.
@@ -79,8 +80,9 @@ Manual GUI checks should be run from a logged-in macOS session when validating a
 ```bash
 cargo test -- --ignored
 clipli doctor
-printf 'Name,Revenue\nAlice,4200\n' | clipli excel - --copy-as svg --dry-run > /tmp/clipli-table.svg
+printf 'Name,Revenue\nAlice,4200\n' | clipli excel --copy-as svg --dry-run > /tmp/clipli-table.svg
+clipli list-build --item 'Launch > [x] QA' --copy-as markdown --dry-run
 printf '<table><tr><td>preview</td></tr></table>' | clipli preview --output /tmp/clipli-preview.html --json
 ```
 
-Representative app validation for 1.0 covers Excel/Numbers-compatible table paste, browser/HTML paste, RTF/plain-text conversion, SVG/PNG image clipboard generation, and safe history restore dry-runs.
+Representative app validation for 1.0 covers Excel/Numbers-compatible table paste, browser/HTML list paste, Markdown list output, RTF/plain-text conversion, SVG/PNG image clipboard generation, and safe history restore dry-runs.
